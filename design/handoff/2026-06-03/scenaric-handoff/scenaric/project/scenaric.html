@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=1280"/>
+<title>Scenaric — scenario planning prototype</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'><rect width='48' height='48' rx='11' fill='%231E1B2E'/><rect x='9' y='9' width='12' height='12' rx='3.5' fill='%23fff'/><rect x='27' y='9' width='12' height='12' rx='3.5' fill='%23F97316'/><rect x='9' y='27' width='12' height='12' rx='3.5' fill='%23fff'/><rect x='27' y='27' width='12' height='12' rx='3.5' fill='%23fff'/></svg>"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="styles.css"/>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="data.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- Components (must load before app.jsx) -->
+  <script type="text/babel" src="components/icons.jsx"></script>
+  <script type="text/babel" src="components/landing.jsx"></script>
+  <script type="text/babel" src="components/auth.jsx"></script>
+  <script type="text/babel" src="components/onboarding.jsx"></script>
+  <script type="text/babel" src="components/app-shell.jsx"></script>
+  <script type="text/babel" src="components/page-dashboard.jsx"></script>
+  <script type="text/babel" src="components/page-knowledge.jsx"></script>
+  <script type="text/babel" src="components/page-signals.jsx"></script>
+  <script type="text/babel" src="components/page-matrix.jsx"></script>
+  <script type="text/babel" src="components/page-canvas.jsx"></script>
+  <script type="text/babel" src="components/signal-card.jsx"></script>
+  <script type="text/babel" src="components/signal-picker-modal.jsx"></script>
+  <script type="text/babel" src="components/reaxis-modal.jsx"></script>
+  <script type="text/babel" src="components/build-scenarios-modal.jsx"></script>
+  <script type="text/babel" src="components/scenario-view-switcher.jsx"></script>
+  <script type="text/babel" src="components/page-storyline.jsx"></script>
+  <script type="text/babel" src="components/page-narrative.jsx"></script>
+  <script type="text/babel" src="components/page-strategy.jsx"></script>
+  <script type="text/babel" src="components/page-monitoring-settings.jsx"></script>
+  <script type="text/babel" src="components/ask-ai.jsx"></script>
+
+  <!-- Router & mount (must be last) -->
+  <script type="text/babel" src="app.jsx"></script>
+</body>
+</html>

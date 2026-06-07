@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Scenaric.ai global styles.
+ * Design tokens live in tailwind.config.ts; shadcn semantic colors resolve to the HSL
+ * variables below, themed with our brand (orange primary, #F5F5F5 background, etc.).
+ * The prototype's bespoke component classes (.btn/.nav-item/.chip/…) were removed —
+ * those styles now live as Tailwind utilities / cva variants inside the components.
+ */
+@layer base {
+  :root {
+    --background: 0 0% 96.1%; /* #F5F5F5 */
+    --foreground: 222.2 47.4% 11.2%; /* #0F172A */
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 47.4% 11.2%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 47.4% 11.2%;
+    --primary: 24.6 95% 53.1%; /* #F97316 */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 14.3% 95.9%; /* #F3F4F6 */
+    --secondary-foreground: 250 26% 14%; /* #1E1B2E */
+    --muted: 220 14.3% 95.9%;
+    --muted-foreground: 220 8.9% 46.1%; /* #6B7280 */
+    --accent: 33.3 100% 96.5%; /* #FFF7ED */
+    --accent-foreground: 17.5 88.3% 40.4%; /* #C2410C */
+    --destructive: 0 84.2% 60.2%; /* #EF4444 */
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 13% 91%; /* #E5E7EB */
+    --input: 220 13% 91%;
+    --ring: 24.6 95% 53.1%; /* #F97316 */
+    --radius: 0.5rem;
+
+    /* Font families wired to next/font local (Geist / Geist Mono) from the root layout */
+    --font-sans: var(--font-geist-sans), "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --font-mono: var(--font-geist-mono), "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-sans;
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    line-height: 1.5;
+  }
+}
+
+/* Custom scrollbar — used by scrollable panes (.scroll-y) */
+.scroll-y { overflow-y: auto; }
+.scroll-y::-webkit-scrollbar { width: 8px; height: 8px; }
+.scroll-y::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 4px; }
+.scroll-y::-webkit-scrollbar-track { background: transparent; }
+
+/* Keyframes / animations (kept as CSS; referenced via utility class names) */
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+.fade-in { animation: fadeIn .25s ease-out both; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .5; }
+}
+.pulse { animation: pulse 1.6s ease-in-out infinite; }
+
+@keyframes slideUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.slide-up { animation: slideUp .3s ease-out both; }
+
+/* Storyline — drop-target pulse for arrow rewiring/creation */
+@keyframes fmDropPulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(249,115,22,0.18), 0 4px 14px rgba(15,23,42,0.10); }
+  50%      { box-shadow: 0 0 0 8px rgba(249,115,22,0.10), 0 4px 14px rgba(15,23,42,0.10); }
+}
+/* Storyline — toast slide-in from bottom-right */
+@keyframes fmToastIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fm-toast-in { animation: fmToastIn .18s ease-out both; }

@@ -1,0 +1,57 @@
+"use client";
+
+// App shell — sidenav + (conditional) topbar + page content.
+// Ported from the handoff app-shell.jsx; routing now comes from the App Router.
+import * as React from "react";
+import { usePathname } from "next/navigation";
+import { SideNav } from "@/components/side-nav";
+import { TopBar } from "@/components/top-bar";
+import { GlobalToast } from "@/components/global-toast";
+import { AskAI } from "@/components/ask-ai";
+import { useNavigate } from "@/lib/use-navigate";
+
+const { useEffect } = React;
+
+// Pages that own their full height (no top bar).
+const FULL_BLEED = new Set(["storyline", "matrix", "narrative"]);
+
+export function AppShell({ children }: { children: React.ReactNode }) {
+  const navigate = useNavigate();
+  const pathname = usePathname();
+  // (app) route group is not in the URL, so the page id is the first path segment.
+  const page = pathname.split("/").filter(Boolean)[0] || "home";
+
+  // Cmd/Ctrl + 1/2/3 → jump between Matrix / Storyline / Narrative.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.key === "1") {
+        e.preventDefault();
+        navigate("/matrix");
+      } else if (e.key === "2") {
+        e.preventDefault();
+        navigate("/storyline");
+      } else if (e.key === "3") {
+        e.preventDefault();
+        navigate("/narrative");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navigate]);
+
+  return (
+    <div
+      data-screen-label={"App · " + page}
+      style={{ display: "flex", height: "100vh", overflow: "hidden", background: "#F5F5F5" }}
+    >
+      <SideNav navigate={navigate} page={page} />
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", marginLeft: 0 }}>
+        {!FULL_BLEED.has(page) && <TopBar page={page} navigate={navigate} />}
+        <div style={{ flex: 1, overflow: "hidden", display: "flex" }}>{children}</div>
+      </div>
+      <AskAI />
+      <GlobalToast navigate={navigate} />
+    </div>
+  );
+}
