@@ -40,9 +40,12 @@ export function TopBar({ page, navigate }: { page: string; navigate: Navigate })
           <Icons.Bell size={14} />
           <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-brand-orange" />
         </Button>
-        <Button variant="primary" size="sm" onClick={() => navigate("/signals")}>
-          <Icons.Plus size={13} /> Add Signal
-        </Button>
+        {/* Signals page has its own "Add Signal" CTA — suppress the global one there to avoid a duplicate. */}
+        {page !== "signals" && (
+          <Button variant="primary" size="sm" onClick={() => navigate("/signals")}>
+            <Icons.Plus size={13} /> Add Signal
+          </Button>
+        )}
       </div>
     </div>
   );
