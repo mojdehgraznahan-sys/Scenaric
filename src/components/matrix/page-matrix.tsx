@@ -178,20 +178,7 @@ export function PageMatrix({ navigate }: { navigate: Navigate }) {
 
   return (
     <div className="scroll-y flex-1 overflow-y-auto p-5">
-      {/* Project-level breadcrumb */}
-      <nav aria-label="Breadcrumb" className="mb-0.5 flex items-center gap-2">
-        <button
-          onClick={() => navigate("/home")}
-          className="border-0 bg-transparent p-0 text-xs text-muted-foreground transition-colors hover:text-brand-orange"
-        >
-          APAC Expansion 2030
-        </button>
-        <span aria-hidden className="text-xs text-border-strong">
-          /
-        </span>
-        <span className="text-xs font-medium text-brand-dark">Matrix</span>
-      </nav>
-
+      {/* Breadcrumb now lives in the shared TopBar. */}
       {/* Project-level page header */}
       <div className="pb-5 pt-3">
         <h1 className="m-0 text-2xl font-semibold tracking-[-0.018em] text-brand-dark">Impact × Uncertainty Matrix</h1>

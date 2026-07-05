@@ -1,6 +1,6 @@
 "use client";
 
-// App shell — sidenav + (conditional) topbar + page content.
+// App shell — sidenav + topbar + page content.
 // Ported from the handoff app-shell.jsx; routing now comes from the App Router.
 import * as React from "react";
 import { usePathname } from "next/navigation";
@@ -11,9 +11,6 @@ import { AskAI } from "@/components/ask-ai";
 import { useNavigate } from "@/lib/use-navigate";
 
 const { useEffect } = React;
-
-// Pages that own their full height (no top bar).
-const FULL_BLEED = new Set(["storyline", "matrix", "narrative"]);
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
@@ -47,7 +44,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     >
       <SideNav navigate={navigate} page={page} />
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", marginLeft: 0 }}>
-        {!FULL_BLEED.has(page) && <TopBar page={page} navigate={navigate} />}
+        <TopBar page={page} navigate={navigate} />
         <div style={{ flex: 1, overflow: "hidden", display: "flex" }}>{children}</div>
       </div>
       <AskAI />

@@ -6,15 +6,17 @@ import { Icons } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
 import type { Navigate } from "@/lib/use-navigate";
 
+// Breadcrumb labels for the TopBar's left segment (short trail, not the page's own
+// large title). Each page still renders its own big heading below the TopBar.
 const TITLES: Record<string, string> = {
   home: "Home",
   dashboard: "Home",
   knowledge: "Knowledge Base",
   signals: "Signals Library",
-  matrix: "Impact × Uncertainty Matrix",
+  matrix: "Matrix",
   storyline: "Storyline",
   canvas: "Scenario Canvas",
-  narrative: "Scenario Narratives",
+  narrative: "Narrative",
   strategy: "Strategic Options",
   monitoring: "Monitoring",
   settings: "Settings",
