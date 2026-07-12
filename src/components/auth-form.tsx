@@ -33,7 +33,7 @@ export function AuthForm({ mode = "login" }: { mode?: "login" | "signup" }) {
     store.setAuthed(true);
     store.setAccountType(accountType);
     if (tab === "signup") navigate("/onboarding");
-    else navigate("/home");
+    else navigate("/projects");
   };
 
   return (

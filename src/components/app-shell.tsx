@@ -9,33 +9,16 @@ import { TopBar } from "@/components/top-bar";
 import { GlobalToast } from "@/components/global-toast";
 import { AskAI } from "@/components/ask-ai";
 import { useNavigate } from "@/lib/use-navigate";
-
-const { useEffect } = React;
+import { useScenarioShortcuts } from "@/components/storyline/scenario-context-header";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const pathname = usePathname();
   // (app) route group is not in the URL, so the page id is the first path segment.
-  const page = pathname.split("/").filter(Boolean)[0] || "home";
+  const page = pathname.split("/").filter(Boolean)[0] || "projects";
 
   // Cmd/Ctrl + 1/2/3 → jump between Matrix / Storyline / Narrative.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey)) return;
-      if (e.key === "1") {
-        e.preventDefault();
-        navigate("/matrix");
-      } else if (e.key === "2") {
-        e.preventDefault();
-        navigate("/storyline");
-      } else if (e.key === "3") {
-        e.preventDefault();
-        navigate("/narrative");
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [navigate]);
+  useScenarioShortcuts(navigate);
 
   return (
     <div

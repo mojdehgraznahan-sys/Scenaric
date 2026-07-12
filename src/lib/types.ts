@@ -19,6 +19,19 @@ export interface Project {
   created: string;
 }
 
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  focal_question: string;
+  horizon: string;
+  industry: string;
+  summary?: string;
+  created?: string;
+  stepsComplete: number;
+  lastEdited: string;
+  archived: boolean;
+}
+
 export interface Stats {
   sources: number;
   interviews: number;
@@ -120,6 +133,7 @@ export interface ChatMessage {
 
 export interface ScenaricData {
   project: Project;
+  projects: ProjectSummary[];
   stats: Stats;
   sources: Source[];
   interviews: Interview[];

@@ -56,7 +56,7 @@ export default function OnboardingPage() {
   const launch = () => {
     persist({ step: 3, focal, refined, horizon, name, summary, industry, complete: true });
     store.setProject({ ...store.project, name, summary, industry, focal_question: refined || focal, horizon });
-    navigate("/home");
+    navigate("/projects");
   };
 
   return (

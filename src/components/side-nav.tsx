@@ -93,14 +93,19 @@ export function SideNav({ navigate, page }: { navigate: Navigate; page: string }
       {/* Project picker */}
       {!collapsed && (
         <div className="px-[11px] pb-1 pt-[11px]">
-          <button className="flex h-[34px] w-full items-center gap-2 rounded-[7px] border border-border bg-white px-[9px] text-left text-[13px] font-medium text-brand-dark">
+          <button
+            onClick={() => navigate("/projects")}
+            className="flex h-[34px] w-full items-center gap-2 rounded-[7px] border border-border bg-white px-[9px] text-left text-[13px] font-medium text-brand-dark"
+          >
             <span className="font-mono text-[11px] text-brand-orange">‹</span>
             All projects
           </button>
-          <div className="mt-[7px] px-[9px] py-1.5">
-            <div className="text-[13px] font-semibold tracking-[-0.01em] text-brand-dark">APAC Expansion 2030</div>
-            <div className="mt-0.5 font-mono text-[10.5px] text-text-3">OWNED BY JOHN DOE</div>
-          </div>
+          {page !== "projects" && (
+            <div className="mt-[7px] px-[9px] py-1.5">
+              <div className="text-[13px] font-semibold tracking-[-0.01em] text-brand-dark">{store.project.name}</div>
+              <div className="mt-0.5 font-mono text-[10.5px] text-text-3">OWNED BY JOHN DOE</div>
+            </div>
+          )}
         </div>
       )}
 
@@ -119,6 +124,7 @@ export function SideNav({ navigate, page }: { navigate: Navigate; page: string }
                 collapsed={collapsed}
                 onClick={() => navigate("/" + item.id)}
                 groupStart={collapsed && !!g.bridge && ii === 0}
+                disabled={page === "projects"}
               />
             ))}
           </React.Fragment>
@@ -131,6 +137,7 @@ export function SideNav({ navigate, page }: { navigate: Navigate; page: string }
           collapsed={collapsed}
           onClick={() => navigate("/settings")}
           groupStart={collapsed}
+          disabled={page === "projects"}
         />
       </nav>
 
@@ -156,12 +163,14 @@ function NavItem({
   collapsed,
   onClick,
   groupStart,
+  disabled,
 }: {
   item: NavItemData;
   active: boolean;
   collapsed: boolean;
   onClick: () => void;
   groupStart?: boolean;
+  disabled?: boolean;
 }) {
   const [hover, setHover] = useState(false);
   // Compute the modifier key after mount to avoid SSR/client hydration mismatch.
@@ -172,7 +181,7 @@ function NavItem({
   }, []);
 
   const shortcutHint = item.shortcut ? `${modKey}${item.shortcut}` : null;
-  const titleAttr = !collapsed && shortcutHint ? `${item.label} · ${shortcutHint}` : undefined;
+  const titleAttr = disabled ? "Select a project first" : !collapsed && shortcutHint ? `${item.label} · ${shortcutHint}` : undefined;
 
   return (
     <div
@@ -181,14 +190,16 @@ function NavItem({
       onMouseLeave={() => setHover(false)}
     >
       <button
-        onClick={onClick}
+        onClick={disabled ? undefined : onClick}
         title={titleAttr}
+        aria-disabled={disabled || undefined}
         className={cn(
           "my-0.5 flex h-nav-item items-center gap-2.5 rounded-[7px] border-0 text-left text-[13px] font-medium transition-[background,color] [transition-duration:120ms]",
           collapsed ? "mx-[7px] w-[38px] justify-center px-0" : "mx-[7px] w-[calc(100%-14px)] px-[9px]",
           active
             ? "bg-brand-orange text-white"
-            : "bg-transparent text-muted-foreground hover:bg-[#F3F4F6] hover:text-foreground"
+            : "bg-transparent text-muted-foreground hover:bg-[#F3F4F6] hover:text-foreground",
+          disabled && "cursor-not-allowed opacity-40 hover:bg-transparent hover:text-muted-foreground"
         )}
       >
         {item.icon}
@@ -204,9 +215,9 @@ function NavItem({
       {/* Tooltip — collapsed state only, appears to the right */}
       {collapsed && hover && (
         <div className="pointer-events-none absolute left-[calc(100%+4px)] top-1/2 z-50 flex -translate-y-1/2 items-center gap-1.5 rounded-md bg-brand-dark px-2 py-1 text-xs font-medium text-white shadow-[0_4px_12px_rgba(15,23,42,0.18)] whitespace-nowrap">
-          {item.label}
-          {shortcutHint && <span className="font-mono text-[10.5px] text-text-3">{shortcutHint}</span>}
-          {item.badge && (
+          {disabled ? "Select a project first" : item.label}
+          {!disabled && shortcutHint && <span className="font-mono text-[10.5px] text-text-3">{shortcutHint}</span>}
+          {!disabled && item.badge && (
             <span className="rounded-[3px] bg-brand-orange/[0.22] px-[5px] font-mono text-[8.5px] font-semibold tracking-[0.06em] text-[#FDBA74]">
               {item.badge}
             </span>

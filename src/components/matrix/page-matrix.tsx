@@ -26,6 +26,7 @@ import { IndependenceAssessment } from "./independence-assessment";
 import { ScenarioPreview } from "./scenario-preview";
 import { CriticalUncertaintyRow } from "./critical-uncertainty-row";
 import { BuildScenariosModal, ReAxisModal } from "./modals";
+import { ScenarioContextHeader } from "../storyline/scenario-context-header";
 
 type DotState = "axis" | "candidate" | "predetermined" | "other";
 
@@ -178,15 +179,7 @@ export function PageMatrix({ navigate }: { navigate: Navigate }) {
 
   return (
     <div className="scroll-y flex-1 overflow-y-auto p-5">
-      {/* Breadcrumb now lives in the shared TopBar. */}
-      {/* Project-level page header */}
-      <div className="pb-5 pt-3">
-        <h1 className="m-0 text-2xl font-semibold tracking-[-0.018em] text-brand-dark">Impact × Uncertainty Matrix</h1>
-        <div className="mt-1 max-w-[672px] text-sm leading-[1.5] text-muted-foreground [text-wrap:pretty]">
-          Rank all your signals by impact and uncertainty. The top-right quadrant becomes the source for your
-          scenario axes.
-        </div>
-      </div>
+      <ScenarioContextHeader view="matrix" />
 
       <div className="rounded-xl border border-border bg-card p-[18px] shadow-card">
         <div className="mb-3.5 flex items-center justify-between">

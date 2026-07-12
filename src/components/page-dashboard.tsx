@@ -1,35 +1,86 @@
 "use client";
 
 // Home / Dashboard — faithful Tailwind/shadcn port of the handoff page-dashboard.jsx.
+// Store-driven: reflects the active project's own progress (stepsComplete/lastEdited),
+// not static demo numbers, so the All Projects → Home handoff is accurate per project.
 import { Icons } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 import { useNavigate } from "@/lib/use-navigate";
 
-const STEPS = [
-  { label: "Focal question", done: true, route: "/settings" },
-  { label: "Key forces", done: true, route: "/knowledge" },
-  { label: "Driving forces", done: true, route: "/signals" },
-  { label: "Rank forces", done: true, route: "/matrix" },
-  { label: "Scenario logics", done: false, route: "/canvas" },
-  { label: "Narratives", done: false, route: "/narrative" },
-  { label: "Implications", done: false, route: "/narrative" },
-  { label: "Indicators", done: false, route: "/monitoring" },
-  { label: "Strategy", done: false, route: "/strategy" },
+const STEP_LABELS = [
+  "Focal question",
+  "Key forces",
+  "Driving forces",
+  "Rank forces",
+  "Scenario logics",
+  "Narratives",
+  "Implications",
+  "Indicators",
+  "Strategy",
 ];
-
-const KPIS = [
-  { label: "Signals tracked", value: 23, sub: "+3 this week", tone: "text-brand-orange", route: "/signals" },
-  { label: "Scenarios drafted", value: 4, sub: "Ready for narratives", tone: "text-[#3B82F6]", route: "/canvas" },
-  { label: "Indicators live", value: 6, sub: "2 in alert", tone: "text-[#EF4444]", route: "/monitoring" },
-  { label: "Strategic options", value: 4, sub: "1 robust across futures", tone: "text-[#10B981]", route: "/strategy" },
-];
+const STEP_ROUTES = ["/settings", "/knowledge", "/signals", "/matrix", "/canvas", "/narrative", "/narrative", "/monitoring", "/strategy"];
+// Maps each of the 9 tracker tiles to the canonical 8-step count used by the Projects
+// dashboard (Key forces + Driving forces both complete once step 2 is reached).
+const STEP_GATE = [1, 2, 2, 3, 4, 5, 6, 7, 8];
 
 export function PageDashboard() {
   const store = useStore();
   const { seed } = store;
   const navigate = useNavigate();
+  const project = store.project;
+  const activeProject = (store.projects || []).find((p) => p.id === store.activeProjectId);
+  const stepsComplete = Math.max(0, Math.min(8, (activeProject && activeProject.stepsComplete) || 0));
+
+  const tiles = STEP_LABELS.map((label, i) => ({
+    label,
+    route: STEP_ROUTES[i],
+    done: stepsComplete >= STEP_GATE[i],
+  }));
+  const tilesDone = tiles.filter((t) => t.done).length;
+  const pct = Math.round((tilesDone / tiles.length) * 100);
+
+  const lastEditedLabel = (() => {
+    if (!activeProject || !activeProject.lastEdited) return "just now";
+    const diffH = Math.round((Date.now() - new Date(activeProject.lastEdited).getTime()) / 3600000);
+    if (diffH < 1) return "just now";
+    if (diffH < 24) return diffH + "h ago";
+    return Math.round(diffH / 24) + "d ago";
+  })();
+
+  // KPI values gate to zero for a project that hasn't reached that step yet — avoids
+  // showing another project's stale counts on a brand-new project.
+  const kpis = [
+    {
+      label: "Signals tracked",
+      value: stepsComplete >= 2 ? seed.stats.signals : 0,
+      sub: stepsComplete >= 2 ? "+3 this week" : "Add your first signal",
+      tone: "text-brand-orange",
+      route: "/signals",
+    },
+    {
+      label: "Scenarios drafted",
+      value: stepsComplete >= 4 ? seed.stats.scenarios : 0,
+      sub: stepsComplete >= 4 ? "Ready for narratives" : "Build your matrix first",
+      tone: "text-[#3B82F6]",
+      route: "/canvas",
+    },
+    {
+      label: "Indicators live",
+      value: stepsComplete >= 7 ? seed.stats.indicators : 0,
+      sub: stepsComplete >= 7 ? "2 in alert" : "Not set up yet",
+      tone: "text-[#EF4444]",
+      route: "/monitoring",
+    },
+    {
+      label: "Strategic options",
+      value: stepsComplete >= 8 ? (store.strategies || []).length : 0,
+      sub: stepsComplete >= 8 ? "1 robust across futures" : "Not started",
+      tone: "text-[#10B981]",
+      route: "/strategy",
+    },
+  ];
 
   return (
     <div className="scroll-y flex-1 overflow-y-auto p-6">
@@ -37,10 +88,14 @@ export function PageDashboard() {
         {/* Welcome header */}
         <div className="mb-5">
           <div className="mb-1.5 font-mono text-[11px] font-medium uppercase tracking-[0.08em] text-brand-orange">
-            WELCOME BACK, JOHN
+            WELCOME BACK, {((store.user && store.user.name) || "there").split(" ")[0].toUpperCase()}
           </div>
-          <h1 className="mb-1 text-[28px] font-semibold tracking-[-0.02em]">APAC Expansion 2030</h1>
-          <div className="text-sm text-muted-foreground">5–10 year horizon · Technology · Last updated 2h ago</div>
+          <h1 className="mb-1 text-[28px] font-semibold tracking-[-0.02em]">{project.name}</h1>
+          <div className="text-sm text-muted-foreground">
+            {[project.horizon ? project.horizon + " horizon" : null, project.industry || null, "Last updated " + lastEditedLabel]
+              .filter(Boolean)
+              .join(" · ")}
+          </div>
         </div>
 
         {/* Progress strip */}
@@ -48,17 +103,20 @@ export function PageDashboard() {
           <div className="mb-3.5 flex items-center justify-between">
             <div>
               <div className="text-sm font-semibold">Methodology progress</div>
-              <div className="mt-0.5 text-[12.5px] text-muted-foreground">4 of 9 steps complete — keep going</div>
+              <div className="mt-0.5 text-[12.5px] text-muted-foreground">
+                {tilesDone === 0 ? "Not started yet — let's begin" : `${tilesDone} of ${tiles.length} steps complete — keep going`}
+              </div>
             </div>
             <div className="font-mono text-[22px] font-semibold tracking-[-0.02em] text-brand-orange">
-              44<span className="text-text-3">%</span>
+              {pct}
+              <span className="text-text-3">%</span>
             </div>
           </div>
           <div className="mb-4 h-1 overflow-hidden rounded-full bg-border">
-            <div className="h-full rounded-full bg-brand-orange" style={{ width: "44%" }} />
+            <div className="h-full rounded-full bg-brand-orange" style={{ width: pct + "%" }} />
           </div>
           <div className="grid grid-cols-9 gap-1.5">
-            {STEPS.map((step, i) => (
+            {tiles.map((step, i) => (
               <button
                 key={i}
                 onClick={() => navigate(step.route)}
@@ -90,7 +148,7 @@ export function PageDashboard() {
 
         {/* Four KPI cards */}
         <div className="mb-4 grid grid-cols-4 gap-3">
-          {KPIS.map((k) => (
+          {kpis.map((k) => (
             <button
               key={k.label}
               onClick={() => navigate(k.route)}
@@ -114,7 +172,9 @@ export function PageDashboard() {
             </div>
             <div className="mb-1 text-[15px] font-semibold">Build the impact × uncertainty matrix</div>
             <div className="mb-3.5 text-[13px] leading-[1.55] text-muted-foreground">
-              You have 23 signals ranked. Plot the top by impact and uncertainty to find your scenario axes.
+              {kpis[0].value > 0
+                ? `You have ${kpis[0].value} signals ranked. Plot the top by impact and uncertainty to find your scenario axes.`
+                : "Add and rank a few signals first, then plot them here to find your scenario axes."}
             </div>
             <Button variant="primary" size="sm" onClick={() => navigate("/matrix")}>
               Open matrix <Icons.ArrowRight size={12} />
@@ -125,9 +185,13 @@ export function PageDashboard() {
               <Icons.Eye size={14} stroke="#10B981" />
               <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[#065F46]">Monitor</span>
             </div>
-            <div className="mb-1 text-[15px] font-semibold">Track 6 leading indicators</div>
+            <div className="mb-1 text-[15px] font-semibold">
+              {kpis[2].value > 0 ? `Track ${kpis[2].value} leading indicators` : "Set up leading indicators"}
+            </div>
             <div className="mb-3.5 text-[13px] leading-[1.55] text-muted-foreground">
-              Regulatory rulings and AI capex thresholds will tell you which scenario is unfolding.
+              {kpis[2].value > 0
+                ? "Regulatory rulings and AI capex thresholds will tell you which scenario is unfolding."
+                : "Once your scenarios are built, define the signposts that tell you which future is unfolding."}
             </div>
             <Button variant="ghost" size="sm" onClick={() => navigate("/monitoring")}>
               Open monitoring <Icons.ArrowRight size={12} />

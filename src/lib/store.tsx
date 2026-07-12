@@ -10,6 +10,7 @@ import { FM_DATA } from "./data";
 import type {
   ScenaricData,
   Project,
+  ProjectSummary,
   Source,
   Signal,
   MatrixDot,
@@ -88,6 +89,10 @@ export interface Store {
   setOnboarding: (v: OnboardingState) => void;
   project: Project;
   setProject: (v: Project) => void;
+  projects: ProjectSummary[];
+  setProjects: (v: ProjectSummary[] | ((prev: ProjectSummary[]) => ProjectSummary[])) => void;
+  activeProjectId: string | null;
+  setActiveProjectId: (v: string | null) => void;
   sources: Source[];
   setSources: (v: Source[]) => void;
   signals: Signal[];
@@ -143,6 +148,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   // Project state
   const [project, setProject] = usePersistentState("fm.project", seed.project);
+  const [projects, setProjects] = usePersistentState<ProjectSummary[]>("fm.projects", seed.projects);
+  const [activeProjectId, setActiveProjectId] = usePersistentState<string | null>(
+    "fm.activeProjectId",
+    (seed.projects[0] && seed.projects[0].id) || null
+  );
   const [sources, setSources] = usePersistentState("fm.sources", seed.sources);
   const [signals, setSignals] = usePersistentState("fm.signals", seed.signals);
   const [matrixDots, setMatrixDots] = usePersistentState("fm.matrix", seed.matrix_dots);
@@ -168,6 +178,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setOnboarding,
     project,
     setProject,
+    projects,
+    setProjects,
+    activeProjectId,
+    setActiveProjectId,
     sources,
     setSources,
     signals,
@@ -193,6 +207,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         "fm.user",
         "fm.onb",
         "fm.project",
+        "fm.projects",
+        "fm.activeProjectId",
         "fm.sources",
         "fm.signals",
         "fm.matrix",
