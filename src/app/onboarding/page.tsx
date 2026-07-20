@@ -53,10 +53,19 @@ export default function OnboardingPage() {
     }, 1300);
   };
 
-  const launch = () => {
+  const [launching, setLaunching] = React.useState(false);
+
+  const launch = async () => {
     persist({ step: 3, focal, refined, horizon, name, summary, industry, complete: true });
-    store.setProject({ ...store.project, name, summary, industry, focal_question: refined || focal, horizon });
-    navigate("/projects");
+    setLaunching(true);
+    try {
+      const proj = await store.createProject({ name, focal_question: refined || focal, horizon, industry, summary });
+      store.setActiveProjectId(proj.id);
+      navigate("/home");
+    } catch (err) {
+      console.error("[onboarding] failed to create project", err);
+      setLaunching(false);
+    }
   };
 
   return (
@@ -281,8 +290,13 @@ export default function OnboardingPage() {
                 >
                   <Icons.ArrowLeft size={14} /> Back
                 </Button>
-                <Button variant="primary" className="flex-1 rounded-[14px] px-4 py-3" onClick={launch} disabled={!name.trim()}>
-                  <Icons.Rocket size={14} /> Launch project
+                <Button
+                  variant="primary"
+                  className="flex-1 rounded-[14px] px-4 py-3"
+                  onClick={launch}
+                  disabled={!name.trim() || launching}
+                >
+                  <Icons.Rocket size={14} /> {launching ? "Launching…" : "Launch project"}
                 </Button>
               </div>
             </>

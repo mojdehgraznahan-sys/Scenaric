@@ -23,17 +23,42 @@ export function AuthForm({ mode = "login" }: { mode?: "login" | "signup" }) {
   const [email, setEmail] = React.useState("");
   const [pwd, setPwd] = React.useState("");
   const [accountType, setAccountType] = React.useState(store.accountType || "self");
+  const [error, setError] = React.useState<string | null>(null);
+  const [submitting, setSubmitting] = React.useState(false);
+  const [checkEmail, setCheckEmail] = React.useState(false);
 
   React.useEffect(() => {
     setTab(mode);
   }, [mode]);
 
-  const submit = (e?: React.FormEvent) => {
+  const submit = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    store.setAuthed(true);
+    setError(null);
+    setSubmitting(true);
     store.setAccountType(accountType);
-    if (tab === "signup") navigate("/onboarding");
-    else navigate("/projects");
+
+    if (tab === "signup") {
+      const { error: authError, needsEmailConfirmation } = await store.signUp(email, pwd);
+      setSubmitting(false);
+      if (authError) {
+        setError(authError);
+        return;
+      }
+      if (needsEmailConfirmation) {
+        setCheckEmail(true);
+        return;
+      }
+      navigate("/onboarding");
+      return;
+    }
+
+    const { error: authError } = await store.signIn(email, pwd);
+    setSubmitting(false);
+    if (authError) {
+      setError(authError);
+      return;
+    }
+    navigate("/projects");
   };
 
   return (
@@ -57,8 +82,31 @@ export function AuthForm({ mode = "login" }: { mode?: "login" | "signup" }) {
       {/* Right panel — form */}
       <div className="flex flex-1 items-center justify-center bg-white p-10">
         <div className="w-full max-w-[380px]">
-          {/* Tab toggle */}
-          <div className="mb-7 flex gap-6 border-b border-border">
+          {checkEmail ? (
+            <div className="flex flex-col gap-2">
+              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-brand-orangeLight">
+                <Icons.Radio size={18} stroke="#F97316" />
+              </div>
+              <h1 className="mt-2 text-[22px] font-semibold tracking-[-0.02em]">Check your email</h1>
+              <p className="text-sm text-muted-foreground">
+                We sent a confirmation link to <span className="font-medium text-brand-dark">{email}</span>. Click it to
+                activate your account and continue setting up your first project.
+              </p>
+              <button
+                onClick={() => {
+                  setCheckEmail(false);
+                  setTab("login");
+                  navigate("/login");
+                }}
+                className="mt-2 cursor-pointer self-start text-[13px] text-brand-orange underline"
+              >
+                Back to sign in
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* Tab toggle */}
+              <div className="mb-7 flex gap-6 border-b border-border">
             <button
               onClick={() => {
                 setTab("login");
@@ -133,8 +181,12 @@ export function AuthForm({ mode = "login" }: { mode?: "login" | "signup" }) {
               </div>
             )}
 
-            <Button type="submit" variant="primary" className="mt-1.5 w-full py-[11px]">
-              {tab === "login" ? "Sign in" : "Create account"}
+            {error && (
+              <div className="rounded-md border border-[#FECACA] bg-[#FEF2F2] px-3 py-2 text-[13px] text-[#7F1D1D]">{error}</div>
+            )}
+
+            <Button type="submit" variant="primary" className="mt-1.5 w-full py-[11px]" disabled={submitting}>
+              {submitting ? "Please wait…" : tab === "login" ? "Sign in" : "Create account"}
             </Button>
 
             <div className="text-center text-[13px] text-muted-foreground">
@@ -167,6 +219,8 @@ export function AuthForm({ mode = "login" }: { mode?: "login" | "signup" }) {
               )}
             </div>
           </form>
+            </>
+          )}
         </div>
       </div>
     </div>

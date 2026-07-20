@@ -58,44 +58,25 @@ export function PageProjects() {
 
   const openProject = (proj: ProjectSummary) => {
     store.setActiveProjectId(proj.id);
-    // Sync legacy single-project state so existing methodology pages show this project's data.
-    store.setProject({
-      name: proj.name,
-      role: "Owner",
-      focal_question: proj.focal_question,
-      horizon: proj.horizon,
-      industry: proj.industry,
-      summary: proj.summary || "",
-      created: proj.created || proj.lastEdited,
-    });
     navigate("/home");
   };
 
-  const updateProject = (id: string, patch: Partial<ProjectSummary>) => {
-    store.setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch, lastEdited: new Date().toISOString() } : p)));
-  };
-
   const duplicateProject = (proj: ProjectSummary) => {
-    const copy: ProjectSummary = {
-      ...proj,
-      id: "proj_" + Date.now().toString(36),
-      name: proj.name + " (Copy)",
-      lastEdited: new Date().toISOString(),
-      archived: false,
-    };
-    store.setProjects((prev) => [copy, ...prev]);
     setMenuFor(null);
+    store.duplicateProject(proj.id).catch((err) => console.error("[page-projects] duplicate failed", err));
   };
 
   const archiveProject = (id: string) => {
-    updateProject(id, { archived: true });
     setMenuFor(null);
+    store.archiveProject(id).catch((err) => console.error("[page-projects] archive failed", err));
   };
-  const restoreProject = (id: string) => updateProject(id, { archived: false });
+  const restoreProject = (id: string) => {
+    store.restoreProject(id).catch((err) => console.error("[page-projects] restore failed", err));
+  };
   const deleteProject = (id: string) => {
-    store.setProjects((prev) => prev.filter((p) => p.id !== id));
     setConfirmDelete(null);
     setMenuFor(null);
+    store.deleteProject(id).catch((err) => console.error("[page-projects] delete failed", err));
   };
 
   const startRename = (proj: ProjectSummary) => {
@@ -104,24 +85,20 @@ export function PageProjects() {
     setMenuFor(null);
   };
   const commitRename = () => {
-    if (renaming && renameValue.trim()) updateProject(renaming, { name: renameValue.trim() });
+    if (renaming && renameValue.trim()) {
+      store.renameProject(renaming, renameValue.trim()).catch((err) => console.error("[page-projects] rename failed", err));
+    }
     setRenaming(null);
   };
 
-  const createProject = (name: string, focalQuestion: string) => {
-    const proj: ProjectSummary = {
-      id: "proj_" + Date.now().toString(36),
-      name: name.trim(),
-      focal_question: focalQuestion.trim(),
-      horizon: "",
-      industry: "",
-      stepsComplete: 0,
-      lastEdited: new Date().toISOString(),
-      archived: false,
-    };
-    store.setProjects((prev) => [proj, ...prev]);
-    setCreateOpen(false);
-    openProject(proj);
+  const createProject = async (name: string, focalQuestion: string) => {
+    try {
+      const proj = await store.createProject({ name: name.trim(), focal_question: focalQuestion.trim() });
+      setCreateOpen(false);
+      openProject(proj);
+    } catch (err) {
+      console.error("[page-projects] create failed", err);
+    }
   };
 
   return (

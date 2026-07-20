@@ -1,12 +1,22 @@
 "use client";
 
 // Scenaric.ai global store — React Context replacing the prototype's StoreProvider.
-// Ported from app.jsx. usePersistentState mirrors the prototype: localStorage-backed
-// with cross-instance sync via a window CustomEvent, but SSR-safe (reads storage only
-// after mount so server and first client render agree).
+// Backend build order §14 item 1: `authed`/`user` and `projects`/`project` are now
+// Supabase-backed (real auth + the projects table); everything else in this store is
+// still localStorage-simulated, to be migrated in later build-order steps.
 
 import * as React from "react";
 import { FM_DATA } from "./data";
+import { createClient } from "./supabase/client";
+import {
+  listProjects,
+  createProject as createProjectAction,
+  renameProject as renameProjectAction,
+  duplicateProject as duplicateProjectAction,
+  setProjectArchived,
+  deleteProject as deleteProjectAction,
+  type ProjectRow,
+} from "./actions/projects";
 import type {
   ScenaricData,
   Project,
@@ -19,7 +29,7 @@ import type {
   Strategy,
 } from "./types";
 
-const { useState, useEffect, createContext, useContext } = React;
+const { useState, useEffect, useCallback, useMemo, createContext, useContext } = React;
 
 export function usePersistentState<T>(key: string, initial: T) {
   const [val, setVal] = useState<T>(initial);
@@ -50,9 +60,7 @@ export function usePersistentState<T>(key: string, initial: T) {
     const onSync = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (!detail || detail.key !== key) return;
-      setVal((prev) =>
-        JSON.stringify(prev) === JSON.stringify(detail.val) ? prev : detail.val
-      );
+      setVal((prev) => (JSON.stringify(prev) === JSON.stringify(detail.val) ? prev : detail.val));
     };
     window.addEventListener("fm:persist", onSync);
     return () => window.removeEventListener("fm:persist", onSync);
@@ -77,20 +85,57 @@ interface OnboardingState {
   complete: boolean;
 }
 
+function initialsFor(name: string | null | undefined, email: string): string {
+  const source = (name || email || "").trim();
+  if (!source) return "?";
+  const parts = source.split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+}
+
+function toProjectSummary(row: ProjectRow): ProjectSummary {
+  return {
+    id: row.id,
+    name: row.name,
+    focal_question: row.focal_question,
+    horizon: row.horizon,
+    industry: row.industry,
+    summary: row.summary,
+    created: row.created_at,
+    stepsComplete: row.steps_complete,
+    lastEdited: row.updated_at,
+    archived: row.archived,
+  };
+}
+
 export interface Store {
   seed: ScenaricData;
   authed: boolean;
-  setAuthed: (v: boolean) => void;
+  authLoading: boolean;
+  signIn: (email: string, password: string) => Promise<{ error: string | null }>;
+  signUp: (email: string, password: string) => Promise<{ error: string | null; needsEmailConfirmation?: boolean }>;
+  signOut: () => Promise<void>;
   accountType: string;
   setAccountType: (v: string) => void;
   user: User;
-  setUser: (v: User) => void;
   onboarding: OnboardingState;
   setOnboarding: (v: OnboardingState) => void;
   project: Project;
   setProject: (v: Project) => void;
   projects: ProjectSummary[];
-  setProjects: (v: ProjectSummary[] | ((prev: ProjectSummary[]) => ProjectSummary[])) => void;
+  projectsLoading: boolean;
+  createProject: (input: {
+    name: string;
+    focal_question?: string;
+    horizon?: string;
+    industry?: string;
+    summary?: string;
+  }) => Promise<ProjectSummary>;
+  renameProject: (id: string, name: string) => Promise<void>;
+  duplicateProject: (id: string) => Promise<void>;
+  archiveProject: (id: string) => Promise<void>;
+  restoreProject: (id: string) => Promise<void>;
+  deleteProject: (id: string) => Promise<void>;
   activeProjectId: string | null;
   setActiveProjectId: (v: string | null) => void;
   sources: Source[];
@@ -124,15 +169,75 @@ export const useStore = () => {
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const seed = FM_DATA;
+  const supabase = useMemo(() => createClient(), []);
 
-  // Auth (simulated)
-  const [authed, setAuthed] = usePersistentState("fm.authed", false);
+  // ---- Auth (real, Supabase) ----
+  const [authed, setAuthed] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [user, setUserState] = useState<User>({ name: "", email: "", initials: "?" });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const hydrateFromSession = async (sessionUserId: string | null, sessionEmail: string | null) => {
+      if (!sessionUserId) {
+        if (!cancelled) {
+          setAuthed(false);
+          setUserState({ name: "", email: "", initials: "?" });
+        }
+        return;
+      }
+      const { data: profile } = await supabase.from("profiles").select("name, email").eq("id", sessionUserId).single();
+      if (cancelled) return;
+      const email = profile?.email || sessionEmail || "";
+      setAuthed(true);
+      setUserState({ name: profile?.name || "", email, initials: initialsFor(profile?.name, email) });
+    };
+
+    supabase.auth.getUser().then(({ data }) => {
+      hydrateFromSession(data.user?.id ?? null, data.user?.email ?? null).finally(() => {
+        if (!cancelled) setAuthLoading(false);
+      });
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      hydrateFromSession(session?.user.id ?? null, session?.user.email ?? null);
+    });
+
+    return () => {
+      cancelled = true;
+      listener.subscription.unsubscribe();
+    };
+  }, [supabase]);
+
+  const signIn = useCallback(
+    async (email: string, password: string) => {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      return { error: error?.message || null };
+    },
+    [supabase]
+  );
+
+  const signUp = useCallback(
+    async (email: string, password: string) => {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+      });
+      // Email confirmation is on: signUp succeeds but returns no session until the
+      // user clicks the confirmation link (see src/app/auth/callback/route.ts).
+      const needsEmailConfirmation = !error && !data.session;
+      return { error: error?.message || null, needsEmailConfirmation };
+    },
+    [supabase]
+  );
+
+  const signOut = useCallback(async () => {
+    await supabase.auth.signOut();
+  }, [supabase]);
+
   const [accountType, setAccountType] = usePersistentState("fm.accountType", "self");
-  const [user, setUser] = usePersistentState<User>("fm.user", {
-    name: "John Doe",
-    email: "john@acme.co",
-    initials: "JD",
-  });
 
   // Onboarding
   const [onboarding, setOnboarding] = usePersistentState<OnboardingState>("fm.onb", {
@@ -146,13 +251,99 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     complete: false,
   });
 
-  // Project state
-  const [project, setProject] = usePersistentState("fm.project", seed.project);
-  const [projects, setProjects] = usePersistentState<ProjectSummary[]>("fm.projects", seed.projects);
-  const [activeProjectId, setActiveProjectId] = usePersistentState<string | null>(
-    "fm.activeProjectId",
-    (seed.projects[0] && seed.projects[0].id) || null
+  // ---- Projects (real, Supabase) ----
+  const [projects, setProjectsState] = useState<ProjectSummary[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(true);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+
+  const refreshProjects = useCallback(async () => {
+    const rows = await listProjects();
+    const summaries = rows.map(toProjectSummary);
+    setProjectsState(summaries);
+    return summaries;
+  }, []);
+
+  useEffect(() => {
+    if (!authed) {
+      setProjectsState([]);
+      setProjectsLoading(false);
+      return;
+    }
+    setProjectsLoading(true);
+    refreshProjects()
+      .then((summaries) => {
+        setActiveProjectId((prev) => prev || (summaries.find((p) => !p.archived) || summaries[0])?.id || null);
+      })
+      .catch((err) => console.error("[store] failed to load projects", err))
+      .finally(() => setProjectsLoading(false));
+  }, [authed, refreshProjects]);
+
+  const createProject = useCallback(
+    async (input: { name: string; focal_question?: string; horizon?: string; industry?: string; summary?: string }) => {
+      const row = await createProjectAction(input);
+      const summary = toProjectSummary(row);
+      await refreshProjects();
+      return summary;
+    },
+    [refreshProjects]
   );
+  const renameProject = useCallback(
+    async (id: string, name: string) => {
+      await renameProjectAction(id, name);
+      await refreshProjects();
+    },
+    [refreshProjects]
+  );
+  const duplicateProject = useCallback(
+    async (id: string) => {
+      await duplicateProjectAction(id);
+      await refreshProjects();
+    },
+    [refreshProjects]
+  );
+  const archiveProject = useCallback(
+    async (id: string) => {
+      await setProjectArchived(id, true);
+      await refreshProjects();
+    },
+    [refreshProjects]
+  );
+  const restoreProject = useCallback(
+    async (id: string) => {
+      await setProjectArchived(id, false);
+      await refreshProjects();
+    },
+    [refreshProjects]
+  );
+  const deleteProject = useCallback(
+    async (id: string) => {
+      await deleteProjectAction(id);
+      await refreshProjects();
+    },
+    [refreshProjects]
+  );
+
+  // `project` (legacy singular) derives from the active project row so every existing
+  // methodology page keeps reading the same shape it always has.
+  const project: Project = useMemo(() => {
+    const active = projects.find((p) => p.id === activeProjectId);
+    if (!active) return seed.project;
+    return {
+      name: active.name,
+      role: "Owner",
+      focal_question: active.focal_question,
+      horizon: active.horizon,
+      industry: active.industry,
+      summary: active.summary || "",
+      created: active.created || active.lastEdited,
+    };
+  }, [projects, activeProjectId, seed.project]);
+  // The real state transition happens via setActiveProjectId; kept only so existing
+  // call sites (page-projects.tsx's openProject) that pass a full Project object don't
+  // need to change — `project` above already re-derives from activeProjectId.
+  const setProject = useCallback((_v: Project) => {}, []);
+
+  // ---- Everything below this line is still localStorage-simulated (later build-order steps) ----
   const [sources, setSources] = usePersistentState("fm.sources", seed.sources);
   const [signals, setSignals] = usePersistentState("fm.signals", seed.signals);
   const [matrixDots, setMatrixDots] = usePersistentState("fm.matrix", seed.matrix_dots);
@@ -169,17 +360,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const store: Store = {
     seed,
     authed,
-    setAuthed,
+    authLoading,
+    signIn,
+    signUp,
+    signOut,
     accountType,
     setAccountType,
     user,
-    setUser,
     onboarding,
     setOnboarding,
     project,
     setProject,
     projects,
-    setProjects,
+    projectsLoading,
+    createProject,
+    renameProject,
+    duplicateProject,
+    archiveProject,
+    restoreProject,
+    deleteProject,
     activeProjectId,
     setActiveProjectId,
     sources,
@@ -201,24 +400,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     navCollapsed,
     setNavCollapsed,
     reset: () => {
-      [
-        "fm.authed",
-        "fm.accountType",
-        "fm.user",
-        "fm.onb",
-        "fm.project",
-        "fm.projects",
-        "fm.activeProjectId",
-        "fm.sources",
-        "fm.signals",
-        "fm.matrix",
-        "fm.scenarios",
-        "fm.indicators",
-        "fm.strategies",
-        "fm.cu",
-      ].forEach((k) => window.localStorage.removeItem(k));
-      window.location.href = "/";
-      window.location.reload();
+      ["fm.accountType", "fm.onb", "fm.sources", "fm.signals", "fm.matrix", "fm.scenarios", "fm.indicators", "fm.strategies", "fm.cu"].forEach(
+        (k) => window.localStorage.removeItem(k)
+      );
+      supabase.auth.signOut().finally(() => {
+        window.location.href = "/";
+      });
     },
   };
 
