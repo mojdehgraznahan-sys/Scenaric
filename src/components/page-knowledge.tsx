@@ -8,7 +8,10 @@ import { Chip } from "@/components/chip";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 import { useNavigate } from "@/lib/use-navigate";
-import type { Source } from "@/lib/types";
+import { createClient } from "@/lib/supabase/client";
+import { listSources, createSource, processSource, deleteSource, type SourceRow, type SourceType } from "@/lib/actions/sources";
+import { listInsights, deleteInsight, type InsightRow } from "@/lib/actions/insights";
+import { extractInsightsForProject } from "@/lib/actions/ai-insights";
 
 const TYPE_OPTIONS = [
   { id: "Docs", icon: <Icons.File size={16} />, label: "Docs" },
@@ -17,53 +20,97 @@ const TYPE_OPTIONS = [
   { id: "Web", icon: <Icons.Link size={16} />, label: "Web" },
 ];
 
+function inferType(file: File): SourceType {
+  if (file.type.startsWith("audio")) return "audio";
+  if (file.name.endsWith(".csv")) return "survey";
+  return "doc";
+}
+
 export function PageKnowledge() {
   const store = useStore();
   const { seed } = store;
   const navigate = useNavigate();
-  const [sources, setSources] = React.useState<Source[]>(store.sources);
+  const projectId = store.activeProjectId;
+  const [sources, setSources] = React.useState<SourceRow[]>([]);
+  const [insights, setInsights] = React.useState<InsightRow[]>([]);
+  const [uploadError, setUploadError] = React.useState<string | null>(null);
+  const [extracting, setExtracting] = React.useState(false);
+  const [extractResult, setExtractResult] = React.useState<string | null>(null);
   const [activeType, setActiveType] = React.useState("Docs");
   const [dragOver, setDragOver] = React.useState(false);
   const [tab, setTab] = React.useState("Interviews");
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-  // Simulate processing progress for any "Processing" source.
-  React.useEffect(() => {
-    const timer = setInterval(() => {
-      setSources((prev) =>
-        prev.map((s) => {
-          if (s.status === "Processing" && s.progress < 100) {
-            const next = Math.min(100, s.progress + 5);
-            return { ...s, progress: next, status: next === 100 ? "Complete" : "Processing" };
-          }
-          return s;
-        })
-      );
-    }, 700);
-    return () => clearInterval(timer);
-  }, []);
+  const refresh = React.useCallback(async () => {
+    if (!projectId) return;
+    const [nextSources, nextInsights] = await Promise.all([listSources(projectId), listInsights(projectId)]);
+    setSources(nextSources);
+    setInsights(nextInsights);
+  }, [projectId]);
 
   React.useEffect(() => {
-    store.setSources(sources);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sources]);
+    refresh();
+  }, [refresh]);
 
-  const onFiles = (files: FileList) => {
-    const list = Array.from(files);
-    const newSources: Source[] = list.map((f, i) => ({
-      id: "u" + Date.now() + "-" + i,
-      name: f.name,
-      type: f.type.startsWith("audio") ? "audio" : f.name.endsWith(".csv") ? "survey" : "doc",
-      status: "Processing",
-      progress: 8,
-    }));
-    setSources((s) => [...newSources, ...s]);
+  const onFiles = async (files: FileList) => {
+    if (!projectId) return;
+    setUploadError(null);
+    const supabase = createClient();
+    for (const file of Array.from(files)) {
+      const path = `${projectId}/${crypto.randomUUID()}-${file.name}`;
+      const { error: uploadErr } = await supabase.storage.from("sources").upload(path, file);
+      if (uploadErr) {
+        setUploadError(`Couldn't upload ${file.name}: ${uploadErr.message}`);
+        continue;
+      }
+      try {
+        const created = await createSource({ projectId, name: file.name, type: inferType(file), storageUrl: path });
+        await processSource(created.id);
+      } catch (err) {
+        console.error("[knowledge] failed to record or process source", err);
+        setUploadError(`Uploaded ${file.name} but failed to process it — try again.`);
+      }
+    }
+    await refresh();
+  };
+
+  const onDeleteSource = async (id: string) => {
+    await deleteSource(id);
+    await refresh();
+  };
+
+  const onDeleteInsight = async (id: string) => {
+    await deleteInsight(id);
+    await refresh();
+  };
+
+  const sourceName = (sourceId: string | null) => sources.find((s) => s.id === sourceId)?.name ?? "Unknown source";
+
+  const onExtractInsights = async () => {
+    if (!projectId) return;
+    setExtracting(true);
+    setExtractResult(null);
+    try {
+      const result = await extractInsightsForProject(projectId);
+      if (result.sourcesProcessed === 0) {
+        setExtractResult("No new sources to extract from.");
+      } else {
+        const failureNote = result.failures.length ? ` (${result.failures.length} source(s) failed — try again later)` : "";
+        setExtractResult(`Extracted ${result.insightsCreated} insight(s) from ${result.sourcesProcessed} source(s)${failureNote}.`);
+      }
+      await refresh();
+    } catch (err) {
+      console.error("[knowledge] insight extraction failed", err);
+      setExtractResult("Couldn't extract insights right now — try again in a moment.");
+    } finally {
+      setExtracting(false);
+    }
   };
 
   const stats = [
     { label: "Sources", value: sources.length },
     { label: "Interviews", value: 5 },
-    { label: "Insights", value: 48 },
+    { label: "Insights", value: insights.length },
     { label: "Voices", value: 9 },
   ];
 
@@ -79,8 +126,8 @@ export function PageKnowledge() {
             <Button variant="ghost" size="sm">
               Invite participant
             </Button>
-            <Button variant="soft" size="sm">
-              <Icons.Sparkle size={12} /> Extract insights
+            <Button variant="soft" size="sm" onClick={onExtractInsights} disabled={extracting || !projectId}>
+              <Icons.Sparkle size={12} /> {extracting ? "Extracting…" : "Extract insights"}
             </Button>
             <Button variant="primary" size="sm">
               <Icons.Plus size={12} /> Add source
@@ -156,51 +203,59 @@ export function PageKnowledge() {
               <div className="mt-2 font-mono text-[10px] tracking-[0.04em] text-text-3">PDF · DOCX · MP3 · MP4 · CSV</div>
             </div>
 
+            {uploadError && (
+              <div className="mt-2.5 rounded-[10px] border border-[#FECACA] bg-[#FEF2F2] px-3 py-2 text-xs text-[#7F1D1D]">{uploadError}</div>
+            )}
+
+            {extractResult && (
+              <div className="mt-2.5 rounded-[10px] border border-brand-orange100 bg-brand-orangeLight px-3 py-2 text-xs text-brand-orange700">
+                {extractResult}
+              </div>
+            )}
+
             <div className="mt-3.5 flex flex-col gap-2">
               {sources.map((s) => {
                 const icon =
                   s.type === "audio" ? <Icons.Mic size={14} /> : s.type === "survey" ? <Icons.Survey size={14} /> : <Icons.File size={14} />;
-                const complete = s.status === "Complete";
+                const complete = s.status === "complete";
+                const failed = s.status === "failed";
+                const unsupported = s.status === "unsupported";
                 return (
                   <div key={s.id} className="flex items-center gap-2.5 rounded-[10px] border border-border bg-white px-3 py-2.5">
                     <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-bg text-muted-foreground">{icon}</span>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-[13px] font-medium">{s.name}</div>
-                      <div className={cn("mt-1.5 h-1 overflow-hidden rounded-full", complete ? "bg-[#ECFDF5]" : "bg-brand-orange100")}>
-                        <div className={cn("h-full", complete ? "bg-[#10B981]" : "bg-brand-orange")} style={{ width: s.progress + "%" }} />
-                      </div>
-                    </div>
+                    <div className="min-w-0 flex-1 truncate text-[13px] font-medium">{s.name}</div>
                     <span
                       className={cn(
                         "inline-flex items-center rounded px-[7px] py-0.5 text-[10px] font-semibold uppercase tracking-[0.04em]",
-                        complete ? "bg-[#ECFDF5] text-[#065F46]" : "bg-brand-orangeLight text-brand-orange700"
+                        complete
+                          ? "bg-[#ECFDF5] text-[#065F46]"
+                          : failed
+                            ? "bg-[#FEF2F2] text-[#7F1D1D]"
+                            : unsupported
+                              ? "bg-[#F3F4F6] text-[#4B5563]"
+                              : "bg-brand-orangeLight text-brand-orange700"
                       )}
                     >
                       {s.status}
                     </span>
+                    <button
+                      type="button"
+                      onClick={() => onDeleteSource(s.id)}
+                      className="border-0 bg-transparent text-muted-foreground hover:text-brand-dark"
+                      aria-label={`Delete ${s.name}`}
+                    >
+                      <Icons.Trash size={14} />
+                    </button>
                   </div>
                 );
               })}
             </div>
           </div>
 
-          {/* Right: AI insights banner + interviews */}
+          {/* Right: interviews / insights tabs */}
           <div>
-            <div className="mb-3 rounded-[10px] border border-brand-orange100 bg-brand-orangeLight p-3.5">
-              <div className="mb-1.5 flex items-center gap-2">
-                <Icons.Sparkle size={12} stroke="#C2410C" />
-                <span className="text-[10.5px] font-semibold uppercase tracking-[0.05em] text-brand-orange700">
-                  AI extracted insights (latest)
-                </span>
-              </div>
-              <div className="text-[13px] leading-[1.55] text-brand-orange700">
-                &quot;Supply chain resilience flagged by 78% of managers as most critical uncertainty for the next 3
-                years.&quot;
-              </div>
-            </div>
-
             <div className="mb-2.5 flex border-b border-border">
-              {["Interviews", "Surveys", "Themes"].map((t) => (
+              {["Interviews", "Surveys", "Themes", "AI Extracted Insight"].map((t) => (
                 <button
                   key={t}
                   onClick={() => setTab(t)}
@@ -214,42 +269,92 @@ export function PageKnowledge() {
               ))}
             </div>
 
-            <div className="flex flex-col gap-2.5">
-              {seed.interviews.map((p) => (
-                <div key={p.id} className="rounded-[10px] border border-border bg-white p-3">
-                  <div className="mb-2 flex items-center gap-2.5">
-                    <span
-                      className="inline-flex h-[26px] w-[26px] items-center justify-center rounded-full text-[10px] font-semibold"
-                      style={{ background: p.avatar_bg, color: p.avatar_fg }}
-                    >
-                      {p.initials}
-                    </span>
-                    <div className="flex-1">
-                      <div className="text-[13px] font-semibold">{p.name}</div>
-                      <div className="font-mono text-[11px] text-text-3">{p.role}</div>
+            {tab !== "AI Extracted Insight" && (
+              <div className="flex flex-col gap-2.5">
+                {seed.interviews.map((p) => (
+                  <div key={p.id} className="rounded-[10px] border border-border bg-white p-3">
+                    <div className="mb-2 flex items-center gap-2.5">
+                      <span
+                        className="inline-flex h-[26px] w-[26px] items-center justify-center rounded-full text-[10px] font-semibold"
+                        style={{ background: p.avatar_bg, color: p.avatar_fg }}
+                      >
+                        {p.initials}
+                      </span>
+                      <div className="flex-1">
+                        <div className="text-[13px] font-semibold">{p.name}</div>
+                        <div className="font-mono text-[11px] text-text-3">{p.role}</div>
+                      </div>
+                      <span
+                        className={cn(
+                          "inline-flex items-center rounded px-[7px] py-0.5 text-[10px] font-semibold uppercase tracking-[0.04em]",
+                          p.status === "Complete" ? "bg-[#ECFDF5] text-[#065F46]" : "bg-brand-orangeLight text-brand-orange700"
+                        )}
+                      >
+                        {p.status}
+                      </span>
                     </div>
-                    <span
-                      className={cn(
-                        "inline-flex items-center rounded px-[7px] py-0.5 text-[10px] font-semibold uppercase tracking-[0.04em]",
-                        p.status === "Complete" ? "bg-[#ECFDF5] text-[#065F46]" : "bg-brand-orangeLight text-brand-orange700"
+                    <div className="mb-2 text-[12.5px] italic leading-[1.5] text-brand-dark">&quot;{p.quote}&quot;</div>
+                    <div className="flex items-center justify-between">
+                      <Chip category={p.tag} />
+                      <button
+                        className="border-0 bg-transparent text-xs font-medium text-brand-orange"
+                        onClick={() => navigate("/signals")}
+                      >
+                        + Add to Signals →
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {tab === "AI Extracted Insight" && (
+              <div className="flex flex-col gap-2.5">
+                {insights.length === 0 && (
+                  <div className="rounded-[10px] border border-dashed border-border p-4 text-center text-xs text-muted-foreground">
+                    No insights yet — extract some from your sources.
+                  </div>
+                )}
+                {insights.map((i) => (
+                  <div key={i.id} className="rounded-[10px] border border-border bg-white p-3">
+                    <div className="mb-2 flex items-center gap-1.5">
+                      {i.actor_type && (
+                        <span className="inline-flex items-center rounded px-[7px] py-0.5 text-[10px] font-semibold uppercase tracking-[0.04em] bg-[#EFF6FF] text-[#1D4ED8]">
+                          {i.actor_type}
+                        </span>
                       )}
-                    >
-                      {p.status}
-                    </span>
+                      {i.confidence && (
+                        <span
+                          className={cn(
+                            "inline-flex items-center rounded px-[7px] py-0.5 text-[10px] font-semibold uppercase tracking-[0.04em]",
+                            i.confidence === "high"
+                              ? "bg-[#ECFDF5] text-[#065F46]"
+                              : i.confidence === "medium"
+                                ? "bg-brand-orangeLight text-brand-orange700"
+                                : "bg-[#F3F4F6] text-[#4B5563]"
+                          )}
+                        >
+                          {i.confidence}
+                        </span>
+                      )}
+                      <span className="ml-auto font-mono text-[11px] text-text-3">{sourceName(i.source_id)}</span>
+                      <button
+                        type="button"
+                        onClick={() => onDeleteInsight(i.id)}
+                        className="border-0 bg-transparent text-muted-foreground hover:text-brand-dark"
+                        aria-label="Delete insight"
+                      >
+                        <Icons.Trash size={14} />
+                      </button>
+                    </div>
+                    <div className="mb-1.5 text-[12.5px] italic leading-[1.5] text-brand-dark">
+                      &quot;{i.quote || i.text}&quot;
+                    </div>
+                    {i.quote && <div className="text-[12px] leading-[1.5] text-muted-foreground">{i.text}</div>}
                   </div>
-                  <div className="mb-2 text-[12.5px] italic leading-[1.5] text-brand-dark">&quot;{p.quote}&quot;</div>
-                  <div className="flex items-center justify-between">
-                    <Chip category={p.tag} />
-                    <button
-                      className="border-0 bg-transparent text-xs font-medium text-brand-orange"
-                      onClick={() => navigate("/signals")}
-                    >
-                      + Add to Signals →
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>

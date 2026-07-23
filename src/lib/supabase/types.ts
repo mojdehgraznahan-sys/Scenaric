@@ -84,6 +84,114 @@ export interface Database {
         };
         Relationships: [];
       };
+      sources: {
+        Row: {
+          id: string;
+          project_id: string;
+          name: string;
+          type: "doc" | "audio" | "survey" | "web";
+          status: "processing" | "complete" | "failed" | "unsupported";
+          storage_url: string | null;
+          extracted_text: string | null;
+          uploaded_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          name: string;
+          type: "doc" | "audio" | "survey" | "web";
+          status?: "processing" | "complete" | "failed" | "unsupported";
+          storage_url?: string | null;
+          extracted_text?: string | null;
+          uploaded_by?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          name?: string;
+          type?: "doc" | "audio" | "survey" | "web";
+          status?: "processing" | "complete" | "failed" | "unsupported";
+          storage_url?: string | null;
+          extracted_text?: string | null;
+          uploaded_by?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      insights: {
+        Row: {
+          id: string;
+          project_id: string;
+          source_id: string | null;
+          text: string;
+          quote: string | null;
+          actor_type: string | null;
+          category: "Social" | "Technology" | "Economic" | "Ecological" | "Political" | "local_actor" | null;
+          confidence: "high" | "medium" | "low" | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          source_id?: string | null;
+          text: string;
+          quote?: string | null;
+          actor_type?: string | null;
+          category?: "Social" | "Technology" | "Economic" | "Ecological" | "Political" | "local_actor" | null;
+          confidence?: "high" | "medium" | "low" | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          source_id?: string | null;
+          text?: string;
+          quote?: string | null;
+          actor_type?: string | null;
+          category?: "Social" | "Technology" | "Economic" | "Ecological" | "Political" | "local_actor" | null;
+          confidence?: "high" | "medium" | "low" | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      ai_runs: {
+        Row: {
+          id: string;
+          project_id: string | null;
+          step: string;
+          prompt_version: string;
+          input_hash: string;
+          output_json: unknown | null;
+          model: string | null;
+          confidence: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id?: string | null;
+          step: string;
+          prompt_version: string;
+          input_hash: string;
+          output_json?: unknown | null;
+          model?: string | null;
+          confidence?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string | null;
+          step?: string;
+          prompt_version?: string;
+          input_hash?: string;
+          output_json?: unknown | null;
+          model?: string | null;
+          confidence?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {

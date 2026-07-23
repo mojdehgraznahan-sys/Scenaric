@@ -21,7 +21,6 @@ import type {
   ScenaricData,
   Project,
   ProjectSummary,
-  Source,
   Signal,
   MatrixDot,
   Scenario,
@@ -127,6 +126,7 @@ export interface Store {
   createProject: (input: {
     name: string;
     focal_question?: string;
+    refined_focal_question?: string | null;
     horizon?: string;
     industry?: string;
     summary?: string;
@@ -138,8 +138,6 @@ export interface Store {
   deleteProject: (id: string) => Promise<void>;
   activeProjectId: string | null;
   setActiveProjectId: (v: string | null) => void;
-  sources: Source[];
-  setSources: (v: Source[]) => void;
   signals: Signal[];
   setSignals: (v: Signal[]) => void;
   matrixDots: MatrixDot[];
@@ -279,7 +277,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [authed, refreshProjects]);
 
   const createProject = useCallback(
-    async (input: { name: string; focal_question?: string; horizon?: string; industry?: string; summary?: string }) => {
+    async (input: {
+      name: string;
+      focal_question?: string;
+      refined_focal_question?: string | null;
+      horizon?: string;
+      industry?: string;
+      summary?: string;
+    }) => {
       const row = await createProjectAction(input);
       const summary = toProjectSummary(row);
       await refreshProjects();
@@ -344,7 +349,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const setProject = useCallback((_v: Project) => {}, []);
 
   // ---- Everything below this line is still localStorage-simulated (later build-order steps) ----
-  const [sources, setSources] = usePersistentState("fm.sources", seed.sources);
   const [signals, setSignals] = usePersistentState("fm.signals", seed.signals);
   const [matrixDots, setMatrixDots] = usePersistentState("fm.matrix", seed.matrix_dots);
   const [selectedDot, setSelectedDot] = useState("d2");
@@ -381,8 +385,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     deleteProject,
     activeProjectId,
     setActiveProjectId,
-    sources,
-    setSources,
     signals,
     setSignals,
     matrixDots,
@@ -400,7 +402,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     navCollapsed,
     setNavCollapsed,
     reset: () => {
-      ["fm.accountType", "fm.onb", "fm.sources", "fm.signals", "fm.matrix", "fm.scenarios", "fm.indicators", "fm.strategies", "fm.cu"].forEach(
+      ["fm.accountType", "fm.onb", "fm.signals", "fm.matrix", "fm.scenarios", "fm.indicators", "fm.strategies", "fm.cu"].forEach(
         (k) => window.localStorage.removeItem(k)
       );
       supabase.auth.signOut().finally(() => {

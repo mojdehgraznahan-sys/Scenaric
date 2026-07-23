@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 import { useNavigate } from "@/lib/use-navigate";
+import { refineFocalQuestion } from "@/lib/actions/ai-focal-question";
 
 const TOTAL_STEPS = 3;
 const EYEBROW = "mb-3.5 font-mono text-[11px] font-medium uppercase tracking-[0.08em] text-brand-orange";
@@ -32,6 +33,7 @@ export default function OnboardingPage() {
   const [focal, setFocal] = React.useState(store.onboarding.focal || "");
   const [refined, setRefined] = React.useState<string | null>(store.onboarding.refined);
   const [refining, setRefining] = React.useState(false);
+  const [refineError, setRefineError] = React.useState<string | null>(null);
   const [horizon, setHorizon] = React.useState(store.onboarding.horizon || "5-10 years");
   const [name, setName] = React.useState(store.onboarding.name || "");
   const [summary, setSummary] = React.useState(store.onboarding.summary || "");
@@ -43,14 +45,19 @@ export default function OnboardingPage() {
 
   const focalReady = focal.trim().length >= 20;
 
-  const refine = () => {
+  const refine = async () => {
     if (!focalReady) return;
     setRefining(true);
-    setTimeout(() => {
-      const suggestion = `Over the next ${horizon}, how should we approach Southeast Asia market entry — sequencing Indonesia, Vietnam, and the Philippines — given the range of geopolitical, regulatory, and macroeconomic outcomes that could reshape the region?`;
-      setRefined(suggestion);
+    setRefineError(null);
+    try {
+      const result = await refineFocalQuestion({ rawQuestion: focal, horizon, industry });
+      setRefined(result.refined_question);
+    } catch (err) {
+      console.error("[onboarding] focal question refine failed", err);
+      setRefineError("Couldn't refine your focal question right now — try again in a moment.");
+    } finally {
       setRefining(false);
-    }, 1300);
+    }
   };
 
   const [launching, setLaunching] = React.useState(false);
@@ -59,7 +66,14 @@ export default function OnboardingPage() {
     persist({ step: 3, focal, refined, horizon, name, summary, industry, complete: true });
     setLaunching(true);
     try {
-      const proj = await store.createProject({ name, focal_question: refined || focal, horizon, industry, summary });
+      const proj = await store.createProject({
+        name,
+        focal_question: focal,
+        refined_focal_question: refined,
+        horizon,
+        industry,
+        summary,
+      });
       store.setActiveProjectId(proj.id);
       navigate("/home");
     } catch (err) {
@@ -122,6 +136,12 @@ export default function OnboardingPage() {
               {refining && (
                 <div className="pulse mt-3.5 rounded-[14px] border border-dashed border-brand-orange100 bg-brand-orangeLight p-3.5 font-mono text-[13px] text-brand-orange700">
                   AI is sharpening your question…
+                </div>
+              )}
+
+              {refineError && !refining && (
+                <div className="mt-3.5 rounded-[14px] border border-[#FECACA] bg-[#FEF2F2] p-3.5 text-[13px] text-[#7F1D1D]">
+                  {refineError}
                 </div>
               )}
 

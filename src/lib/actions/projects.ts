@@ -32,6 +32,7 @@ async function currentOrgId(): Promise<string> {
 export async function createProject(input: {
   name: string;
   focal_question?: string;
+  refined_focal_question?: string | null;
   horizon?: string;
   industry?: string;
   summary?: string;
@@ -47,6 +48,7 @@ export async function createProject(input: {
       org_id,
       name: input.name,
       focal_question: input.focal_question || "",
+      refined_focal_question: input.refined_focal_question ?? null,
       horizon: input.horizon || "",
       industry: input.industry || "",
       summary: input.summary || "",

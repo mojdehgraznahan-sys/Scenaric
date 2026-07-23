@@ -135,6 +135,9 @@ export const Icons = {
   Refresh: (p: IP) => (
     <Icon {...p} d={<><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></>} />
   ),
+  Trash: (p: IP) => (
+    <Icon {...p} d={<><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></>} />
+  ),
   Logo: ({ size = 28, reverse = false }: { size?: number; reverse?: boolean }) => {
     const base = reverse ? "#fff" : "#1E1B2E";
     return (
