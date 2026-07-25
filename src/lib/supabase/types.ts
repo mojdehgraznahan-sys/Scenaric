@@ -130,6 +130,9 @@ export interface Database {
           actor_type: string | null;
           category: "Social" | "Technology" | "Economic" | "Ecological" | "Political" | "local_actor" | null;
           confidence: "high" | "medium" | "low" | null;
+          source_type: "Docs" | "Audio" | "Survey" | "Web" | null;
+          speaker_name: string | null;
+          speaker_role: string | null;
           created_at: string;
         };
         Insert: {
@@ -141,6 +144,9 @@ export interface Database {
           actor_type?: string | null;
           category?: "Social" | "Technology" | "Economic" | "Ecological" | "Political" | "local_actor" | null;
           confidence?: "high" | "medium" | "low" | null;
+          source_type?: "Docs" | "Audio" | "Survey" | "Web" | null;
+          speaker_name?: string | null;
+          speaker_role?: string | null;
           created_at?: string;
         };
         Update: {
@@ -152,6 +158,87 @@ export interface Database {
           actor_type?: string | null;
           category?: "Social" | "Technology" | "Economic" | "Ecological" | "Political" | "local_actor" | null;
           confidence?: "high" | "medium" | "low" | null;
+          source_type?: "Docs" | "Audio" | "Survey" | "Web" | null;
+          speaker_name?: string | null;
+          speaker_role?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      signals: {
+        Row: {
+          id: string;
+          project_id: string;
+          category: "Social" | "Technology" | "Economic" | "Ecological" | "Political";
+          source: string;
+          title: string;
+          body: string;
+          impact: number | null;
+          uncertainty: "Low" | "Medium" | "High" | null;
+          origin: "ai" | "user" | "insight" | "external_pattern";
+          status: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          category: "Social" | "Technology" | "Economic" | "Ecological" | "Political";
+          source: string;
+          title: string;
+          body?: string;
+          impact?: number | null;
+          uncertainty?: "Low" | "Medium" | "High" | null;
+          origin?: "ai" | "user" | "insight" | "external_pattern";
+          status?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          category?: "Social" | "Technology" | "Economic" | "Ecological" | "Political";
+          source?: string;
+          title?: string;
+          body?: string;
+          impact?: number | null;
+          uncertainty?: "Low" | "Medium" | "High" | null;
+          origin?: "ai" | "user" | "insight" | "external_pattern";
+          status?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      interviews: {
+        Row: {
+          id: string;
+          project_id: string;
+          source_id: string | null;
+          participant_name: string;
+          role: string | null;
+          transcript: string | null;
+          tag: "Social" | "Technology" | "Economic" | "Ecological" | "Political" | null;
+          key_quote: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          source_id?: string | null;
+          participant_name: string;
+          role?: string | null;
+          transcript?: string | null;
+          tag?: "Social" | "Technology" | "Economic" | "Ecological" | "Political" | null;
+          key_quote?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          source_id?: string | null;
+          participant_name?: string;
+          role?: string | null;
+          transcript?: string | null;
+          tag?: "Social" | "Technology" | "Economic" | "Ecological" | "Political" | null;
+          key_quote?: string | null;
           created_at?: string;
         };
         Relationships: [];

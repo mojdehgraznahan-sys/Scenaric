@@ -160,22 +160,32 @@ export function SignalPickerModal({ open, onClose, nodes, phases, columnLabels, 
     commitAdd(newChainNodes, moveTitles);
   };
 
-  const handleCreateNew = () => {
+  const handleCreateNew = async () => {
     if (!form.title.trim()) {
       setFormError("Title is required.");
       return;
     }
+    if (!store.activeProjectId) {
+      setFormError("No active project.");
+      return;
+    }
     setFormError(null);
-    const newSignal: Signal = {
-      id: "sg_new_" + Date.now().toString(36),
-      category: form.category,
-      source: form.source.trim() || "Internal research",
-      title: form.title.trim(),
-      body: form.body.trim(),
-      impact: form.impact,
-      uncertainty: form.uncertainty,
-    };
-    store.setSignals([newSignal, ...store.signals]);
+    let newSignal: Signal;
+    try {
+      newSignal = await store.createSignal({
+        projectId: store.activeProjectId,
+        category: form.category,
+        source: form.source.trim() || "Internal research",
+        title: form.title.trim(),
+        body: form.body.trim(),
+        impact: form.impact,
+        uncertainty: form.uncertainty,
+      });
+    } catch (err) {
+      console.error("[signal-picker] failed to create signal", err);
+      setFormError("Couldn't create the signal — try again.");
+      return;
+    }
     commitAdd(
       [
         {
@@ -186,8 +196,8 @@ export function SignalPickerModal({ open, onClose, nodes, phases, columnLabels, 
           body: newSignal.body,
           year: "—",
           source: newSignal.source,
-          impact: newSignal.impact,
-          uncertainty: newSignal.uncertainty,
+          impact: newSignal.impact ?? undefined,
+          uncertainty: newSignal.uncertainty ?? undefined,
           strength: 0.6,
         },
       ],
@@ -367,7 +377,7 @@ function LibraryTab({
             {filtered.map((s) => {
               const isSelected = selected.has(s.id);
               const isInChain = chainTitles.has((s.title || "").toLowerCase());
-              const u = UNCERTAINTY_BADGE[s.uncertainty] || UNCERTAINTY_BADGE.Medium;
+              const u = UNCERTAINTY_BADGE[s.uncertainty || "Medium"] || UNCERTAINTY_BADGE.Medium;
               return (
                 <li
                   key={s.id}

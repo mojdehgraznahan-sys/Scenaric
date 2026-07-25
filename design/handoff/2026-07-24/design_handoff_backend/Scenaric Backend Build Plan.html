@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Scenaric — Backend Build Plan</title>
+<template id="__bundler_thumbnail">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#1E1B2E"/><rect x="30" y="30" width="16" height="16" fill="#fff"/><rect x="54" y="30" width="16" height="16" fill="#F97316"/><rect x="30" y="54" width="16" height="16" fill="#fff"/><rect x="54" y="54" width="16" height="16" fill="#fff"/></svg>
+</template>
+<style>doc-page:not(:defined){visibility:hidden}</style>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+  body { font-family: "Geist", -apple-system, sans-serif; color: #1E1B2E; }
+  .mono { font-family: "Geist Mono", monospace; }
+  h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 6px; }
+  h2 { font-size: 21px; font-weight: 600; letter-spacing: -0.01em; margin: 40px 0 4px; padding-top: 14px; border-top: 2px solid #1E1B2E; }
+  h3 { font-size: 15.5px; font-weight: 600; margin: 20px 0 8px; color: #C2410C; }
+  h4 { font-size: 13px; font-weight: 600; margin: 14px 0 6px; text-transform: uppercase; letter-spacing: .04em; color: #6B7280; }
+  p, li { font-size: 13.5px; line-height: 1.6; color: #374151; }
+  .lede { font-size: 15px; color: #6B7280; margin: 0 0 22px; }
+  .step-badge { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:999px; background:#F97316; color:#fff; font-size:11px; font-weight:600; font-family:"Geist Mono",monospace; flex-shrink:0; }
+  .map-row { display:grid; grid-template-columns: 26px 1.3fr 1fr 1fr; gap:10px; align-items:start; padding:10px 0; border-bottom:1px solid #F3F4F6; }
+  .map-head { display:grid; grid-template-columns: 26px 1.3fr 1fr 1fr; gap:10px; font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:#9CA3AF; padding-bottom:6px; border-bottom:1px solid #E5E7EB; }
+  code, .code { font-family:"Geist Mono",monospace; font-size:12px; }
+  pre { background:#1E1B2E; color:#E5E7EB; padding:14px 16px; border-radius:10px; font-size:11.5px; line-height:1.55; overflow-x:auto; white-space:pre-wrap; break-inside: avoid; }
+  pre .k { color:#FDBA74; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; margin: 8px 0 16px; }
+  th { text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; color:#9CA3AF; font-weight:600; padding:6px 8px; border-bottom:1px solid #E5E7EB; }
+  td { padding:7px 8px; border-bottom:1px solid #F3F4F6; vertical-align:top; }
+  .callout { background:#FFF7ED; border:1px solid #FED7AA; border-radius:10px; padding:12px 14px; margin:12px 0; font-size:12.5px; color:#7C2D12; break-inside: avoid; }
+  .callout.rule { background:#FEF2F2; border-color:#FECACA; color:#7F1D1D; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:10.5px; font-weight:600; font-family:"Geist Mono",monospace; }
+  .b-post { background:#ECFDF5; color:#065F46; }
+  .b-get { background:#EFF6FF; color:#1D4ED8; }
+  .b-put { background:#FFFBEB; color:#92400E; }
+  section { break-inside: avoid-page; }
+  ol { padding-left: 18px; }
+  ol li { margin-bottom: 4px; }
+</style>
+</head>
+<body>
+<doc-page size="letter" orientation="portrait" margin="0.7in">
+
+  <h1>Scenaric — Backend Build Plan</h1>
+  <p class="lede">A step-by-step spec for building the AI backend behind Scenaric's nine-tile methodology tracker — an AI-native implementation of Peter Schwartz's scenario-planning process ("The Art of the Long View"). Read alongside the existing prototype in <code>app.jsx</code>, <code>data.js</code>, and <code>components/*.jsx</code>.</p>
+
+  <h2>0. Principles</h2>
+  <ol>
+    <li><strong>Multi-project is foundational, not bolted on.</strong> Every resource (sources, signals, matrix, scenarios, storyline, indicators, strategies) is scoped to a <code>project_id</code>. A user/org owns many projects; the prototype's <code>projects[]</code> array + <code>activeProjectId</code> is the UI contract — the backend must mirror it exactly (see §1).</li>
+    <li><strong>Grounding over generation.</strong> Every AI step reads from the project's own knowledge base and prior steps — never general world knowledge presented as project fact. If evidence is thin, the model must say so (a <code>confidence</code> field and an explicit "insufficient evidence" path), not fabricate detail. This mirrors the Matrix's real "Independence unclear" state and the Storyline's real "gaps in chain" state — the AI is allowed, and expected, to surface uncertainty rather than fill it in.</li>
+    <li><strong>Structured output only.</strong> Every AI call returns strict JSON matching a schema (via tool-calling / JSON mode), never freeform prose to parse. This is the primary anti-hallucination lever: schemas force the model to cite the source ids it used and to emit null/low-confidence fields instead of inventing values.</li>
+    <li><strong>Schwartz's method is the spine, not a vibe.</strong> The 9 tiles are a literal implementation of Schwartz's 8-step process (see mapping below) plus one product-level extension (Strategic Options). Every prompt below encodes the actual definition of that step from the book — not a generic "brainstorm ideas" prompt.</li>
+    <li><strong>Deterministic where it should be.</strong> Classification/scoring calls (impact, uncertainty, orthogonality) run at low temperature with fixed rubrics. Generative calls (narrative prose) run at moderate temperature but are still constrained to cite the causal chain/signals they're built from.</li>
+  </ol>
+
+  <h2>1. Schwartz's 8 steps → Scenaric's 9 tiles → pages</h2>
+  <p>Schwartz's book defines 8 steps. Scenaric splits "Key Forces" and "Driving Forces" into two tiles for the product's Knowledge Base → Signals Library flow, and adds a 9th tile, Strategic Options, as the "so what" layer the book leaves implicit.</p>
+  <div class="map-head"><div>#</div><div>Schwartz step (book)</div><div>Scenaric tile</div><div>Page / component</div></div>
+  <div class="map-row"><div class="step-badge">1</div><div>Identify the focal issue or decision</div><div>Focal question</div><div class="mono">Onboarding, Settings → Project</div></div>
+  <div class="map-row"><div class="step-badge">2</div><div>Key forces in the local (task) environment</div><div>Key forces</div><div class="mono">page-knowledge.jsx</div></div>
+  <div class="map-row"><div class="step-badge">3</div><div>Driving forces — macro-environmental (STEEP)</div><div>Driving forces</div><div class="mono">page-signals.jsx</div></div>
+  <div class="map-row"><div class="step-badge">4</div><div>Rank by importance &amp; uncertainty</div><div>Rank forces</div><div class="mono">page-matrix.jsx</div></div>
+  <div class="map-row"><div class="step-badge">5</div><div>Select scenario logics (the 2×2 skeleton)</div><div>Scenario logics</div><div class="mono">build-scenarios-modal.jsx, reaxis-modal.jsx</div></div>
+  <div class="map-row"><div class="step-badge">6</div><div>Flesh out the scenarios</div><div>Narratives</div><div class="mono">page-narrative.jsx, page-storyline.jsx</div></div>
+  <div class="map-row"><div class="step-badge">7</div><div>Implications</div><div>Implications</div><div class="mono">page-narrative.jsx (Implications block)</div></div>
+  <div class="map-row"><div class="step-badge">8</div><div>Selection of leading indicators / signposts</div><div>Indicators</div><div class="mono">page-monitoring-settings.jsx</div></div>
+  <div class="map-row"><div>+</div><div><em>(not in the book — product extension)</em></div><div>Strategic options</div><div class="mono">page-strategy.jsx</div></div>
+
+  <h2>2. Data model (multi-project)</h2>
+  <p>One Postgres-style schema, every table scoped by <code>project_id</code> except <code>orgs</code>, <code>users</code>, and <code>projects</code> itself. This is a direct backend for the existing <code>usePersistentState</code> keys in <code>app.jsx</code> — replace localStorage with these tables and the frontend contract doesn't change.</p>
+  <table>
+    <tr><th>Table</th><th>Key columns</th><th>Notes</th></tr>
+    <tr><td class="mono">orgs</td><td>id, name, plan</td><td>Billing boundary</td></tr>
+    <tr><td class="mono">users</td><td>id, org_id, name, email, role</td><td></td></tr>
+    <tr><td class="mono">projects</td><td>id, org_id, name, focal_question, refined_focal_question, horizon, industry, summary, steps_complete, archived, created_by</td><td>Mirrors <code>data.js: projects[]</code>. <code>steps_complete</code> is server-derived, not client-set (§6).</td></tr>
+    <tr><td class="mono">sources</td><td>id, project_id, name, type, status, storage_url, extracted_text, uploaded_by</td><td>Knowledge Base raw uploads (docs/audio/survey/web)</td></tr>
+    <tr><td class="mono">interviews</td><td>id, project_id, source_id, participant_name, role, transcript, tag(STEEP), key_quote</td><td></td></tr>
+    <tr><td class="mono">insights</td><td>id, project_id, source_id, text, category(STEEP), confidence</td><td>AI-extracted from sources; feeds Key Forces</td></tr>
+    <tr><td class="mono">signals</td><td>id, project_id, category(STEEP), source, title, body, impact(1-5), uncertainty(Low/Med/High), origin(ai/user/insight_id), status</td><td>Driving Forces library</td></tr>
+    <tr><td class="mono">matrix_dots</td><td>id, project_id, signal_id, x, y, is_critical_axis</td><td>Rank Forces placement; x/y persisted 0–100</td></tr>
+    <tr><td class="mono">axes</td><td>id, project_id, x_signal_id, y_signal_id, x_label, y_label, independence_state, independence_rationale</td><td>Exactly 2 rows max active per project (Schwartz's 2×2 constraint)</td></tr>
+    <tr><td class="mono">scenarios</td><td>id, project_id, axes_id, quadrant(TL/TR/BL/BR), name, tagline, summary, narrative, color, is_archived</td><td>Always 4 live per active axes set</td></tr>
+    <tr><td class="mono">storyline_nodes</td><td>id, project_id, scenario_id, phase, category, title, body, year, strength, signal_id(nullable)</td><td>Causal chain cards</td></tr>
+    <tr><td class="mono">storyline_edges</td><td>id, project_id, scenario_id, from_node_id, to_node_id, relationship, confidence</td><td></td></tr>
+    <tr><td class="mono">implications</td><td>id, project_id, scenario_id, text, category(capital/hiring/tech/partners/other)</td><td></td></tr>
+    <tr><td class="mono">indicators</td><td>id, project_id, scenario_id, name, status(On track/Watch/Alert), trend, note, last_checked</td><td>Signposts</td></tr>
+    <tr><td class="mono">strategies</td><td>id, project_id, name, notes, risk, cost, robust_in(scenario_id[])</td><td></td></tr>
+    <tr><td class="mono">ai_runs</td><td>id, project_id, step, prompt_version, input_hash, output_json, model, confidence, created_at</td><td>Audit log — every generation call, replayable and reviewable</td></tr>
+  </table>
+  <div class="callout"><strong>Project switch contract:</strong> the client sends <code>activeProjectId</code> on every request (header or path param, e.g. <code>/api/projects/:id/signals</code>). No endpoint should ever mix data across projects — this is the #1 place a shared vector index or a global RAG context leaks cross-project.</div>
+
+  <h2>3. Global anti-hallucination scaffold</h2>
+  <p>Reused by every prompt below, not repeated in each section.</p>
+  <h4>System prompt preamble (prepend to all calls)</h4>
+  <pre>You are Scenaric's scenario-planning analyst. You work <span class="k">strictly</span> from the
+project data provided in this request — the knowledge base, signals, axes,
+and prior steps. You are implementing Peter Schwartz's scenario-planning
+method from "The Art of the Long View." Follow the definition of the
+current step exactly; do not substitute a generic brainstorming approach.
+
+Rules (violating any of these is a failure):
+1. Never invent a fact, statistic, date, or named entity that is not present
+   in the supplied context. If you need a plausible illustrative detail,
+   you may generalize from a cited signal but must not state it as if it
+   were sourced when it is inferred — mark inferred content in the
+   `inference` field of your output, never inline in prose.
+2. Every claim you output must be traceable to one or more input ids
+   (signal_id / source_id / node_id). Populate `grounded_in: [...]` with
+   those ids. If a claim has no grounding, do not include it.
+3. If the input evidence is insufficient to complete the step
+   confidently, return `sufficient_evidence: false` and a `gap`
+   description instead of guessing. Do not pad with generic
+   filler to look complete.
+4. Output ONLY the JSON matching the provided schema. No prose outside
+   the schema, no markdown, no preamble.
+5. Never break the 2-axis / 4-quadrant structure, the 5-phase storyline
+   structure, or the STEEP taxonomy (Social, Technological, Economic,
+   Ecological, Political) — these are fixed by the method, not creative
+   choices.</pre>
+  <div class="callout rule"><strong>Enforcement:</strong> pass a JSON Schema via the model's structured-output / tool-calling mode (not "please respond in JSON") so malformed output is rejected at the API layer before it reaches the DB. Reject and retry once on schema validation failure; on second failure, surface <code>sufficient_evidence:false</code> to the UI rather than showing a hallucinated result.</div>
+
+  <h2>4. Step 1 — Focal question <span class="mono" style="font-size:12px;color:#9CA3AF;">(onboarding.jsx)</span></h2>
+  <p>Schwartz: the focal issue must be a real pending decision, specific enough to test scenarios against, with an explicit time horizon.</p>
+  <table><tr><th>Endpoint</th><th>Trigger</th></tr>
+  <tr><td><span class="badge b-post">POST</span> <span class="mono">/projects/:id/focal-question/refine</span></td><td>"Refine with AI" button, onboarding step 1</td></tr></table>
+  <h4>Prompt (task-specific suffix)</h4>
+  <pre>Task: Sharpen the user's rough focal question into Schwartz's required form:
+a single decision-oriented question, bounded by the stated time horizon,
+specific about WHO is deciding and WHAT the decision changes.
+
+Input: { raw_question: string, horizon: string, industry: string }
+
+Requirements for the refined question:
+- Must be answerable "yes we should" / "no we shouldn't" or as a choice
+  among named options — not an open-ended topic ("the future of X").
+- Must name the actual decision-maker's scope (the company / product /
+  market), not a generic industry question.
+- Must include the time horizon verbatim.
+- Must NOT introduce new facts (competitors, markets, financial figures)
+  that were not in raw_question — reword and sharpen only.
+
+Output schema:
+{ refined_question: string, changed: boolean,
+  rationale: string[] /* 1-3 short bullets on what was sharpened and why */ }
+
+If raw_question is already well-formed, set changed:false and return it
+unmodified rather than rewriting for the sake of it.</pre>
+
+  <h2>5. Step 2 — Key forces <span class="mono" style="font-size:12px;color:#9CA3AF;">(page-knowledge.jsx)</span></h2>
+  <p>Schwartz: forces in the immediate/local environment — customers, suppliers, competitors, stakeholders — distinct from macro driving forces.</p>
+  <table><tr><th>Endpoint</th><th>Trigger</th></tr>
+  <tr><td><span class="badge b-post">POST</span> <span class="mono">/sources/:id/extract</span></td><td>File finishes upload/transcription</td></tr>
+  <tr><td><span class="badge b-post">POST</span> <span class="mono">/projects/:id/insights/extract-all</span></td><td>"Extract insights" button</td></tr></table>
+  <h4>Prompt</h4>
+  <pre>Task: Extract key local-environment forces from ONE source document/
+transcript. Key forces = stakeholders and actors that directly interact
+with the focal decision (customers, competitors, regulators the org
+negotiates with directly, suppliers, partners, internal capability
+constraints) — NOT macro trends (those are Step 3, driving forces).
+
+Input: { project_focal_question: string, source_id: string,
+         source_text: string /* full extracted text, chunked if long */ }
+
+Extraction rules:
+- Only extract statements actually present in source_text. Quote or
+  tightly paraphrase — do not synthesize claims the source doesn't make.
+- Each insight must include a verbatim `quote` (<= 40 words) copied from
+  source_text as evidence. If you cannot produce a real quote, drop the
+  insight.
+- Classify each insight's STEEP category ONLY if it's a driving force;
+  key forces (this step) are tagged `local_actor` instead.
+- Cap output at the 8 highest-signal insights per source. Do not pad to
+  hit a round number.
+
+Output schema:
+{ sufficient_evidence: boolean,
+  insights: [{ text: string, quote: string, actor_type: string,
+               confidence: "high"|"medium"|"low" }] }</pre>
+
+  <h2>6. Step 3 — Driving forces <span class="mono" style="font-size:12px;color:#9CA3AF;">(page-signals.jsx)</span></h2>
+  <p>Schwartz: macro-environmental forces across Social, Technological, Economic, Ecological, Political (STEEP) categories that shape the focal question but sit outside the org's direct control.</p>
+  <table><tr><th>Endpoint</th><th>Trigger</th></tr>
+  <tr><td><span class="badge b-post">POST</span> <span class="mono">/projects/:id/signals/suggest</span></td><td>"Add Signal" → AI suggestion tab, or auto-run after insight extraction</td></tr>
+  <tr><td><span class="badge b-post">POST</span> <span class="mono">/projects/:id/signals/score</span></td><td>Batch impact/uncertainty scoring for signals lacking scores</td></tr></table>
+  <h4>Prompt — generate candidate signals from insights</h4>
+  <pre>Task: Convert local insights + the focal question into STEEP-classified
+driving-force signals, each representing ONE distinct macro uncertainty
+the scenario set must consider.
+
+Input: { focal_question: string, horizon: string, industry: string,
+         insights: [{id, text, actor_type}], existing_signals: [{id,title,category}] }
+
+Rules:
+- Every new signal must be grounded_in >= 1 insight id, OR explicitly
+  flagged `origin:"external_pattern"` if it names a well-established
+  macro trend for this industry/horizon not present in insights (allowed,
+  but must be flagged, never presented as sourced from the user's data).
+- Do NOT propose a signal that duplicates an existing_signals title or
+  underlying uncertainty — check semantic overlap, not just exact text.
+- Each signal needs exactly one STEEP category: Social, Technology,
+  Economic, Ecological, or Political.
+- Write `title` as a factual trend statement (<=8 words), `body` as a
+  2-sentence explanation of the mechanism connecting it to the focal
+  question, and cite `source` as the real originating source name
+  (e.g. "Internal interview — Jan Oosterom") — never a fabricated
+  publication name.
+- Cap at 6 new signals per call.
+
+Output schema:
+{ signals: [{ title, body, category, source, grounded_in: string[],
+              origin: "insight"|"external_pattern" }] }</pre>
+  <h4>Prompt — impact / uncertainty scoring (deterministic, temp 0)</h4>
+  <pre>Task: Score ONE signal on Schwartz's two axes used for the ranking matrix:
+IMPACT (how much would this reshape the focal decision if it occurred)
+and UNCERTAINTY (how unpredictable is its outcome/direction).
+
+Input: { focal_question, signal: {title, body, category} }
+
+Rubric (apply literally, do not freelance a different scale):
+Impact 1 = negligible effect on the decision; 5 = would overturn the
+  strategy entirely.
+Uncertainty Low = outcome is largely predetermined/trending;
+  Medium = plausible range of outcomes, some predictability;
+  High = genuinely unknowable direction today.
+
+Output schema:
+{ impact: 1|2|3|4|5, uncertainty: "Low"|"Medium"|"High",
+  rationale: string /* one sentence, cites the mechanism, not a vibe */ }</pre>
+
+  <h2>7. Step 4 — Rank forces <span class="mono" style="font-size:12px;color:#9CA3AF;">(page-matrix.jsx)</span></h2>
+  <p>Schwartz: plot every force on impact × uncertainty; the two most important AND most uncertain become the scenario axes. Everything else sorts into Predetermined / Background / Wildcard.</p>
+  <table><tr><th>Endpoint</th><th>Trigger</th></tr>
+  <tr><td><span class="badge b-get">GET</span> <span class="mono">/projects/:id/matrix/axis-candidates</span></td><td>Matrix page load — ranks top-right quadrant signals</td></tr>
+  <tr><td><span class="badge b-post">POST</span> <span class="mono">/projects/:id/matrix/independence-check</span></td><td>User selects 2 axis signals (mirrors existing <code>assessIndependence</code> heuristic in page-matrix.jsx, now AI-backed instead of a pseudo-random hash)</td></tr></table>
+  <h4>Prompt — orthogonality / independence check</h4>
+  <p>This replaces the current client-side <code>assessIndependence()</code> stub (a hashed pseudo-random "sync %") with a real grounded judgment — it must reach one of exactly three states already defined in the UI: <code>independent</code>, <code>correlated</code>, <code>uncertain</code>.</p>
+  <pre>Task: Assess whether two candidate scenario axes resolve independently
+of one another. Schwartz's method requires the two axes to be able to
+combine into all 4 plausible quadrants — correlated axes collapse the
+matrix to effectively 2 scenarios, which is a methodology violation.
+
+Input: { axis_a: {title, body, category}, axis_b: {title, body, category},
+         library_signals: [{title, category}] /* full signal library for context */ }
+
+Decision procedure (must follow, do not skip steps):
+1. If axis_a and axis_b share a common underlying causal driver (one's
+   outcome mechanically constrains the other's), return "correlated"
+   and name the shared driver in rationale.
+2. Else if the library contains fewer than 2 supporting signals for
+   either axis's category, return "uncertain" — there isn't enough
+   evidence in this project to judge independence either way. Do not
+   guess in this case.
+3. Else return "independent".
+Every rationale bullet must reference axis_a/axis_b's actual content or
+a named library signal — never a generic statement like "these seem
+different."
+
+Output schema:
+{ state: "independent"|"correlated"|"uncertain",
+  rationale: string[] /* 1-3 bullets, each grounded */ }</pre>
+
+  <h2>8. Step 5 — Scenario logics <span class="mono" style="font-size:12px;color:#9CA3AF;">(build-scenarios-modal.jsx, reaxis-modal.jsx)</span></h2>
+  <p>Schwartz: with 2 axes fixed, define the internal logic of each of the 4 quadrants — what makes that combination a coherent, plausible world (not just a label).</p>
+  <table><tr><th>Endpoint</th><th>Trigger</th></tr>
+  <tr><td><span class="badge b-post">POST</span> <span class="mono">/projects/:id/scenarios/build</span></td><td>"Build Scenario Matrix" confirm (first time)</td></tr>
+  <tr><td><span class="badge b-post">POST</span> <span class="mono">/projects/:id/scenarios/reaxis-preview</span></td><td>Re-axis modal step 2, before committing migration</td></tr></table>
+  <h4>Prompt</h4>
+  <pre>Task: Generate the 4 scenario logics for a 2×2 built from axis_a
+(vertical) and axis_b (horizontal). A "logic" is the causal argument for
+why that combination of pole outcomes is an internally consistent world
+— not just a mashup of two adjectives.
+
+Input: { focal_question, horizon, axis_a: {label, pole_pos, pole_neg},
+         axis_b: {label, pole_pos, pole_neg}, predetermined_signals: [...],
+         name_pool: string[] /* curated evocative names, model must pick
+         from or closely riff on this pool — never invent unrelated
+         proper nouns */ }
+
+Rules:
+- Produce exactly 4 scenarios, one per quadrant (TL/TR/BL/BR), each
+  combining one pole of axis_a with one pole of axis_b.
+- `logic` must explain the causal mechanism connecting the two poles
+  into one coherent world in 1-2 sentences — if a quadrant combination
+  is internally contradictory (e.g. both poles require the same
+  precondition to differ), set `plausible:false` and explain why in
+  `implausibility_note` instead of forcing a narrative.
+- Weave in predetermined_signals where relevant — these hold true in
+  ALL 4 quadrants and must not contradict any scenario's logic.
+- `tagline` <= 6 words, `summary` <= 2 sentences, no invented statistics.
+
+Output schema:
+{ scenarios: [{ quadrant: "TL"|"TR"|"BL"|"BR", name, tagline, summary,
+                logic, plausible: boolean, implausibility_note?: string }] }</pre>
+
+  <h2>9. Step 6 — Narratives &amp; storyline <span class="mono" style="font-size:12px;color:#9CA3AF;">(page-narrative.jsx, page-storyline.jsx)</span></h2>
+  <p>Schwartz: flesh out each scenario into a full narrative — the causal chain of events from today's precursors to the realized future. Scenaric implements this as prose (Narrative page) and a 5-phase causal graph (Storyline page); both must derive from the same chain, not diverge.</p>
+  <table><tr><th>Endpoint</th><th>Trigger</th></tr>
+  <tr><td><span class="badge b-post">POST</span> <span class="mono">/scenarios/:id/storyline/auto-suggest</span></td><td>"Auto-suggest chain from AI", storyline empty state</td></tr>
+  <tr><td><span class="badge b-post">POST</span> <span class="mono">/scenarios/:id/narrative/expand</span></td><td>"Expand with AI" on narrative page</td></tr>
+  <tr><td><span class="badge b-post">POST</span> <span class="mono">/scenarios/:id/storyline/find-signal</span></td><td>"Find signals" gap-filler in side panel</td></tr></table>
+  <h4>Prompt — storyline causal chain (source of truth)</h4>
+  <pre>Task: Build the causal chain for ONE scenario across Schwartz's 5 phases:
+Precursors (conditions already true today) → Catalysts (near-term
+triggering events) → First-order effects → Second-order effects →
+Scenario realized (the end state at the horizon).
+
+Input: { scenario: {name, logic, quadrant}, axis_a, axis_b,
+         library_signals: [...], predetermined_signals: [...],
+         horizon: string }
+
+Rules:
+- Every node must belong to exactly one phase and connect via >=1 edge
+  (except phase-1 precursors, which may be roots).
+- No forward-skipping shortcuts that assert the end state as a
+  precursor — respect causal ordering; a node in phase N can only
+  causally justify nodes in phase N or later (never earlier — that is
+  the "backward in time" error state the product already flags).
+- Every node's `title`+`body` must trace to a library_signal or
+  predetermined_signal id in `grounded_in`, OR be marked
+  `inference:true` if it's a plausible near-term consequence the model
+  is inferring rather than one already present in the library — cap
+  inferred nodes at 40% of the chain.
+- Edge `relationship` in {"Leads to","Enables","Amplifies","Blocks"},
+  `confidence` in {"Strong","Moderate","Weak"} — set confidence Weak
+  whenever grounded_in is empty (i.e. purely inferred).
+- 7-10 nodes total, at least 1 per phase.
+
+Output schema:
+{ sufficient_evidence: boolean,
+  nodes: [{ id, phase, category(STEEP), title, body, year,
+            grounded_in: string[], inference: boolean }],
+  edges: [{ from, to, relationship, confidence }] }</pre>
+  <h4>Prompt — narrative prose expansion</h4>
+  <pre>Task: Turn an approved storyline chain (nodes+edges) into the scenario's
+readable narrative paragraph, in past-tense retrospective voice ("by
+{horizon_end}, X had happened...") per Schwartz's convention of writing
+scenarios as history remembered from the future.
+
+Input: { scenario: {name, tagline, summary}, storyline_nodes: [...ordered
+         by phase], storyline_edges: [...] }
+
+Rules:
+- The narrative must mention every node's core fact in causal order —
+  do not invent connective events not present in the chain.
+- Do not introduce any named company, person, statistic, or policy not
+  present in a node's title/body.
+- 150-300 words. No bullet points — flowing prose.
+- If storyline_nodes is empty or has <4 nodes, return
+  sufficient_evidence:false instead of writing a thin narrative from
+  scratch.
+
+Output schema:
+{ sufficient_evidence: boolean, narrative: string }</pre>
+
+  <h2>10. Step 7 — Implications <span class="mono" style="font-size:12px;color:#9CA3AF;">(page-narrative.jsx)</span></h2>
+  <p>Schwartz: for each scenario, work out what it would mean for the actual decision — this is where scenarios connect back to the focal question.</p>
+  <table><tr><th>Endpoint</th><th>Trigger</th></tr>
+  <tr><td><span class="badge b-post">POST</span> <span class="mono">/scenarios/:id/implications/generate</span></td><td>Narrative page load / regenerate action</td></tr></table>
+  <h4>Prompt</h4>
+  <pre>Task: Derive strategic implications of ONE scenario for the focal
+question — concrete "if this future happens, we would need to..."
+statements, not restated scenario facts.
+
+Input: { focal_question, scenario: {name, narrative}, categories:
+         ["capital allocation","hiring/org","technology/product",
+          "partnerships","other"] }
+
+Rules:
+- Each implication must name a decision or resource shift the
+  organization in focal_question would plausibly need to make — derived
+  from a specific fact in scenario.narrative, cited in `grounded_in_text`
+  (a short quote/paraphrase of the triggering sentence).
+- No generic implications that would apply to any scenario ("invest in
+  talent") — must be scenario-specific.
+- 3-5 implications, each 1 sentence, each tagged with one category.
+
+Output schema:
+{ implications: [{ text, category, grounded_in_text }] }</pre>
+
+  <h2>11. Step 8 — Indicators / signposts <span class="mono" style="font-size:12px;color:#9CA3AF;">(page-monitoring-settings.jsx)</span></h2>
+  <p>Schwartz: leading indicators are observable, near-term events that reveal which scenario is actually unfolding — they must be specific and checkable, not vague trends.</p>
+  <table><tr><th>Endpoint</th><th>Trigger</th></tr>
+  <tr><td><span class="badge b-post">POST</span> <span class="mono">/projects/:id/indicators/generate</span></td><td>"Add indicator" → AI suggest, or run once per scenario after narrative approval</td></tr>
+  <tr><td><span class="badge b-put">PUT</span> <span class="mono">/indicators/:id/status</span></td><td>Manual or news-feed-triggered status update (Watch/Alert/On track)</td></tr></table>
+  <h4>Prompt — generate signposts</h4>
+  <pre>Task: Generate leading indicators (signposts) for ONE scenario — concrete,
+externally observable events that would tell an analyst this scenario is
+the one unfolding, distinguishable from the OTHER 3 scenarios.
+
+Input: { scenario: {name, storyline_nodes}, sibling_scenarios:
+         [{name, tagline}] /* the other 3, for distinguishing power */ }
+
+Rules:
+- Each indicator must be phrased as a checkable, dated, or thresholded
+  event ("X ruling published", "Y index crosses Z%") — never a vague
+  directional claim ("regulation increases").
+- Each indicator must map to exactly one storyline_node's mechanism
+  (`grounded_in`) — do not invent indicators disconnected from the
+  approved chain.
+- Reject (do not output) any candidate indicator that would equally
+  well signal one of sibling_scenarios — signposts must discriminate.
+- 4-6 indicators per scenario.
+
+Output schema:
+{ indicators: [{ name, grounded_in: string (node id),
+                  discriminates_from: string[] (sibling scenario ids) }] }</pre>
+  <h4>Prompt — status classification from a news item (used by the News Feed → "+ Add to Signals"/monitoring loop)</h4>
+  <pre>Task: Given one incoming news item and the project's existing
+indicators, decide whether it moves any indicator's status.
+
+Input: { news_item: {title, source, body}, indicators: [{id, name,
+         current_status}] }
+
+Rules:
+- Only change status for indicators the news_item DIRECTLY concerns —
+  match on named entities/mechanisms, not thematic vibes.
+- Escalate to "Alert" only if the news_item reports the indicator's
+  triggering condition has occurred or is imminent (<1 quarter).
+  "Watch" if directionally relevant but not yet triggering. Otherwise
+  leave unchanged.
+- If uncertain whether the news_item concerns an indicator at all,
+  leave it unchanged — do not force a match.
+
+Output schema:
+{ updates: [{ indicator_id, new_status, reason: string }] }</pre>
+
+  <h2>12. Strategic options (product extension, not in Schwartz) <span class="mono" style="font-size:12px;color:#9CA3AF;">(page-strategy.jsx)</span></h2>
+  <p>Wind-tunnelling: test candidate strategies against all 4 scenarios and score robustness. This is standard scenario-planning practice (Shell/GBN) that Schwartz's book gestures at but doesn't formalize as a named step — treat its grounding rules as strict as the book steps.</p>
+  <table><tr><th>Endpoint</th><th>Trigger</th></tr>
+  <tr><td><span class="badge b-post">POST</span> <span class="mono">/projects/:id/strategies/generate</span></td><td>"Generate options" button</td></tr>
+  <tr><td><span class="badge b-post">POST</span> <span class="mono">/projects/:id/strategies/wind-tunnel</span></td><td>Re-score existing strategies after scenarios change</td></tr></table>
+  <h4>Prompt</h4>
+  <pre>Task: Propose strategic options for the focal question and score each
+against all 4 scenarios ("wind-tunnelling" — does this option still work
+if this future happens?).
+
+Input: { focal_question, scenarios: [{id, name, narrative, implications}] }
+
+Rules:
+- Each strategy must be actionable (a real operating/investment choice),
+  not a restated goal ("succeed in all markets").
+- `robust_in` may only include a scenario id if the strategy's mechanism
+  is explicitly supported by that scenario's narrative or implications —
+  cite the supporting text in `robust_because`. If a strategy is robust
+  in 0-1 scenarios, still include it if it's the best available option,
+  but flag `single_scenario_bet:true`.
+- risk/cost are relative within THIS option set only (Low/Medium/High),
+  derived from execution complexity and capital intensity described in
+  narratives — not a generic guess.
+- 3-5 strategies. Always include one full-coverage or near-coverage
+  hedge if the scenario set allows one; never fabricate one that isn't
+  supported.
+
+Output schema:
+{ strategies: [{ name, notes, risk: "Low"|"Medium"|"High",
+                  cost: "Low"|"Medium"|"High",
+                  robust_in: [{scenario_id, robust_because}],
+                  single_scenario_bet: boolean }] }</pre>
+
+  <h2>13. Cross-cutting: Ask AI chat &amp; project progress</h2>
+  <h3>Ask AI (ask-ai.jsx)</h3>
+  <p>Replace the canned-reply array with a single grounded chat endpoint. It must answer only from the active project's stored data (signals, scenarios, storyline, indicators) — not general knowledge about the user's industry.</p>
+  <pre>Task: Answer the user's question about their scenario-planning project.
+
+Input: { question, project_snapshot: { focal_question, signals,
+         axes, scenarios, storyline_summaries, indicators, strategies } }
+
+Rules:
+- Answer ONLY using project_snapshot. If the question requires info not
+  present (e.g. asks about a market not in any signal), say so plainly
+  and suggest which step would supply it (e.g. "add a signal about X in
+  the Signals Library") — never answer from general knowledge as if it
+  were project fact.
+- When citing a scenario or signal, name it exactly as stored.
+- Keep responses under ~120 words unless the user asks for depth.
+
+Output schema: { answer: string, cites: string[] (ids referenced) }</pre>
+  <h3>Project progress (<span class="mono">stepsComplete</span>)</h3>
+  <p>Currently client-set in the prototype. Make it server-derived so a project's tile state can never be spoofed or drift from real data:</p>
+  <pre>steps_complete = count of gates passed, where:
+  1 (Focal question)   → project.refined_focal_question IS NOT NULL
+  2 (Key forces)        → count(insights) >= 1
+  3 (Driving forces)    → count(signals) >= 4  (min. viable STEEP spread)
+  4 (Rank forces)       → axes row exists with independence_state != 'uncertain'
+  5 (Scenario logics)   → count(scenarios WHERE plausible) == 4
+  6 (Narratives)        → count(scenarios WHERE narrative IS NOT NULL) == 4
+  7 (Implications)      → count(implications) >= 4*3
+  8 (Indicators)        → count(indicators) >= 4*3
+  9 (Strategy)          → count(strategies) >= 3</pre>
+
+  <h2>14. Build order</h2>
+  <ol>
+    <li>Schema + multi-project CRUD (projects, sources, signals, scenarios, etc.) with project-scoped auth on every route.</li>
+    <li>Server-derived <code>steps_complete</code> gate (§13) — wires the existing dashboard/projects UI to real state immediately, even before AI exists.</li>
+    <li>Global prompt scaffold + structured-output client wrapper (schema validation, retry-once, <code>ai_runs</code> audit log) — build once, reuse for every step below.</li>
+    <li>Step 1 (focal refine) + Step 2/3 (insight + signal extraction) — unlocks Knowledge Base and Signals Library end to end.</li>
+    <li>Step 4 (scoring + independence check) — Matrix page fully live.</li>
+    <li>Step 5 (scenario logics) for both first-build and re-axis flows.</li>
+    <li>Step 6 (storyline chain + narrative prose) — build storyline first since narrative prose depends on it.</li>
+    <li>Step 7 + 8 (implications, indicators) — both are cheap, single-call generations once scenarios/storyline exist.</li>
+    <li>Strategic options (§12) + Ask AI (§13) — depend on everything above being populated.</li>
+    <li>News-feed → indicator status classifier (§11) as a background job/webhook once indicators exist.</li>
+  </ol>
+
+</doc-page>
+<script src="doc-page.js"></script>
+</body>
+</html>

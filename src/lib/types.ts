@@ -67,8 +67,10 @@ export interface Signal {
   category: SteepCategory;
   source: string;
   title: string;
-  impact: number;
-  uncertainty: "Low" | "Medium" | "High";
+  // Nullable: a manually-added or freshly-AI-suggested signal can sit unscored
+  // until it goes through impact/uncertainty scoring.
+  impact: number | null;
+  uncertainty: "Low" | "Medium" | "High" | null;
   body: string;
 }
 

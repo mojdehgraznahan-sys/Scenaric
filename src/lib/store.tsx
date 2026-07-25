@@ -17,11 +17,24 @@ import {
   deleteProject as deleteProjectAction,
   type ProjectRow,
 } from "./actions/projects";
+import {
+  listSignals,
+  createSignal as createSignalAction,
+  deleteSignal as deleteSignalAction,
+  type SignalRow,
+} from "./actions/signals";
+import {
+  suggestSignals as suggestSignalsAction,
+  scoreUnscoredSignals as scoreUnscoredSignalsAction,
+  type SuggestSignalsResult,
+  type ScoreSignalsResult,
+} from "./actions/ai-signals";
 import type {
   ScenaricData,
   Project,
   ProjectSummary,
   Signal,
+  SteepCategory,
   MatrixDot,
   Scenario,
   Indicator,
@@ -84,7 +97,7 @@ interface OnboardingState {
   complete: boolean;
 }
 
-function initialsFor(name: string | null | undefined, email: string): string {
+export function initialsFor(name: string | null | undefined, email: string): string {
   const source = (name || email || "").trim();
   if (!source) return "?";
   const parts = source.split(/\s+/);
@@ -104,6 +117,18 @@ function toProjectSummary(row: ProjectRow): ProjectSummary {
     stepsComplete: row.steps_complete,
     lastEdited: row.updated_at,
     archived: row.archived,
+  };
+}
+
+function toSignal(row: SignalRow): Signal {
+  return {
+    id: row.id,
+    category: row.category,
+    source: row.source,
+    title: row.title,
+    body: row.body,
+    impact: row.impact,
+    uncertainty: row.uncertainty,
   };
 }
 
@@ -139,7 +164,19 @@ export interface Store {
   activeProjectId: string | null;
   setActiveProjectId: (v: string | null) => void;
   signals: Signal[];
-  setSignals: (v: Signal[]) => void;
+  signalsLoading: boolean;
+  createSignal: (input: {
+    projectId: string;
+    category: SteepCategory;
+    source: string;
+    title: string;
+    body?: string;
+    impact?: number | null;
+    uncertainty?: "Low" | "Medium" | "High" | null;
+  }) => Promise<Signal>;
+  deleteSignal: (id: string) => Promise<void>;
+  suggestSignals: (projectId: string) => Promise<SuggestSignalsResult>;
+  scoreUnscoredSignals: (projectId: string) => Promise<ScoreSignalsResult>;
   matrixDots: MatrixDot[];
   setMatrixDots: (v: MatrixDot[]) => void;
   selectedDot: string;
@@ -348,8 +385,71 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   // need to change — `project` above already re-derives from activeProjectId.
   const setProject = useCallback((_v: Project) => {}, []);
 
+  // ---- Signals (real, Supabase) ----
+  const [signals, setSignalsState] = useState<Signal[]>([]);
+  const [signalsLoading, setSignalsLoading] = useState(true);
+
+  const refreshSignals = useCallback(async (projectId: string) => {
+    const rows = await listSignals(projectId);
+    setSignalsState(rows.map(toSignal));
+  }, []);
+
+  useEffect(() => {
+    if (!activeProjectId) {
+      setSignalsState([]);
+      setSignalsLoading(false);
+      return;
+    }
+    setSignalsLoading(true);
+    refreshSignals(activeProjectId)
+      .catch((err) => console.error("[store] failed to load signals", err))
+      .finally(() => setSignalsLoading(false));
+  }, [activeProjectId, refreshSignals]);
+
+  const createSignal = useCallback(
+    async (input: {
+      projectId: string;
+      category: SteepCategory;
+      source: string;
+      title: string;
+      body?: string;
+      impact?: number | null;
+      uncertainty?: "Low" | "Medium" | "High" | null;
+    }) => {
+      const row = await createSignalAction(input);
+      await refreshSignals(input.projectId);
+      return toSignal(row);
+    },
+    [refreshSignals]
+  );
+
+  const deleteSignal = useCallback(
+    async (id: string) => {
+      await deleteSignalAction(id);
+      if (activeProjectId) await refreshSignals(activeProjectId);
+    },
+    [activeProjectId, refreshSignals]
+  );
+
+  const suggestSignals = useCallback(
+    async (projectId: string) => {
+      const result = await suggestSignalsAction(projectId);
+      await refreshSignals(projectId);
+      return result;
+    },
+    [refreshSignals]
+  );
+
+  const scoreUnscoredSignals = useCallback(
+    async (projectId: string) => {
+      const result = await scoreUnscoredSignalsAction(projectId);
+      await refreshSignals(projectId);
+      return result;
+    },
+    [refreshSignals]
+  );
+
   // ---- Everything below this line is still localStorage-simulated (later build-order steps) ----
-  const [signals, setSignals] = usePersistentState("fm.signals", seed.signals);
   const [matrixDots, setMatrixDots] = usePersistentState("fm.matrix", seed.matrix_dots);
   const [selectedDot, setSelectedDot] = useState("d2");
   const [scenarios, setScenarios] = usePersistentState("fm.scenarios", seed.scenarios);
@@ -386,7 +486,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     activeProjectId,
     setActiveProjectId,
     signals,
-    setSignals,
+    signalsLoading,
+    createSignal,
+    deleteSignal,
+    suggestSignals,
+    scoreUnscoredSignals,
     matrixDots,
     setMatrixDots,
     selectedDot,
@@ -402,7 +506,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     navCollapsed,
     setNavCollapsed,
     reset: () => {
-      ["fm.accountType", "fm.onb", "fm.signals", "fm.matrix", "fm.scenarios", "fm.indicators", "fm.strategies", "fm.cu"].forEach(
+      ["fm.accountType", "fm.onb", "fm.matrix", "fm.scenarios", "fm.indicators", "fm.strategies", "fm.cu"].forEach(
         (k) => window.localStorage.removeItem(k)
       );
       supabase.auth.signOut().finally(() => {
