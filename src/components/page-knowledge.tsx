@@ -469,7 +469,7 @@ export function PageKnowledge() {
                     <div className="flex items-center justify-end">
                       <button
                         className="border-0 bg-transparent text-xs font-medium text-brand-orange"
-                        onClick={() => navigate("/signals")}
+                        onClick={() => navigate(`/signals?mergeInsight=${i.id}`)}
                       >
                         + Merge into Signal →
                       </button>

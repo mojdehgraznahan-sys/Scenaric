@@ -243,6 +243,12 @@ export interface Database {
         };
         Relationships: [];
       };
+      signal_insight_links: {
+        Row: { project_id: string; signal_id: string; insight_id: string };
+        Insert: { project_id: string; signal_id: string; insight_id: string };
+        Update: { project_id?: string; signal_id?: string; insight_id?: string };
+        Relationships: [];
+      };
       ai_runs: {
         Row: {
           id: string;

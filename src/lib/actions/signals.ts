@@ -8,8 +8,10 @@ import type { Database } from "@/lib/supabase/types";
 
 export type SignalRow = Database["public"]["Tables"]["signals"]["Row"];
 export type SteepCategory = SignalRow["category"];
+export type SignalOrigin = SignalRow["origin"];
+export type SignalWithGrounding = SignalRow & { groundedInsightIds: string[] };
 
-export async function listSignals(projectId: string): Promise<SignalRow[]> {
+export async function listSignals(projectId: string): Promise<SignalWithGrounding[]> {
   const supabase = createClient();
   const { data, error } = await supabase
     .from("signals")
@@ -17,7 +19,21 @@ export async function listSignals(projectId: string): Promise<SignalRow[]> {
     .eq("project_id", projectId)
     .order("created_at", { ascending: false });
   if (error) throw error;
-  return data;
+
+  const { data: links, error: linksError } = await supabase
+    .from("signal_insight_links")
+    .select("signal_id, insight_id")
+    .eq("project_id", projectId);
+  if (linksError) throw linksError;
+
+  const groundedBySignal = new Map<string, string[]>();
+  for (const link of links) {
+    const existing = groundedBySignal.get(link.signal_id);
+    if (existing) existing.push(link.insight_id);
+    else groundedBySignal.set(link.signal_id, [link.insight_id]);
+  }
+
+  return data.map((row) => ({ ...row, groundedInsightIds: groundedBySignal.get(row.id) ?? [] }));
 }
 
 export async function createSignal(input: {
@@ -28,6 +44,7 @@ export async function createSignal(input: {
   body?: string;
   impact?: number | null;
   uncertainty?: "Low" | "Medium" | "High" | null;
+  origin?: SignalOrigin;
 }): Promise<SignalRow> {
   const supabase = createClient();
   const { data, error } = await supabase
@@ -40,9 +57,27 @@ export async function createSignal(input: {
       body: input.body ?? "",
       impact: input.impact ?? null,
       uncertainty: input.uncertainty ?? null,
+      origin: input.origin ?? "user",
     })
     .select()
     .single();
+  if (error) throw error;
+  revalidatePath("/signals");
+  return data;
+}
+
+export async function updateSignal(input: {
+  id: string;
+  title?: string;
+  body?: string;
+  category?: SteepCategory;
+  source?: string;
+  impact?: number | null;
+  uncertainty?: "Low" | "Medium" | "High" | null;
+}): Promise<SignalRow> {
+  const supabase = createClient();
+  const { id, ...fields } = input;
+  const { data, error } = await supabase.from("signals").update(fields).eq("id", id).select().single();
   if (error) throw error;
   revalidatePath("/signals");
   return data;

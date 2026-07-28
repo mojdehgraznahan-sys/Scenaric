@@ -19,6 +19,13 @@ export async function listInsights(projectId: string): Promise<InsightRow[]> {
   return data;
 }
 
+export async function getInsight(id: string): Promise<InsightRow | null> {
+  const supabase = createClient();
+  const { data, error } = await supabase.from("insights").select("*").eq("id", id).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
 export async function deleteInsight(id: string): Promise<void> {
   const supabase = createClient();
   const { error } = await supabase.from("insights").delete().eq("id", id);

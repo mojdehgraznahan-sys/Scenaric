@@ -20,12 +20,15 @@ import {
 import {
   listSignals,
   createSignal as createSignalAction,
+  updateSignal as updateSignalAction,
   deleteSignal as deleteSignalAction,
   type SignalRow,
+  type SignalOrigin,
 } from "./actions/signals";
 import {
   suggestSignals as suggestSignalsAction,
   scoreUnscoredSignals as scoreUnscoredSignalsAction,
+  scoreOneSignal,
   type SuggestSignalsResult,
   type ScoreSignalsResult,
 } from "./actions/ai-signals";
@@ -171,6 +174,16 @@ export interface Store {
     source: string;
     title: string;
     body?: string;
+    impact?: number | null;
+    uncertainty?: "Low" | "Medium" | "High" | null;
+    origin?: SignalOrigin;
+  }) => Promise<Signal>;
+  updateSignal: (input: {
+    id: string;
+    title?: string;
+    body?: string;
+    category?: SteepCategory;
+    source?: string;
     impact?: number | null;
     uncertainty?: "Low" | "Medium" | "High" | null;
   }) => Promise<Signal>;
@@ -415,12 +428,36 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       body?: string;
       impact?: number | null;
       uncertainty?: "Low" | "Medium" | "High" | null;
+      origin?: SignalOrigin;
     }) => {
       const row = await createSignalAction(input);
       await refreshSignals(input.projectId);
+      // Fire-and-forget: don't block signal creation on scoring latency (mirrors how
+      // "Suggest signals" already chains suggest -> score non-blocking). Refreshes again
+      // once scoring lands so the card updates off "Not yet scored" on its own.
+      scoreOneSignal(input.projectId, row.id)
+        .then(() => refreshSignals(input.projectId))
+        .catch((err) => console.error("[store] auto-score failed for new signal", err));
       return toSignal(row);
     },
     [refreshSignals]
+  );
+
+  const updateSignal = useCallback(
+    async (input: {
+      id: string;
+      title?: string;
+      body?: string;
+      category?: SteepCategory;
+      source?: string;
+      impact?: number | null;
+      uncertainty?: "Low" | "Medium" | "High" | null;
+    }) => {
+      const row = await updateSignalAction(input);
+      if (activeProjectId) await refreshSignals(activeProjectId);
+      return toSignal(row);
+    },
+    [activeProjectId, refreshSignals]
   );
 
   const deleteSignal = useCallback(
@@ -488,6 +525,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     signals,
     signalsLoading,
     createSignal,
+    updateSignal,
     deleteSignal,
     suggestSignals,
     scoreUnscoredSignals,

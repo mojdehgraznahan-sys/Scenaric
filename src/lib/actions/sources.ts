@@ -41,6 +41,13 @@ export async function listSources(projectId: string): Promise<SourceRow[]> {
   return data;
 }
 
+export async function getSource(id: string): Promise<SourceRow | null> {
+  const supabase = createClient();
+  const { data, error } = await supabase.from("sources").select("*").eq("id", id).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
 export async function createSource(input: {
   projectId: string;
   name: string;
