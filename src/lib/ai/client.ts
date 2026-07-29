@@ -7,6 +7,9 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { AIGenerationFailedError } from "./errors";
+
+export { AIGenerationFailedError };
 
 const anthropic = new Anthropic(); // reads ANTHROPIC_API_KEY from the environment
 
@@ -39,17 +42,6 @@ Rules (violating any of these is a failure):
    structure, or the STEEP taxonomy (Social, Technological, Economic,
    Ecological, Political) — these are fixed by the method, not creative
    choices.`;
-
-export class AIGenerationFailedError extends Error {
-  constructor(
-    public readonly step: string,
-    public readonly reason: "refusal" | "schema_validation_failed",
-    public readonly attempts: number
-  ) {
-    super(`AI generation failed for step "${step}" after ${attempts} attempt(s): ${reason}`);
-    this.name = "AIGenerationFailedError";
-  }
-}
 
 interface RunStructuredOptions<T extends z.ZodTypeAny> {
   step: string;

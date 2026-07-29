@@ -40,6 +40,34 @@ function citationFor(insight: InsightRow, sourceName: string | null): string {
 
 const CATEGORIES: Array<"All" | SteepCategory> = ["All", "Social", "Technology", "Economic", "Ecological", "Political"];
 
+const SORT_OPTIONS = [
+  { value: "recent", label: "Recently added" },
+  { value: "impact", label: "Impact" },
+  { value: "uncertainty", label: "Uncertainty" },
+  { value: "category", label: "Category" },
+] as const;
+type SortMode = (typeof SORT_OPTIONS)[number]["value"];
+const SORT_VALUES = SORT_OPTIONS.map((o) => o.value) as readonly string[];
+
+const UNCERTAINTY_RANK: Record<string, number> = { High: 3, Medium: 2, Low: 1 };
+
+// Client-side only — sorts what's already fetched into store.signals, never re-fetches.
+// Unscored signals (impact/uncertainty null) sort to the end under both numeric modes via
+// the -1 fallback, rather than crashing or landing in an unpredictable spot.
+function sortSignals(list: Signal[], mode: SortMode): Signal[] {
+  const sorted = [...list];
+  if (mode === "impact") {
+    sorted.sort((a, b) => (b.impact ?? -1) - (a.impact ?? -1));
+  } else if (mode === "uncertainty") {
+    sorted.sort((a, b) => (UNCERTAINTY_RANK[b.uncertainty ?? ""] ?? -1) - (UNCERTAINTY_RANK[a.uncertainty ?? ""] ?? -1));
+  } else if (mode === "category") {
+    sorted.sort((a, b) => a.category.localeCompare(b.category));
+  } else {
+    sorted.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+  return sorted;
+}
+
 // Filter-pill classes (literal strings so Tailwind JIT keeps them).
 const PILL: Record<string, { active: string; inactive: string }> = {
   All: { active: "bg-brand-orange text-white border-brand-orange", inactive: "bg-white text-muted-foreground border-border" },
@@ -187,7 +215,20 @@ export function PageSignals() {
     }
   };
 
+  // Sort mode lives in the URL (?sort=...), not React state — useSearchParams() is
+  // already reactive, so there's no separate state to drift out of sync with it. Falls
+  // back to "recent" for anything missing or unrecognized.
+  const rawSort = searchParams.get("sort");
+  const sortMode: SortMode = (SORT_VALUES.includes(rawSort ?? "") ? rawSort : "recent") as SortMode;
+
+  const onSortChange = (mode: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("sort", mode);
+    router.replace(`/signals?${params.toString()}`);
+  };
+
   const filtered = filter === "All" ? signals : signals.filter((s) => s.category === filter);
+  const sortedFiltered = sortSignals(filtered, sortMode);
   const unscoredCount = signals.filter((s) => s.impact == null || s.uncertainty == null).length;
 
   // Detail-modal editing (in place, not a separate dialog) — see the detail modal below.
@@ -320,9 +361,19 @@ export function PageSignals() {
             </div>
           </div>
           <div className="flex gap-2">
-            <Button variant="ghost" size="sm">
-              <Icons.Filter size={12} /> Sort
-            </Button>
+            <Select value={sortMode} onValueChange={onSortChange}>
+              <SelectTrigger className="h-8 w-auto gap-1.5 border-border px-2.5 text-xs">
+                <Icons.Filter size={12} />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SORT_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Button
               variant="soft"
               size="sm"
@@ -374,7 +425,7 @@ export function PageSignals() {
           </div>
         )}
         <div className="grid grid-cols-3 gap-3">
-          {filtered.map((s) => (
+          {sortedFiltered.map((s) => (
             <div
               key={s.id}
               onClick={() => setSelected(s)}

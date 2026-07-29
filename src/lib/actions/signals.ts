@@ -45,6 +45,11 @@ export async function createSignal(input: {
   impact?: number | null;
   uncertainty?: "Low" | "Medium" | "High" | null;
   origin?: SignalOrigin;
+  // Insight ids this signal is grounded in (e.g. from the Ask AI chat's suggested_signal,
+  // or the Knowledge Base merge-into-signal flow) — persisted to signal_insight_links.
+  // Failures here are logged, not thrown: the signal itself already inserted successfully
+  // and shouldn't be undone by a grounding-metadata problem (same call as suggestSignals).
+  groundedInsightIds?: string[];
 }): Promise<SignalRow> {
   const supabase = createClient();
   const { data, error } = await supabase
@@ -62,6 +67,14 @@ export async function createSignal(input: {
     .select()
     .single();
   if (error) throw error;
+
+  if (input.groundedInsightIds && input.groundedInsightIds.length > 0) {
+    const { error: linkError } = await supabase.from("signal_insight_links").insert(
+      input.groundedInsightIds.map((insightId) => ({ project_id: input.projectId, signal_id: data.id, insight_id: insightId }))
+    );
+    if (linkError) console.error("[signals] failed to persist grounded_in links", linkError);
+  }
+
   revalidatePath("/signals");
   return data;
 }

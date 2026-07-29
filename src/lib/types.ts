@@ -72,6 +72,7 @@ export interface Signal {
   impact: number | null;
   uncertainty: "Low" | "Medium" | "High" | null;
   body: string;
+  createdAt: string;
 }
 
 export interface Scenario {

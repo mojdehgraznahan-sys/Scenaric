@@ -1,12 +1,14 @@
 "use server";
 
-// §6 — Step 3: Driving forces (build order §14 item 4c Phase 2). Three calls:
+// §6 — Step 3: Driving forces (build order §14 item 4c Phase 2). Four calls:
 // suggestSignals (candidate generation from insights), scoreUnscoredSignals
-// (impact/uncertainty scoring for any signal missing either), and suggestSignalCategory
+// (impact/uncertainty scoring for any signal missing either), suggestSignalCategory
 // (single-item STEEP classification, used to pre-fill the category field when drafting a
 // new signal from a Knowledge Base insight — see page-signals.tsx's merge-into-signal
-// flow). Fires from the Signals Library's "Suggest signals" button, manually per-signal
-// via the "Score" action, or automatically when the merge modal opens.
+// flow), and askSignalsChat (the Signals Library's grounded "Ask AI" mode — see
+// ask-ai.tsx's context: "signals" path). Fires from the Signals Library's "Suggest
+// signals" button, manually per-signal via the "Score" action, automatically when the
+// merge modal opens, or from the Ask AI chat drawer on the Signals page.
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { runStructured, AIGenerationFailedError } from "@/lib/ai/client";
@@ -292,4 +294,123 @@ export async function suggestSignalCategory(input: { projectId: string; text: st
   });
 
   return output;
+}
+
+const SignalsChatSchema = z.object({
+  answer: z.string(),
+  suggested_signal: z
+    .object({
+      title: z.string(),
+      body: z.string(),
+      category: z.enum(["Social", "Technology", "Economic", "Ecological", "Political"]),
+      grounded_in: z.array(z.string()),
+      origin: z.enum(["insight", "external_pattern"]),
+    })
+    .optional(),
+  cites: z.array(z.string()),
+});
+
+const SIGNALS_CHAT_TASK_PROMPT = `Task: Answer the user's question about their Signals Library —
+grounded strictly in the driving-force signals and extracted insights already in this
+project. This is a narrower, signals-scoped variant of general project Q&A: do not
+reference scenarios, storyline, or indicators even if asked — those aren't available in
+this chat context, say so if asked about them.
+
+Input: { question: string, focal_question: string, industry: string, horizon: string,
+         existing_signals: [{id, title, category, impact, uncertainty}],
+         recent_insights: [{id, text, category}] }
+
+Rules:
+- Answer ONLY using the supplied signals and insights. Never invent a signal, statistic,
+  or macro trend not traceable to one of them.
+- If asked to suggest a signal about a topic, first check existing_signals for a semantic
+  duplicate (not just exact title match). If one exists, name it exactly as stored and
+  offer to strengthen it with new grounding instead of proposing a duplicate — do not
+  populate suggested_signal in that case.
+- If the question has no supporting evidence in recent_insights, say plainly that there
+  isn't a grounded insight for it yet, and suggest tagging/uploading a source under
+  Knowledge Base for that STEEP category — never fabricate one to answer anyway.
+- If you do propose a new signal, populate suggested_signal with grounded_in set to the
+  insight id(s) it's traceable to. If it names a well-established macro trend not present
+  in any insight, you may still propose it, but set origin: "external_pattern",
+  grounded_in: [], and say plainly in \`answer\` that this isn't from the project's own
+  data and should be reviewed before adding.
+- Keep \`answer\` under ~100 words unless the user explicitly asks for more depth.
+- \`cites\` lists the signal/insight ids the answer actually relied on.
+
+Output schema:
+{ answer: string,
+  suggested_signal?: { title: string, body: string,
+    category: "Social"|"Technology"|"Economic"|"Ecological"|"Political",
+    grounded_in: string[], origin: "insight"|"external_pattern" },
+  cites: string[] }`;
+
+export interface SignalsChatResult {
+  answer: string;
+  suggestedSignal?: {
+    title: string;
+    body: string;
+    category: SteepCategory;
+    groundedIn: string[];
+    origin: "insight" | "external_pattern";
+  };
+  cites: string[];
+}
+
+export async function askSignalsChat(input: { projectId: string; question: string }): Promise<SignalsChatResult> {
+  const supabase = createClient();
+
+  const { data: project, error: projectError } = await supabase
+    .from("projects")
+    .select("focal_question, refined_focal_question, industry, horizon")
+    .eq("id", input.projectId)
+    .single();
+  if (projectError) throw projectError;
+  const focalQuestion = project.refined_focal_question ?? project.focal_question;
+
+  const { data: existingSignals, error: signalsError } = await supabase
+    .from("signals")
+    .select("id, title, category, impact, uncertainty")
+    .eq("project_id", input.projectId);
+  if (signalsError) throw signalsError;
+
+  const { data: recentInsights, error: insightsError } = await supabase
+    .from("insights")
+    .select("id, text, category")
+    .eq("project_id", input.projectId)
+    .order("created_at", { ascending: false })
+    .limit(30);
+  if (insightsError) throw insightsError;
+
+  const output = await runStructured({
+    step: "signals.chat",
+    projectId: input.projectId,
+    taskPrompt: SIGNALS_CHAT_TASK_PROMPT,
+    input: {
+      question: input.question,
+      focal_question: focalQuestion,
+      industry: project.industry,
+      horizon: project.horizon,
+      existing_signals: existingSignals,
+      recent_insights: recentInsights,
+    },
+    schema: SignalsChatSchema,
+    effort: "medium",
+  });
+
+  return {
+    answer: output.answer,
+    cites: output.cites,
+    ...(output.suggested_signal
+      ? {
+          suggestedSignal: {
+            title: output.suggested_signal.title,
+            body: output.suggested_signal.body,
+            category: output.suggested_signal.category,
+            groundedIn: output.suggested_signal.grounded_in,
+            origin: output.suggested_signal.origin,
+          },
+        }
+      : {}),
+  };
 }

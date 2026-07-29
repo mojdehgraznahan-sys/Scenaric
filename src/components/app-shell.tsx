@@ -30,7 +30,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <TopBar page={page} navigate={navigate} />
         <div style={{ flex: 1, overflow: "hidden", display: "flex" }}>{children}</div>
       </div>
-      <AskAI />
+      <AskAI context={page === "signals" ? "signals" : undefined} />
       <GlobalToast navigate={navigate} />
     </div>
   );

@@ -132,6 +132,7 @@ function toSignal(row: SignalRow): Signal {
     body: row.body,
     impact: row.impact,
     uncertainty: row.uncertainty,
+    createdAt: row.created_at,
   };
 }
 
@@ -177,6 +178,7 @@ export interface Store {
     impact?: number | null;
     uncertainty?: "Low" | "Medium" | "High" | null;
     origin?: SignalOrigin;
+    groundedInsightIds?: string[];
   }) => Promise<Signal>;
   updateSignal: (input: {
     id: string;
@@ -429,6 +431,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       impact?: number | null;
       uncertainty?: "Low" | "Medium" | "High" | null;
       origin?: SignalOrigin;
+      groundedInsightIds?: string[];
     }) => {
       const row = await createSignalAction(input);
       await refreshSignals(input.projectId);

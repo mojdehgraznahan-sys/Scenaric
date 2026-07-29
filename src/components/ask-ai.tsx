@@ -1,19 +1,40 @@
 "use client";
 
 // Floating "Ask AI" launcher + chat drawer — available on every app page.
-// Faithful Tailwind/shadcn port of the handoff ask-ai.jsx (canned-reply demo chat).
+// Faithful Tailwind/shadcn port of the handoff ask-ai.jsx (canned-reply demo chat), now
+// with one real path: context="signals" (passed from app-shell.tsx when on the Signals
+// page) calls askSignalsChat for real, grounded answers instead of picking a canned
+// reply. Every other page keeps the original canned-reply behavior untouched.
 import * as React from "react";
 import { Icons } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
+import { Chip } from "@/components/chip";
 import { cn } from "@/lib/utils";
+import { useStore } from "@/lib/store";
+import { askSignalsChat, type SignalsChatResult } from "@/lib/actions/ai-signals";
+import { AIGenerationFailedError } from "@/lib/ai/errors";
 
 interface ChatMsg {
   role: "ai" | "user";
   text: string;
+  suggestedSignal?: SignalsChatResult["suggestedSignal"];
+  cites?: string[];
+  // Set once "Add to Signals" succeeds, so the button can't fire twice.
+  added?: boolean;
+  // The project this suggestion was generated against — "Add to Signals" disables itself
+  // if the active project has since changed, rather than silently writing to the wrong one.
+  suggestedForProjectId?: string;
 }
 
 const INITIAL: ChatMsg[] = [
   { role: "ai", text: "Hi — I'm your AI Analyst. I've read your 12 sources and 5 interviews. Ask me anything about your scenarios." },
+];
+
+const SIGNALS_INITIAL: ChatMsg[] = [
+  {
+    role: "ai",
+    text: "Hi — ask me about your Signals Library. I'll only answer from the signals and insights already in this project, and I'll say so plainly if something isn't grounded yet.",
+  },
 ];
 
 const CANNED_REPLIES = [
@@ -31,31 +52,47 @@ const SUGGESTED = [
   "Summarise this week's signals",
 ];
 
+const SIGNALS_SUGGESTED = [
+  "What are my highest-impact signals?",
+  "Suggest a signal about supply chain risk",
+  "Which STEEP category has the least coverage?",
+  "Summarize my Economic signals",
+];
+
 function Dot({ delay = 0 }: { delay?: number }) {
   return <span className="h-1.5 w-1.5 rounded-full bg-text-3" style={{ animation: "blink 1.2s infinite ease-in-out", animationDelay: delay + "ms" }} />;
 }
 
-export function AskAI() {
+export function AskAI({ context }: { context?: "signals" }) {
+  const store = useStore();
   const [open, setOpen] = React.useState(false);
-  const [messages, setMessages] = React.useState<ChatMsg[]>(INITIAL);
+  const [messages, setMessages] = React.useState<ChatMsg[]>(context === "signals" ? SIGNALS_INITIAL : INITIAL);
   const [input, setInput] = React.useState("");
   const [thinking, setThinking] = React.useState(false);
   const scrollRef = React.useRef<HTMLDivElement>(null);
 
-  // Load persisted history after mount (SSR-safe).
+  const storageKey = context === "signals" ? "fm.askai.signals" : "fm.askai";
+
+  // Reload from this context's own storage slot whenever the context changes (e.g. the
+  // user navigates between the Signals page and everywhere else while the chat drawer's
+  // component instance stays mounted) — keeps real signals-grounded history from ever
+  // mixing with the general canned-reply thread.
   React.useEffect(() => {
     try {
-      const stored = localStorage.getItem("fm.askai");
-      if (stored) setMessages(JSON.parse(stored));
-    } catch {}
-  }, []);
+      const stored = localStorage.getItem(storageKey);
+      setMessages(stored ? JSON.parse(stored) : context === "signals" ? SIGNALS_INITIAL : INITIAL);
+    } catch {
+      setMessages(context === "signals" ? SIGNALS_INITIAL : INITIAL);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storageKey]);
 
   React.useEffect(() => {
     try {
-      localStorage.setItem("fm.askai", JSON.stringify(messages));
+      localStorage.setItem(storageKey, JSON.stringify(messages));
     } catch {}
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [messages, thinking]);
+  }, [messages, thinking, storageKey]);
 
   // Keyboard shortcut: ⌘/Ctrl + I to toggle, Esc to close.
   React.useEffect(() => {
@@ -70,18 +107,68 @@ export function AskAI() {
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
-  const send = (text?: string) => {
+  const send = async (text?: string) => {
     const t = (text || input).trim();
     if (!t) return;
     setMessages((m) => [...m, { role: "user", text: t }]);
     setInput("");
     setThinking(true);
+
+    if (context === "signals") {
+      const projectId = store.activeProjectId;
+      if (!projectId) {
+        setMessages((m) => [...m, { role: "ai", text: "No active project — open a project first." }]);
+        setThinking(false);
+        return;
+      }
+      try {
+        const result = await askSignalsChat({ projectId, question: t });
+        setMessages((m) => [
+          ...m,
+          { role: "ai", text: result.answer, suggestedSignal: result.suggestedSignal, cites: result.cites, suggestedForProjectId: projectId },
+        ]);
+      } catch (err) {
+        console.error("[ask-ai] signals chat failed", err);
+        const text =
+          err instanceof AIGenerationFailedError
+            ? "Couldn't get a grounded answer right now — try rephrasing or ask again in a moment."
+            : "Something went wrong answering that — try again.";
+        setMessages((m) => [...m, { role: "ai", text }]);
+      } finally {
+        setThinking(false);
+      }
+      return;
+    }
+
     setTimeout(() => {
       const reply = CANNED_REPLIES[Math.floor(Math.random() * CANNED_REPLIES.length)];
       setMessages((m) => [...m, { role: "ai", text: reply }]);
       setThinking(false);
     }, 900 + Math.random() * 500);
   };
+
+  const onAddSignal = async (index: number) => {
+    const msg = messages[index];
+    const suggestion = msg.suggestedSignal;
+    if (!suggestion || msg.added || msg.suggestedForProjectId !== store.activeProjectId) return;
+    try {
+      await store.createSignal({
+        projectId: store.activeProjectId!,
+        category: suggestion.category,
+        source: "Ask AI",
+        title: suggestion.title,
+        body: suggestion.body,
+        origin: suggestion.origin,
+        groundedInsightIds: suggestion.groundedIn,
+      });
+      setMessages((m) => m.map((msg, i) => (i === index ? { ...msg, added: true } : msg)));
+    } catch (err) {
+      console.error("[ask-ai] failed to add suggested signal", err);
+    }
+  };
+
+  const suggested = context === "signals" ? SIGNALS_SUGGESTED : SUGGESTED;
+  const emptyGreetingCount = context === "signals" ? SIGNALS_INITIAL.length : INITIAL.length;
 
   return (
     <>
@@ -111,7 +198,9 @@ export function AskAI() {
               </span>
               <div className="flex-1">
                 <div className="text-sm font-semibold tracking-[-0.01em]">Ask AI</div>
-                <div className="font-mono text-[11px] tracking-[0.04em] text-text-3">ANALYST · READING APAC EXPANSION 2030</div>
+                <div className="font-mono text-[11px] tracking-[0.04em] text-text-3">
+                  {context === "signals" ? "SIGNALS MODE · GROUNDED IN YOUR SIGNALS" : "ANALYST · READING APAC EXPANSION 2030"}
+                </div>
               </div>
               <button
                 onClick={() => setMessages([{ role: "ai", text: "Cleared. What would you like to explore?" }])}
@@ -136,6 +225,38 @@ export function AskAI() {
                   )}
                 >
                   {m.text}
+                  {m.suggestedSignal && (
+                    <div className="mt-2.5 rounded-[10px] border border-border bg-white p-3 text-brand-dark">
+                      <div className="mb-1.5 flex items-center justify-between gap-2">
+                        <Chip category={m.suggestedSignal.category} />
+                        <span
+                          className={cn(
+                            "inline-flex items-center rounded px-[7px] py-0.5 text-[10px] font-semibold uppercase tracking-[0.04em]",
+                            m.suggestedSignal.groundedIn.length > 0 ? "bg-[#ECFDF5] text-[#065F46]" : "bg-brand-orangeLight text-brand-orange700"
+                          )}
+                        >
+                          {m.suggestedSignal.groundedIn.length > 0
+                            ? `Grounded in ${m.suggestedSignal.groundedIn.length} insight${m.suggestedSignal.groundedIn.length === 1 ? "" : "s"}`
+                            : "External pattern — review before adding"}
+                        </span>
+                      </div>
+                      <div className="mb-1 text-[13px] font-semibold leading-[1.3]">{m.suggestedSignal.title}</div>
+                      <div className="mb-2.5 text-[12.5px] leading-[1.5] text-muted-foreground">{m.suggestedSignal.body}</div>
+                      <Button
+                        variant={m.added ? "ghost" : "soft"}
+                        size="sm"
+                        className="w-full"
+                        disabled={m.added || m.suggestedForProjectId !== store.activeProjectId}
+                        onClick={() => onAddSignal(i)}
+                      >
+                        {m.added
+                          ? "Added to Signals ✓"
+                          : m.suggestedForProjectId !== store.activeProjectId
+                            ? "Switched projects — can't add"
+                            : "+ Add to Signals"}
+                      </Button>
+                    </div>
+                  )}
                 </div>
               ))}
               {thinking && (
@@ -146,10 +267,10 @@ export function AskAI() {
                 </div>
               )}
 
-              {messages.length <= 1 && (
+              {messages.length <= emptyGreetingCount && (
                 <div className="mt-2 flex flex-col gap-1.5">
                   <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">SUGGESTED</div>
-                  {SUGGESTED.map((s) => (
+                  {suggested.map((s) => (
                     <button
                       key={s}
                       onClick={() => send(s)}
