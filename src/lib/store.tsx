@@ -32,12 +32,16 @@ import {
   type SuggestSignalsResult,
   type ScoreSignalsResult,
 } from "./actions/ai-signals";
+import { getMatrixData, updateMatrixDotPosition as updateMatrixDotPositionAction, type MatrixDotData } from "./actions/matrix";
+import { classifyMatrixBuckets, reclassifySignal } from "./actions/ai-matrix";
+import { buildScenarios as buildScenariosAction, type AxisInput, type BuildScenariosResult } from "./actions/ai-scenarios";
 import type {
   ScenaricData,
   Project,
   ProjectSummary,
   Signal,
   SteepCategory,
+  Quadrant,
   MatrixDot,
   Scenario,
   Indicator,
@@ -136,6 +140,32 @@ function toSignal(row: SignalRow): Signal {
   };
 }
 
+function toMatrixDot(d: MatrixDotData): MatrixDot {
+  return {
+    id: d.signalId,
+    sigId: d.signalId,
+    x: d.x,
+    y: d.y,
+    label: d.label,
+    color: d.color,
+    category: d.signal.category,
+    bucket: d.bucket,
+  };
+}
+
+function toScenario(row: BuildScenariosResult["scenarios"][number]): Scenario {
+  return {
+    id: row.id,
+    name: row.name,
+    quadrant: row.quadrant,
+    color: row.color || "#9CA3AF",
+    tagline: row.tagline || "",
+    summary: row.summary || "",
+    narrative: row.narrative || "",
+    archived: row.is_archived,
+  };
+}
+
 export interface Store {
   seed: ScenaricData;
   authed: boolean;
@@ -192,12 +222,26 @@ export interface Store {
   deleteSignal: (id: string) => Promise<void>;
   suggestSignals: (projectId: string) => Promise<SuggestSignalsResult>;
   scoreUnscoredSignals: (projectId: string) => Promise<ScoreSignalsResult>;
+  scoreSignal: (projectId: string, signalId: string) => Promise<void>;
   matrixDots: MatrixDot[];
   setMatrixDots: (v: MatrixDot[]) => void;
+  matrixDotsLoading: boolean;
+  pendingScoringCount: number;
+  pendingScoringIds: string[];
+  refreshMatrixData: (projectId: string) => Promise<void>;
+  updateMatrixDotPosition: (projectId: string, signalId: string, x: number, y: number) => Promise<void>;
   selectedDot: string;
   setSelectedDot: (v: string) => void;
   scenarios: Scenario[];
   setScenarios: (v: Scenario[]) => void;
+  buildScenarios: (input: {
+    projectId: string;
+    axisA: AxisInput;
+    axisB: AxisInput;
+    independenceState: "independent" | "correlated" | "uncertain";
+    independenceRationale?: string[];
+    requestedNames?: Partial<Record<Quadrant, string>>;
+  }) => Promise<{ scenarios: Scenario[] }>;
   indicators: Indicator[];
   setIndicators: (v: Indicator[]) => void;
   strategies: Strategy[];
@@ -458,6 +502,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }) => {
       const row = await updateSignalAction(input);
       if (activeProjectId) await refreshSignals(activeProjectId);
+      // Self-heals a signal left unscored (e.g. a swallowed AIGenerationFailedError at
+      // creation time) — mirrors createSignal's fire-and-forget scoring above.
+      if (activeProjectId && (row.impact == null || row.uncertainty == null)) {
+        scoreOneSignal(activeProjectId, row.id)
+          .then(() => refreshSignals(activeProjectId))
+          .catch((err) => console.error("[store] auto-score failed for edited signal", err));
+      }
       return toSignal(row);
     },
     [activeProjectId, refreshSignals]
@@ -489,8 +540,71 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [refreshSignals]
   );
 
+  // ---- Matrix (real, Supabase) — Matrix backend build, Step 4 (§7) ----
+  const [matrixDots, setMatrixDots] = useState<MatrixDot[]>([]);
+  const [matrixDotsLoading, setMatrixDotsLoading] = useState(true);
+  const [pendingScoringCount, setPendingScoringCount] = useState(0);
+  const [pendingScoringIds, setPendingScoringIds] = useState<string[]>([]);
+
+  const refreshMatrixData = useCallback(async (projectId: string) => {
+    // getMatrixData first — it auto-positions any newly-scored signal, which classification
+    // depends on (classifyMatrixBuckets only ever UPDATEs an existing matrix_dots row, never
+    // inserts one). Classify is best-effort: a failed classification leaves that signal's
+    // bucket null (an honest, valid "not yet classified" state) rather than blocking the
+    // whole page load — matches classifyMatrixBuckets' own per-signal failure tolerance.
+    await getMatrixData(projectId);
+    await classifyMatrixBuckets(projectId).catch((err) => console.error("[store] bucket classification failed", err));
+    const result = await getMatrixData(projectId);
+    setMatrixDots(result.dots.map(toMatrixDot));
+    setPendingScoringCount(result.pendingScoringCount);
+    setPendingScoringIds(result.pendingScoringIds);
+  }, []);
+
+  useEffect(() => {
+    if (!activeProjectId) {
+      setMatrixDots([]);
+      setPendingScoringCount(0);
+      setPendingScoringIds([]);
+      setMatrixDotsLoading(false);
+      return;
+    }
+    setMatrixDotsLoading(true);
+    refreshMatrixData(activeProjectId)
+      .catch((err) => console.error("[store] failed to load matrix data", err))
+      .finally(() => setMatrixDotsLoading(false));
+  }, [activeProjectId, refreshMatrixData]);
+
+  // On-demand single-signal scoring — Signals Library's "Add to Matrix" on an unscored
+  // signal. Unlike createSignal/updateSignal's fire-and-forget scoring, this awaits and lets
+  // AIGenerationFailedError propagate: the caller navigates to the Matrix only on success, so
+  // it needs to know whether scoring actually landed. Also refreshes matrixDots (not just
+  // signals) — matrixDots only auto-refreshes on activeProjectId changes, not on route
+  // navigation, so without this a signal scored here wouldn't have a dot yet by the time the
+  // Matrix page reads store.matrixDots if that state had already been loaded earlier.
+  const scoreSignal = useCallback(
+    async (projectId: string, signalId: string) => {
+      await scoreOneSignal(projectId, signalId);
+      await Promise.all([refreshSignals(projectId), refreshMatrixData(projectId)]);
+    },
+    [refreshSignals, refreshMatrixData]
+  );
+
+  const updateMatrixDotPosition = useCallback(
+    async (projectId: string, signalId: string, x: number, y: number) => {
+      await updateMatrixDotPositionAction(projectId, signalId, x, y);
+      // The position update already cleared the now-stale bucket to null (matrix.ts can't
+      // determine Wildcard membership itself — that's a content judgment). Reclassify this
+      // one signal immediately rather than waiting for the next full-page classify sweep, so
+      // the dot doesn't sit bucket-less after a drag the user just watched happen.
+      // Best-effort: on failure it's left null, same honest "not yet classified" state as
+      // any other unclassified signal, not a broken drag interaction.
+      await reclassifySignal(projectId, signalId).catch((err) => console.error("[store] reclassify after drag failed", err));
+      await refreshMatrixData(projectId);
+    },
+    [refreshMatrixData]
+  );
+
   // ---- Everything below this line is still localStorage-simulated (later build-order steps) ----
-  const [matrixDots, setMatrixDots] = usePersistentState("fm.matrix", seed.matrix_dots);
   const [selectedDot, setSelectedDot] = useState("d2");
   const [scenarios, setScenarios] = usePersistentState("fm.scenarios", seed.scenarios);
   const [indicators, setIndicators] = usePersistentState("fm.indicators", seed.indicators);
@@ -500,6 +614,29 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     ["sg2", "sg4"] // AI Adoption, US-China decoupling
   );
   const [navCollapsed, setNavCollapsed] = usePersistentState("fm.navCollapsed", false);
+
+  // buildScenarios ("Build Scenario Matrix" confirm) is real, Supabase-backed (Step 5, §8) —
+  // scenarios/criticalUncertainties above stay local-state containers so Canvas and the
+  // Re-axis flow (out of scope for this build) need zero changes; this just feeds them real
+  // data instead of the modal's previous 100%-client fabrication.
+  const buildScenarios = useCallback(
+    async (input: {
+      projectId: string;
+      axisA: AxisInput;
+      axisB: AxisInput;
+      independenceState: "independent" | "correlated" | "uncertain";
+      independenceRationale?: string[];
+      requestedNames?: Partial<Record<Quadrant, string>>;
+    }) => {
+      const result = await buildScenariosAction(input);
+      const mapped = result.scenarios.map(toScenario);
+      setScenarios(mapped);
+      setCriticalUncertainties([input.axisA.signalId, input.axisB.signalId]);
+      await refreshMatrixData(input.projectId);
+      return { scenarios: mapped };
+    },
+    [setScenarios, setCriticalUncertainties, refreshMatrixData]
+  );
 
   const store: Store = {
     seed,
@@ -532,12 +669,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     deleteSignal,
     suggestSignals,
     scoreUnscoredSignals,
+    scoreSignal,
     matrixDots,
     setMatrixDots,
+    matrixDotsLoading,
+    pendingScoringCount,
+    pendingScoringIds,
+    refreshMatrixData,
+    updateMatrixDotPosition,
     selectedDot,
     setSelectedDot,
     scenarios,
     setScenarios,
+    buildScenarios,
     indicators,
     setIndicators,
     strategies,
@@ -547,8 +691,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     navCollapsed,
     setNavCollapsed,
     reset: () => {
-      ["fm.accountType", "fm.onb", "fm.matrix", "fm.scenarios", "fm.indicators", "fm.strategies", "fm.cu"].forEach(
-        (k) => window.localStorage.removeItem(k)
+      ["fm.accountType", "fm.onb", "fm.scenarios", "fm.indicators", "fm.strategies", "fm.cu"].forEach((k) =>
+        window.localStorage.removeItem(k)
       );
       supabase.auth.signOut().finally(() => {
         window.location.href = "/";

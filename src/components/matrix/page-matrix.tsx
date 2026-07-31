@@ -6,7 +6,15 @@
 // distance lets a plain click (no drag) select a top-right candidate as a scenario axis.
 // Dynamic values (dot left/top %, color, dnd transform) stay inline; everything else
 // is Tailwind utilities + tokens.
+//
+// Matrix backend build (Step 4-5, §7-§8): dots/signals are now real (store.matrixDots,
+// store.signals) instead of the seed dataset — a dot's position is derived server-side from
+// the signal's AI-scored (or user-overridden) impact/uncertainty. The Critical-Uncertainties
+// panel is ranked by the real axis-candidates backend rather than raw insertion order, and
+// the orthogonality check is a real AI call (see independence-assessment.tsx) instead of the
+// old client-side hash.
 import * as React from "react";
+import { useSearchParams } from "next/navigation";
 import {
   DndContext,
   PointerSensor,
@@ -21,6 +29,8 @@ import { Icons } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 import type { MatrixDot, Signal } from "@/lib/types";
 import type { Navigate } from "@/lib/use-navigate";
+import { getAxisCandidates, type MatrixDotData } from "@/lib/actions/matrix";
+import { checkAxisIndependence, type IndependenceResult } from "@/lib/actions/ai-matrix";
 import { MethodologyInfo } from "./methodology-info";
 import { IndependenceAssessment } from "./independence-assessment";
 import { ScenarioPreview } from "./scenario-preview";
@@ -31,11 +41,9 @@ import { ScenarioContextHeader } from "../storyline/scenario-context-header";
 type DotState = "axis" | "candidate" | "predetermined" | "other";
 
 function dotState(d: MatrixDot, critical: string[]): DotState {
-  const inCritical = d.x > 50 && d.y < 50; // top-right
-  const inPredet = d.x <= 50 && d.y < 50; // top-left
   if (critical.includes(d.sigId)) return "axis";
-  if (inCritical) return "candidate";
-  if (inPredet) return "predetermined";
+  if (d.bucket === "critical_uncertainty") return "candidate";
+  if (d.bucket === "predetermined") return "predetermined";
   return "other";
 }
 
@@ -112,24 +120,83 @@ function Dot({
 
 export function PageMatrix({ navigate }: { navigate: Navigate }) {
   const store = useStore();
-  const seed = store.seed;
+  const searchParams = useSearchParams();
+  // /matrix?focus={signalId} — see src/components/page-signals.tsx's "+ Add to Matrix".
+  // Dot id *is* the signal id (see store.tsx's toMatrixDot), so this matches directly.
+  const focusId = searchParams.get("focus");
   const [dots, setDots] = React.useState<MatrixDot[]>(store.matrixDots);
-  const [selectedId, setSelectedId] = React.useState<string>(store.selectedDot || dots[0]?.id);
+  const [selectedId, setSelectedId] = React.useState<string>("");
   const [critical, setCritical] = React.useState<string[]>(store.criticalUncertainties);
   const matrixRef = React.useRef<HTMLDivElement>(null);
   const draggedRef = React.useRef(false);
 
+  // store.matrixDots is now the server-fetched source of truth — resync whenever it changes
+  // (initial load, after a persisted drag, after scoring completes elsewhere).
   React.useEffect(() => {
-    store.setMatrixDots(dots);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dots]);
+    setDots(store.matrixDots);
+  }, [store.matrixDots]);
+
+  React.useEffect(() => {
+    if (selectedId || dots.length === 0) return;
+    // Prefer the focused signal (arrived via "+ Add to Matrix") if it's actually loaded;
+    // degrades silently to the first dot otherwise — same as a stale mergeInsight id.
+    const focused = focusId && dots.find((d) => d.id === focusId);
+    setSelectedId(focused ? focused.id : dots[0].id);
+  }, [dots, selectedId, focusId]);
+
   React.useEffect(() => {
     store.setCriticalUncertainties(critical);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [critical]);
 
+  // Ranked axis candidates (real backend — impact * uncertainty weight, Critical quadrant
+  // only). Re-fetched whenever the dot set changes (drag, rescoring, initial load).
+  const [candidates, setCandidates] = React.useState<MatrixDotData[]>([]);
+  React.useEffect(() => {
+    if (!store.activeProjectId) {
+      setCandidates([]);
+      return;
+    }
+    let cancelled = false;
+    getAxisCandidates(store.activeProjectId)
+      .then((result) => {
+        if (!cancelled) setCandidates(result);
+      })
+      .catch((err) => console.error("[matrix] failed to load axis candidates", err));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.activeProjectId, dots]);
+
+  // Orthogonality check (real AI call) once exactly 2 critical signals are selected.
+  const [independence, setIndependence] = React.useState<IndependenceResult | null>(null);
+  const [independenceLoading, setIndependenceLoading] = React.useState(false);
+  React.useEffect(() => {
+    if (critical.length !== 2 || !store.activeProjectId) {
+      setIndependence(null);
+      return;
+    }
+    let cancelled = false;
+    setIndependenceLoading(true);
+    checkAxisIndependence({ projectId: store.activeProjectId, axisASignalId: critical[0], axisBSignalId: critical[1] })
+      .then((result) => {
+        if (!cancelled) setIndependence(result);
+      })
+      .catch((err) => {
+        console.error("[matrix] independence check failed", err);
+        if (!cancelled) setIndependence(null);
+      })
+      .finally(() => {
+        if (!cancelled) setIndependenceLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [critical, store.activeProjectId]);
+
   const selectedDot = dots.find((d) => d.id === selectedId);
-  const selectedSignal = selectedDot ? seed.signals.find((s) => s.id === selectedDot.sigId) : null;
+  const selectedSignal = selectedDot ? store.signals.find((s) => s.id === selectedDot.sigId) : null;
   const [reaxisOpen, setReaxisOpen] = React.useState(false);
   const [buildOpen, setBuildOpen] = React.useState(false);
   const hasScenarios = (store.scenarios || []).some((s) => !s.archived);
@@ -147,16 +214,25 @@ export function PageMatrix({ navigate }: { navigate: Navigate }) {
 
   const onDragEnd = (e: DragEndEvent) => {
     const rect = matrixRef.current?.getBoundingClientRect();
+    const signalId = String(e.active.id); // dot.id is the signal id (see store.tsx's toMatrixDot)
     if (rect) {
-      const id = String(e.active.id);
+      let newX = 0;
+      let newY = 0;
       setDots((prev) =>
         prev.map((d) => {
-          if (d.id !== id) return d;
+          if (d.id !== signalId) return d;
           const x = Math.max(2, Math.min(98, d.x + (e.delta.x / rect.width) * 100));
           const y = Math.max(2, Math.min(98, d.y + (e.delta.y / rect.height) * 100));
+          newX = x;
+          newY = y;
           return { ...d, x, y };
         })
       );
+      if (store.activeProjectId) {
+        store.updateMatrixDotPosition(store.activeProjectId, signalId, newX, newY).catch((err) => {
+          console.error("[matrix] failed to persist dot position", err);
+        });
+      }
     }
     // Release click-suppression after the synthetic click fires.
     setTimeout(() => {
@@ -164,18 +240,18 @@ export function PageMatrix({ navigate }: { navigate: Navigate }) {
     }, 0);
   };
 
-  // Click on a dot: select it; a click (not a drag) on a top-right candidate marks it
-  // as an axis (max 2).
+  // Click on a dot: select it; a click (not a drag) on a Critical Uncertainties candidate
+  // marks it as an axis (max 2).
   const handleDotSelect = (id: string) => {
     if (draggedRef.current) return;
     setSelectedId(id);
     const d = dots.find((x) => x.id === id);
-    if (d && d.x > 50 && d.y < 50 && !critical.includes(d.sigId) && critical.length < 2) {
+    if (d && d.bucket === "critical_uncertainty" && !critical.includes(d.sigId) && critical.length < 2) {
       setCritical((prev) => (prev.length < 2 ? [...prev, d.sigId] : prev));
     }
   };
 
-  const criticalSignals = critical.map((id) => seed.signals.find((s) => s.id === id)).filter(Boolean) as Signal[];
+  const criticalSignals = critical.map((id) => store.signals.find((s) => s.id === id)).filter(Boolean) as Signal[];
 
   return (
     <div className="scroll-y flex-1 overflow-y-auto p-5">
@@ -193,6 +269,13 @@ export function PageMatrix({ navigate }: { navigate: Navigate }) {
             Build Scenario Matrix <Icons.ArrowRight size={12} />
           </button>
         </div>
+
+        {store.pendingScoringCount > 0 && (
+          <div className="mb-3.5 rounded-[9px] border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2.5 text-[12.5px] text-[#92400E]">
+            {store.pendingScoringCount} signal{store.pendingScoringCount === 1 ? "" : "s"} need
+            {store.pendingScoringCount === 1 ? "s" : ""} scoring before ranking.
+          </div>
+        )}
 
         <div className="grid grid-cols-[1fr_260px] gap-3.5">
           {/* Matrix */}
@@ -233,7 +316,7 @@ export function PageMatrix({ navigate }: { navigate: Navigate }) {
 
                 {/* Dots */}
                 {dots.map((d) => {
-                  const sig = seed.signals.find((s) => s.id === d.sigId);
+                  const sig = store.signals.find((s) => s.id === d.sigId);
                   return <Dot key={d.id} dot={d} sig={sig} state={dotState(d, critical)} onSelect={handleDotSelect} />;
                 })}
               </div>
@@ -301,45 +384,45 @@ export function PageMatrix({ navigate }: { navigate: Navigate }) {
                 <span className="text-[11px] text-[#9A3412]">Select 2 as scenario axes</span>
                 <MethodologyInfo />
               </div>
-              {dots
-                .filter((d) => d.x > 50 && d.y < 50)
-                .map((d) => {
-                  const sig = seed.signals.find((s) => s.id === d.sigId);
-                  const isOn = critical.includes(d.sigId);
-                  return (
-                    <CriticalUncertaintyRow
-                      key={d.id}
-                      dot={d}
-                      sig={sig}
-                      isOn={isOn}
-                      atCapacity={critical.length >= 2 && !isOn}
-                      currentPicks={critical.map((id) => {
-                        const cd = dots.find((x) => x.sigId === id);
-                        const cs = cd && seed.signals.find((s) => s.id === cd.sigId);
-                        return { sigId: id, title: (cs && cs.title) || (cd && cd.label) || id };
-                      })}
-                      onToggle={() => {
-                        setCritical((prev) =>
-                          prev.includes(d.sigId)
-                            ? prev.filter((x) => x !== d.sigId)
-                            : prev.length < 2
-                              ? [...prev, d.sigId]
-                              : prev
-                        );
-                      }}
-                      onReplace={(removeId) => {
-                        setCritical((prev) => [...prev.filter((x) => x !== removeId), d.sigId]);
-                      }}
-                      onViewStoryline={() => navigate("/storyline")}
-                    />
-                  );
-                })}
-              {dots.filter((d) => d.x > 50 && d.y < 50).length === 0 && (
+              {candidates.map((c) => {
+                const dot = dots.find((d) => d.sigId === c.signalId);
+                const sig = store.signals.find((s) => s.id === c.signalId);
+                if (!dot) return null;
+                const isOn = critical.includes(c.signalId);
+                return (
+                  <CriticalUncertaintyRow
+                    key={dot.id}
+                    dot={dot}
+                    sig={sig}
+                    isOn={isOn}
+                    atCapacity={critical.length >= 2 && !isOn}
+                    currentPicks={critical.map((id) => {
+                      const cs = store.signals.find((s) => s.id === id);
+                      const cd = dots.find((x) => x.sigId === id);
+                      return { sigId: id, title: (cs && cs.title) || (cd && cd.label) || id };
+                    })}
+                    onToggle={() => {
+                      setCritical((prev) =>
+                        prev.includes(c.signalId)
+                          ? prev.filter((x) => x !== c.signalId)
+                          : prev.length < 2
+                            ? [...prev, c.signalId]
+                            : prev
+                      );
+                    }}
+                    onReplace={(removeId) => {
+                      setCritical((prev) => [...prev.filter((x) => x !== removeId), c.signalId]);
+                    }}
+                    onViewStoryline={() => navigate("/storyline")}
+                  />
+                );
+              })}
+              {candidates.length === 0 && (
                 <div className="py-2 text-[11.5px] text-text-3">Drag signals into the top-right to mark as critical.</div>
               )}
 
               {/* Orthogonality assessment — only with exactly 2 axes */}
-              <IndependenceAssessment signals={criticalSignals} library={seed.signals} />
+              <IndependenceAssessment result={independence} loading={independenceLoading} />
 
               {/* Live 2×2 scenario preview */}
               <ScenarioPreview signals={criticalSignals} />
@@ -350,9 +433,9 @@ export function PageMatrix({ navigate }: { navigate: Navigate }) {
                 <span className="text-xs font-semibold text-[#1D4ED8]">Predetermined</span>
               </div>
               {dots
-                .filter((d) => d.x <= 50 && d.y < 50)
+                .filter((d) => d.bucket === "predetermined")
                 .map((d) => {
-                  const sig = seed.signals.find((s) => s.id === d.sigId);
+                  const sig = store.signals.find((s) => s.id === d.sigId);
                   return (
                     <div key={d.id} className="flex items-center gap-2 py-1.5 text-xs text-brand-dark">
                       <span className="h-2 w-2 rounded-full" style={{ background: d.color }} />
@@ -360,7 +443,7 @@ export function PageMatrix({ navigate }: { navigate: Navigate }) {
                     </div>
                   );
                 })}
-              {dots.filter((d) => d.x <= 50 && d.y < 50).length === 0 && (
+              {dots.filter((d) => d.bucket === "predetermined").length === 0 && (
                 <div className="py-1 text-[11.5px] text-[#1D4ED8]">No predetermined forces yet.</div>
               )}
             </div>
@@ -380,7 +463,12 @@ export function PageMatrix({ navigate }: { navigate: Navigate }) {
       {/* Re-axis migration modal (when scenarios already exist) */}
       <ReAxisModal open={reaxisOpen} onClose={() => setReaxisOpen(false)} navigate={navigate} />
       {/* Build scenarios modal (first-time creation) */}
-      <BuildScenariosModal open={buildOpen} onClose={() => setBuildOpen(false)} navigate={navigate} />
+      <BuildScenariosModal
+        open={buildOpen}
+        onClose={() => setBuildOpen(false)}
+        navigate={navigate}
+        independence={independence}
+      />
     </div>
   );
 }

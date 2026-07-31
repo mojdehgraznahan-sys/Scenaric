@@ -1,10 +1,13 @@
 "use client";
 
-// Orthogonality assessment panel — Tailwind/token-driven.
+// Orthogonality assessment panel — Tailwind/token-driven. Purely presentational: the real
+// AI-backed check (checkAxisIndependence, replacing the old assessIndependence() hash stub)
+// runs in page-matrix.tsx and is passed down as `result`/`loading`.
 import * as React from "react";
-import type { Signal } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { assessIndependence, type AssessState } from "./axis-data";
+import type { IndependenceResult } from "@/lib/actions/ai-matrix";
+
+type AssessState = IndependenceResult["state"];
 
 interface Theme {
   wrap: string; // bg + border color (literal classes for JIT)
@@ -54,8 +57,7 @@ const THEME: Record<AssessState, Theme> = {
   },
 };
 
-export function IndependenceAssessment({ signals, library }: { signals: Signal[]; library: Signal[] }) {
-  const result = assessIndependence(signals, library);
+export function IndependenceAssessment({ result, loading }: { result: IndependenceResult | null; loading: boolean }) {
   const [open, setOpen] = React.useState(false);
   const [mounted, setMounted] = React.useState(false);
 
@@ -68,6 +70,14 @@ export function IndependenceAssessment({ signals, library }: { signals: Signal[]
     setOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result ? result.state : null, !!result]);
+
+  if (loading) {
+    return (
+      <div className="mt-2.5 rounded-[10px] border border-border bg-bg p-3 text-xs text-muted-foreground">
+        Checking whether these axes are independent…
+      </div>
+    );
+  }
 
   if (!result) return null;
 

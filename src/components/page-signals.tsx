@@ -17,6 +17,7 @@ import { useNavigate } from "@/lib/use-navigate";
 import { getInsight, type InsightRow } from "@/lib/actions/insights";
 import { getSource } from "@/lib/actions/sources";
 import { suggestSignalCategory } from "@/lib/actions/ai-signals";
+import { AIGenerationFailedError } from "@/lib/ai/errors";
 import type { Signal, SteepCategory } from "@/lib/types";
 
 const STEEP_CATEGORIES: SteepCategory[] = ["Social", "Technology", "Economic", "Ecological", "Political"];
@@ -100,6 +101,8 @@ export function PageSignals() {
   const [submitting, setSubmitting] = React.useState(false);
   const [suggesting, setSuggesting] = React.useState(false);
   const [suggestResult, setSuggestResult] = React.useState<string | null>(null);
+  const [addingToMatrixId, setAddingToMatrixId] = React.useState<string | null>(null);
+  const [addToMatrixError, setAddToMatrixError] = React.useState<{ id: string; message: string } | null>(null);
 
   // "+ Merge into Signal" from a Knowledge Base insight card lands here as
   // /signals?mergeInsight={id} — see src/components/page-knowledge.tsx.
@@ -350,6 +353,32 @@ export function PageSignals() {
     }
   };
 
+  // "+ Add to Matrix": a scored signal is already on the Matrix automatically
+  // (getMatrixData auto-creates its dot) — jump straight to it. An unscored one isn't there
+  // yet, so score it first and only navigate once that actually lands; landing on the Matrix
+  // without the signal really being there would misrepresent what happened.
+  const onAddToMatrix = async (s: Signal) => {
+    if (s.impact != null && s.uncertainty != null) {
+      navigate(`/matrix?focus=${s.id}`);
+      return;
+    }
+    if (!store.activeProjectId) return;
+    setAddingToMatrixId(s.id);
+    setAddToMatrixError(null);
+    try {
+      await store.scoreSignal(store.activeProjectId, s.id);
+      navigate(`/matrix?focus=${s.id}`);
+    } catch (err) {
+      console.error("[signals] failed to score signal for Add to Matrix", err);
+      setAddToMatrixError({
+        id: s.id,
+        message: err instanceof AIGenerationFailedError ? "Scoring failed — try again." : "Couldn't add to Matrix — try again.",
+      });
+    } finally {
+      setAddingToMatrixId(null);
+    }
+  };
+
   return (
     <div className="scroll-y flex-1 overflow-y-auto p-5">
       <div className="rounded-xl border border-border bg-card p-[18px] shadow-card">
@@ -453,12 +482,13 @@ export function PageSignals() {
                   variant="soft"
                   size="sm"
                   className="flex-1"
+                  disabled={addingToMatrixId === s.id}
                   onClick={(e) => {
                     e.stopPropagation();
-                    navigate("/matrix");
+                    onAddToMatrix(s);
                   }}
                 >
-                  + Add to Matrix
+                  {addingToMatrixId === s.id ? "Adding…" : "+ Add to Matrix"}
                 </Button>
                 <Button
                   variant="ghost"
@@ -473,6 +503,9 @@ export function PageSignals() {
                   <Icons.Trash size={14} />
                 </Button>
               </div>
+              {addToMatrixError && addToMatrixError.id === s.id && (
+                <div className="text-[11px] text-[#DC2626]">{addToMatrixError.message}</div>
+              )}
             </div>
           ))}
         </div>

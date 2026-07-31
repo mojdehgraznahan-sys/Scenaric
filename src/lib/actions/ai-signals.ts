@@ -182,7 +182,14 @@ async function scoreSignalRow(
     schema: ScoreSignalSchema,
     effort: "low",
   });
-  const { error } = await supabase.from("signals").update({ impact: output.impact, uncertainty: output.uncertainty }).eq("id", signal.id);
+  // Records the AI score into ai_impact/ai_uncertainty (Matrix backend build, §7) as well
+  // as the effective impact/uncertainty columns every other feature already reads — this is
+  // always the first score for a signal (only ever called on rows missing a score), so
+  // there's no pre-existing user override here to preserve.
+  const { error } = await supabase
+    .from("signals")
+    .update({ impact: output.impact, uncertainty: output.uncertainty, ai_impact: output.impact, ai_uncertainty: output.uncertainty })
+    .eq("id", signal.id);
   if (error) throw error;
 }
 

@@ -1,4 +1,5 @@
 // Scenaric.ai data model — derived from the prototype data.js (window.FM_DATA)
+import type { MatrixBucket } from "./matrix-mapping";
 
 export type SteepCategory =
   | "Social"
@@ -96,6 +97,10 @@ export interface MatrixDot {
   color: string;
   category: SteepCategory;
   selected?: boolean;
+  // Schwartz zone — AI-classified and persisted server-side (ai-matrix.ts's
+  // classifyMatrixBuckets), never recomputed client-side. Null until classification has run
+  // for this signal (a real, valid intermediate state — see matrix.ts's MatrixDotData).
+  bucket: MatrixBucket | null;
 }
 
 export interface Indicator {

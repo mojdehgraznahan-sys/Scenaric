@@ -179,16 +179,19 @@ export const FM_DATA: ScenaricData = {
   // Quadrants used: TL Predetermined, TR Critical, BL Background, BR Wildcards
   quadrants: { TL: "Predetermined", TR: "Critical ★", BL: "Background", BR: "Wildcards" },
   matrix_dots: [
-    // x,y in 0..100 percent (0 = left/top, 100 = right/bottom)
-    { id: "d1", sigId: "sg1", x: 28, y: 30, label: "CO₂", color: "#EF4444", category: "Political" },
-    { id: "d2", sigId: "sg2", x: 56, y: 26, label: "AI", color: "#F97316", category: "Technology", selected: true },
-    { id: "d3", sigId: "sg4", x: 71, y: 18, label: "Geo", color: "#EF4444", category: "Political" },
-    { id: "d4", sigId: "sg3", x: 47, y: 36, label: "Z", color: "#8B5CF6", category: "Social" },
-    { id: "d5", sigId: "sg6", x: 33, y: 64, label: "Bio", color: "#14B8A6", category: "Ecological" },
-    { id: "d6", sigId: "sg9", x: 60, y: 70, label: "FX", color: "#10B981", category: "Economic" },
-    { id: "d7", sigId: "sg5", x: 38, y: 78, label: "M+", color: "#10B981", category: "Economic" },
-    { id: "d8", sigId: "sg7", x: 50, y: 82, label: "Mob", color: "#3B82F6", category: "Technology" },
-    { id: "d9", sigId: "sg8", x: 75, y: 42, label: "Tx", color: "#EF4444", category: "Political" },
+    // x,y in 0..100 percent (0 = left/top, 100 = right/bottom). bucket is normally
+    // AI-classified and persisted (ai-matrix.ts's classifyMatrixBuckets) — this seed array is
+    // demo-only (the real Matrix page always reads store.matrixDots, server-derived), so
+    // these are just plausible values satisfying the type, not real classifications.
+    { id: "d1", sigId: "sg1", x: 28, y: 30, label: "CO₂", color: "#EF4444", category: "Political", bucket: "critical_uncertainty" },
+    { id: "d2", sigId: "sg2", x: 56, y: 26, label: "AI", color: "#F97316", category: "Technology", selected: true, bucket: "background" },
+    { id: "d3", sigId: "sg4", x: 71, y: 18, label: "Geo", color: "#EF4444", category: "Political", bucket: "critical_uncertainty" },
+    { id: "d4", sigId: "sg3", x: 47, y: 36, label: "Z", color: "#8B5CF6", category: "Social", bucket: "background" },
+    { id: "d5", sigId: "sg6", x: 33, y: 64, label: "Bio", color: "#14B8A6", category: "Ecological", bucket: "critical_uncertainty" },
+    { id: "d6", sigId: "sg9", x: 60, y: 70, label: "FX", color: "#10B981", category: "Economic", bucket: "critical_uncertainty" },
+    { id: "d7", sigId: "sg5", x: 38, y: 78, label: "M+", color: "#10B981", category: "Economic", bucket: "predetermined" },
+    { id: "d8", sigId: "sg7", x: 50, y: 82, label: "Mob", color: "#3B82F6", category: "Technology", bucket: "background" },
+    { id: "d9", sigId: "sg8", x: 75, y: 42, label: "Tx", color: "#EF4444", category: "Political", bucket: "critical_uncertainty" },
   ],
   indicators: [
     { id: "in1", name: "ASEAN customs harmonisation milestone", scenario: "Pacific Connector", status: "Watch", trend: "+", note: "Target Q3 2026" },

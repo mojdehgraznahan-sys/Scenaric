@@ -8,7 +8,8 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 import type { Navigate } from "@/lib/use-navigate";
-import type { Quadrant, Scenario, SteepCategory } from "@/lib/types";
+import type { Quadrant, SteepCategory } from "@/lib/types";
+import type { IndependenceResult } from "@/lib/actions/ai-matrix";
 import { axisMeta } from "./axis-data";
 
 const QUAD_COLOR: Record<Quadrant, string> = { TL: "#3B82F6", TR: "#10B981", BL: "#EF4444", BR: "#F97316" };
@@ -47,7 +48,17 @@ interface FmWindow extends Window {
   FM_toast?: (opts: { message: string; actionText?: string; action?: string; duration?: number }) => void;
 }
 
-export function BuildScenariosModal({ open, onClose, navigate }: { open: boolean; onClose: () => void; navigate: Navigate }) {
+export function BuildScenariosModal({
+  open,
+  onClose,
+  navigate,
+  independence,
+}: {
+  open: boolean;
+  onClose: () => void;
+  navigate: Navigate;
+  independence: IndependenceResult | null;
+}) {
   const store = useStore();
   const signals = store.signals || store.seed.signals;
   const dots = store.matrixDots || [];
@@ -60,9 +71,10 @@ export function BuildScenariosModal({ open, onClose, navigate }: { open: boolean
   const [regen, setRegen] = React.useState(0);
   const [openCanvas, setOpenCanvas] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+  const [building, setBuilding] = React.useState(false);
 
   const candidates = React.useMemo(
-    () => dots.filter((d) => d.x > 50 && d.y < 50).map((d) => signals.find((s) => s.id === d.sigId)).filter(Boolean),
+    () => dots.filter((d) => d.bucket === "critical_uncertainty").map((d) => signals.find((s) => s.id === d.sigId)).filter(Boolean),
     [dots, signals]
   ) as typeof signals;
 
@@ -90,30 +102,35 @@ export function BuildScenariosModal({ open, onClose, navigate }: { open: boolean
   }, [open]);
 
   const axesValid = !!axes[0] && !!axes[1] && axes[0] !== axes[1];
+  // Independence must have already passed (real AI check, run on the Matrix page as soon as
+  // 2 candidates are selected) — mirrors the server-side rejection in buildScenarios itself,
+  // so the button reflects the block instead of only surfacing it after a failed call.
+  const canBuild = axesValid && independence?.state === "independent";
 
-  const build = () => {
+  const build = async () => {
+    if (!canBuild || !store.activeProjectId) {
+      setError(
+        !axesValid
+          ? "Pick two different axes first."
+          : "These axes aren't independent yet — pick a different pair or resolve the correlation."
+      );
+      return;
+    }
+    setBuilding(true);
+    setError(null);
     try {
-      if (!axesValid) throw new Error("invalid axes");
-      const combos: Record<Quadrant, string> = {
-        TL: `${a.pos} + ${b.neg}`,
-        TR: `${a.pos} + ${b.pos}`,
-        BL: `${a.neg} + ${b.neg}`,
-        BR: `${a.neg} + ${b.pos}`,
-      };
-      const now = Date.now();
-      const built: Scenario[] = ORDER.map((q, i) => ({
-        id: "sc_" + q.toLowerCase() + "_" + now.toString(36),
-        name: (names[i] || suggested[i] || q).trim() || q,
-        quadrant: q,
-        color: QUAD_COLOR[q],
-        tagline: combos[q],
-        summary: "",
-        narrative: "",
-        reaxedAt: now,
-      }));
-      if (built.length !== 4) throw new Error("generation failed");
-      store.setScenarios(built);
-      store.setCriticalUncertainties(axes);
+      const requestedNames: Partial<Record<Quadrant, string>> = {};
+      ORDER.forEach((q, i) => {
+        if (names[i]?.trim()) requestedNames[q] = names[i];
+      });
+      await store.buildScenarios({
+        projectId: store.activeProjectId,
+        axisA: { signalId: axes[0], label: a.axis, polePos: a.pos, poleNeg: a.neg },
+        axisB: { signalId: axes[1], label: b.axis, polePos: b.pos, poleNeg: b.neg },
+        independenceState: independence!.state,
+        independenceRationale: independence!.rationale,
+        requestedNames,
+      });
       try {
         localStorage.removeItem("fm.reaxReview");
       } catch {}
@@ -121,8 +138,11 @@ export function BuildScenariosModal({ open, onClose, navigate }: { open: boolean
       const w = window as FmWindow;
       if (w.FM_toast) w.FM_toast({ message: "4 scenarios created", actionText: "Open Canvas", action: "open-canvas", duration: 4000 });
       if (openCanvas && navigate) navigate("/canvas");
-    } catch {
+    } catch (err) {
+      console.error("[matrix] buildScenarios failed", err);
       setError("Couldn't build scenarios. Try again or pick different axes.");
+    } finally {
+      setBuilding(false);
     }
   };
 
@@ -136,7 +156,7 @@ export function BuildScenariosModal({ open, onClose, navigate }: { open: boolean
         if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
         if (step < 3) {
           if (axesValid) setStep((s) => s + 1);
-        } else if (axesValid) build();
+        } else if (canBuild && !building) build();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -321,8 +341,15 @@ export function BuildScenariosModal({ open, onClose, navigate }: { open: boolean
 
           {step === 3 && (
             <div>
+              {independence && independence.state !== "independent" && (
+                <div className="mb-3 rounded-md border border-[rgba(245,158,11,0.4)] bg-[#FFFBEB] p-2.5 text-[12.5px] text-[#92400E]">
+                  These axes came back <strong>{independence.state}</strong> in the independence
+                  check — building is blocked until you pick a different pair.
+                </div>
+              )}
               <div className="mb-3.5 text-[13.5px] leading-[1.5] text-[#374151]">
-                This will create <strong className="text-brand-dark">4 new scenarios</strong>. You can edit, rename, or delete them later on the Canvas page.
+                This will create <strong className="text-brand-dark">4 new scenarios</strong>, with AI-generated logic and
+                summaries for each quadrant. You can edit, rename, or delete them later on the Canvas page.
               </div>
               <label className="flex cursor-pointer items-center gap-[9px] text-[13px] text-brand-dark">
                 <span
@@ -381,10 +408,10 @@ export function BuildScenariosModal({ open, onClose, navigate }: { open: boolean
             ) : (
               <button
                 onClick={build}
-                disabled={!axesValid}
+                disabled={!canBuild || building}
                 className="rounded-md border-0 bg-brand-orange px-4 py-2 text-[13.5px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
               >
-                Build scenarios →
+                {building ? "Building…" : "Build scenarios →"}
               </button>
             )}
           </div>

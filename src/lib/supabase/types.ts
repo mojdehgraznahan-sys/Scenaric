@@ -2,6 +2,7 @@
 // actually queries from the app. supabase/migrations/0001_schema.sql has the full
 // 15-table schema; the remaining tables get typed here as their build-order steps wire
 // them up (items 4-10) rather than hand-maintaining 15 tables' worth of types now.
+// matrix_dots/axes/scenarios added by the Matrix backend build (Step 4, §7-§8).
 // Shared with Tables.projects.Row and Functions.list_projects_with_progress.Returns —
 // list_projects_with_progress (supabase/migrations/0005_steps_complete_gate.sql) returns
 // the same column shape as the projects table itself, just with steps_complete computed.
@@ -175,6 +176,10 @@ export interface Database {
           body: string;
           impact: number | null;
           uncertainty: "Low" | "Medium" | "High" | null;
+          ai_impact: number | null;
+          ai_uncertainty: "Low" | "Medium" | "High" | null;
+          user_impact: number | null;
+          user_uncertainty: "Low" | "Medium" | "High" | null;
           origin: "ai" | "user" | "insight" | "external_pattern";
           status: string;
           created_at: string;
@@ -188,6 +193,10 @@ export interface Database {
           body?: string;
           impact?: number | null;
           uncertainty?: "Low" | "Medium" | "High" | null;
+          ai_impact?: number | null;
+          ai_uncertainty?: "Low" | "Medium" | "High" | null;
+          user_impact?: number | null;
+          user_uncertainty?: "Low" | "Medium" | "High" | null;
           origin?: "ai" | "user" | "insight" | "external_pattern";
           status?: string;
           created_at?: string;
@@ -201,9 +210,142 @@ export interface Database {
           body?: string;
           impact?: number | null;
           uncertainty?: "Low" | "Medium" | "High" | null;
+          ai_impact?: number | null;
+          ai_uncertainty?: "Low" | "Medium" | "High" | null;
+          user_impact?: number | null;
+          user_uncertainty?: "Low" | "Medium" | "High" | null;
           origin?: "ai" | "user" | "insight" | "external_pattern";
           status?: string;
           created_at?: string;
+        };
+        Relationships: [];
+      };
+      matrix_dots: {
+        Row: {
+          id: string;
+          project_id: string;
+          signal_id: string;
+          x: number;
+          y: number;
+          is_critical_axis: boolean;
+          bucket: "critical_uncertainty" | "predetermined" | "background" | "wildcard" | null;
+          bucket_rationale: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          signal_id: string;
+          x: number;
+          y: number;
+          is_critical_axis?: boolean;
+          bucket?: "critical_uncertainty" | "predetermined" | "background" | "wildcard" | null;
+          bucket_rationale?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          signal_id?: string;
+          x?: number;
+          y?: number;
+          is_critical_axis?: boolean;
+          bucket?: "critical_uncertainty" | "predetermined" | "background" | "wildcard" | null;
+          bucket_rationale?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      axes: {
+        Row: {
+          id: string;
+          project_id: string;
+          x_signal_id: string | null;
+          y_signal_id: string | null;
+          x_label: string | null;
+          y_label: string | null;
+          independence_state: "independent" | "correlated" | "uncertain" | null;
+          independence_rationale: string | null;
+          is_active: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          x_signal_id?: string | null;
+          y_signal_id?: string | null;
+          x_label?: string | null;
+          y_label?: string | null;
+          independence_state?: "independent" | "correlated" | "uncertain" | null;
+          independence_rationale?: string | null;
+          is_active?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          x_signal_id?: string | null;
+          y_signal_id?: string | null;
+          x_label?: string | null;
+          y_label?: string | null;
+          independence_state?: "independent" | "correlated" | "uncertain" | null;
+          independence_rationale?: string | null;
+          is_active?: boolean;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      scenarios: {
+        Row: {
+          id: string;
+          project_id: string;
+          axes_id: string | null;
+          quadrant: "TL" | "TR" | "BL" | "BR";
+          name: string;
+          tagline: string | null;
+          summary: string | null;
+          narrative: string | null;
+          color: string | null;
+          logic: string | null;
+          plausible: boolean | null;
+          implausibility_note: string | null;
+          is_archived: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          axes_id?: string | null;
+          quadrant: "TL" | "TR" | "BL" | "BR";
+          name: string;
+          tagline?: string | null;
+          summary?: string | null;
+          narrative?: string | null;
+          color?: string | null;
+          logic?: string | null;
+          plausible?: boolean | null;
+          implausibility_note?: string | null;
+          is_archived?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          axes_id?: string | null;
+          quadrant?: "TL" | "TR" | "BL" | "BR";
+          name?: string;
+          tagline?: string | null;
+          summary?: string | null;
+          narrative?: string | null;
+          color?: string | null;
+          logic?: string | null;
+          plausible?: boolean | null;
+          implausibility_note?: string | null;
+          is_archived?: boolean;
+          created_at?: string;
+          updated_at?: string;
         };
         Relationships: [];
       };
