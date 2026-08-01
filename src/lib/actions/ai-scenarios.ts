@@ -80,28 +80,28 @@ export interface BuildScenariosResult {
   scenarios: ScenarioRow[];
 }
 
-export async function buildScenarios(input: {
-  projectId: string;
-  axisA: AxisInput;
-  axisB: AxisInput;
-  independenceState: "independent" | "correlated" | "uncertain";
-  independenceRationale?: string[];
-  requestedNames?: Partial<Record<Quadrant, string>>;
-}): Promise<BuildScenariosResult> {
+export type ScenarioLogic = z.infer<typeof ScenarioLogicsSchema>["scenarios"][number];
+
+// Shared by buildScenarios (persists) and reaxisPreview (doesn't persist) — both need the
+// identical §8 grounding: predetermined/wildcard signals pulled from matrix_dots, scoped to
+// the project, fed into the same scenario-logic prompt. `step` differs per caller so the
+// ai_runs audit log can tell a committed build apart from a preview-only call.
+async function generateScenarioLogics(
+  step: string,
+  projectId: string,
+  axisA: AxisInput,
+  axisB: AxisInput
+): Promise<ScenarioLogic[]> {
   // Is this even a valid axis pair at all — the more fundamental precondition, checked
   // before whether they're independent of each other.
-  await assertAxisCandidates(input.projectId, [input.axisA.signalId, input.axisB.signalId]);
-
-  if (input.independenceState !== "independent") {
-    throw new Error(`Cannot build scenarios on ${input.independenceState} axes — the independence check must pass first.`);
-  }
+  await assertAxisCandidates(projectId, [axisA.signalId, axisB.signalId]);
 
   const supabase = createClient();
 
   const { data: project, error: projectError } = await supabase
     .from("projects")
     .select("focal_question, refined_focal_question, horizon")
-    .eq("id", input.projectId)
+    .eq("id", projectId)
     .single();
   if (projectError) throw projectError;
   const focalQuestion = project.refined_focal_question ?? project.focal_question;
@@ -114,13 +114,13 @@ export async function buildScenarios(input: {
   const { data: signals, error: signalsError } = await supabase
     .from("signals")
     .select("id, title, body, category")
-    .eq("project_id", input.projectId);
+    .eq("project_id", projectId);
   if (signalsError) throw signalsError;
 
   const { data: dots, error: dotsError } = await supabase
     .from("matrix_dots")
     .select("signal_id, bucket")
-    .eq("project_id", input.projectId);
+    .eq("project_id", projectId);
   if (dotsError) throw dotsError;
   const bucketBySignalId = new Map(dots.map((d) => [d.signal_id, d.bucket]));
 
@@ -131,14 +131,14 @@ export async function buildScenarios(input: {
   const wildcardSignals = signalsInBucket("wildcard");
 
   const output = await runStructured({
-    step: "scenarios.build",
-    projectId: input.projectId,
+    step,
+    projectId,
     taskPrompt: SCENARIO_LOGICS_TASK_PROMPT,
     input: {
       focal_question: focalQuestion,
       horizon: project.horizon,
-      axis_a: { label: input.axisA.label, pole_pos: input.axisA.polePos, pole_neg: input.axisA.poleNeg },
-      axis_b: { label: input.axisB.label, pole_pos: input.axisB.polePos, pole_neg: input.axisB.poleNeg },
+      axis_a: { label: axisA.label, pole_pos: axisA.polePos, pole_neg: axisA.poleNeg },
+      axis_b: { label: axisB.label, pole_pos: axisB.polePos, pole_neg: axisB.poleNeg },
       predetermined_signals: predeterminedSignals,
       wildcard_signals: wildcardSignals,
       name_pool: SCENARIO_NAME_POOL,
@@ -147,6 +147,34 @@ export async function buildScenarios(input: {
     effort: "high",
     thinking: true,
   });
+
+  return output.scenarios;
+}
+
+// POST .../scenarios/reaxis-preview — Re-axis modal step 2, before committing migration (§8).
+// Generates the 4 scenario logics for a candidate new axis pair with the same predetermined/
+// wildcard grounding as buildScenarios, but persists nothing (no axes/scenarios rows) — purely
+// a preview for the user to review before choosing to apply the migration.
+export async function reaxisPreview(input: { projectId: string; axisA: AxisInput; axisB: AxisInput }): Promise<{ scenarios: ScenarioLogic[] }> {
+  const scenarios = await generateScenarioLogics("scenarios.reaxis_preview", input.projectId, input.axisA, input.axisB);
+  return { scenarios };
+}
+
+export async function buildScenarios(input: {
+  projectId: string;
+  axisA: AxisInput;
+  axisB: AxisInput;
+  independenceState: "independent" | "correlated" | "uncertain";
+  independenceRationale?: string[];
+  requestedNames?: Partial<Record<Quadrant, string>>;
+}): Promise<BuildScenariosResult> {
+  if (input.independenceState !== "independent") {
+    throw new Error(`Cannot build scenarios on ${input.independenceState} axes — the independence check must pass first.`);
+  }
+
+  const scenarios = await generateScenarioLogics("scenarios.build", input.projectId, input.axisA, input.axisB);
+
+  const supabase = createClient();
 
   // Enforce the "max 2 active rows per project" invariant from the schema's own comment
   // (0001_schema.sql) — cheap guard against a retry; the real re-axis migration UI stays
@@ -176,7 +204,7 @@ export async function buildScenarios(input: {
     .single();
   if (axesError) throw axesError;
 
-  const byQuadrant = new Map(output.scenarios.map((s) => [s.quadrant, s]));
+  const byQuadrant = new Map(scenarios.map((s) => [s.quadrant, s]));
   const scenarioInserts = QUAD_ORDER.map((quadrant) => {
     const s = byQuadrant.get(quadrant)!;
     const requestedName = input.requestedNames?.[quadrant];

@@ -444,6 +444,44 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   // need to change — `project` above already re-derives from activeProjectId.
   const setProject = useCallback((_v: Project) => {}, []);
 
+  // ---- Matrix (real, Supabase) — Matrix backend build, Step 4 (§7) ----
+  // Declared before Signals below so createSignal/updateSignal/scoreUnscoredSignals can call
+  // refreshMatrixData (which classifies buckets) right after their scoring completes, mirroring
+  // the on-demand scoreSignal path further down — the Matrix page should never show a scored,
+  // dot-positioned signal that's still bucket-null just because the user never revisited it.
+  const [matrixDots, setMatrixDots] = useState<MatrixDot[]>([]);
+  const [matrixDotsLoading, setMatrixDotsLoading] = useState(true);
+  const [pendingScoringCount, setPendingScoringCount] = useState(0);
+  const [pendingScoringIds, setPendingScoringIds] = useState<string[]>([]);
+
+  const refreshMatrixData = useCallback(async (projectId: string) => {
+    // getMatrixData first — it auto-positions any newly-scored signal, which classification
+    // depends on (classifyMatrixBuckets only ever UPDATEs an existing matrix_dots row, never
+    // inserts one). Classify is best-effort: a failed classification leaves that signal's
+    // bucket null (an honest, valid "not yet classified" state) rather than blocking the
+    // whole page load — matches classifyMatrixBuckets' own per-signal failure tolerance.
+    await getMatrixData(projectId);
+    await classifyMatrixBuckets(projectId).catch((err) => console.error("[store] bucket classification failed", err));
+    const result = await getMatrixData(projectId);
+    setMatrixDots(result.dots.map(toMatrixDot));
+    setPendingScoringCount(result.pendingScoringCount);
+    setPendingScoringIds(result.pendingScoringIds);
+  }, []);
+
+  useEffect(() => {
+    if (!activeProjectId) {
+      setMatrixDots([]);
+      setPendingScoringCount(0);
+      setPendingScoringIds([]);
+      setMatrixDotsLoading(false);
+      return;
+    }
+    setMatrixDotsLoading(true);
+    refreshMatrixData(activeProjectId)
+      .catch((err) => console.error("[store] failed to load matrix data", err))
+      .finally(() => setMatrixDotsLoading(false));
+  }, [activeProjectId, refreshMatrixData]);
+
   // ---- Signals (real, Supabase) ----
   const [signals, setSignalsState] = useState<Signal[]>([]);
   const [signalsLoading, setSignalsLoading] = useState(true);
@@ -480,14 +518,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const row = await createSignalAction(input);
       await refreshSignals(input.projectId);
       // Fire-and-forget: don't block signal creation on scoring latency (mirrors how
-      // "Suggest signals" already chains suggest -> score non-blocking). Refreshes again
-      // once scoring lands so the card updates off "Not yet scored" on its own.
+      // "Suggest signals" already chains suggest -> score non-blocking). Refreshes signals
+      // and matrix data once scoring lands, so the card updates off "Not yet scored" and the
+      // new dot gets classified without waiting for the user to revisit the Matrix page.
       scoreOneSignal(input.projectId, row.id)
-        .then(() => refreshSignals(input.projectId))
+        .then(() => Promise.all([refreshSignals(input.projectId), refreshMatrixData(input.projectId)]))
         .catch((err) => console.error("[store] auto-score failed for new signal", err));
       return toSignal(row);
     },
-    [refreshSignals]
+    [refreshSignals, refreshMatrixData]
   );
 
   const updateSignal = useCallback(
@@ -503,15 +542,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const row = await updateSignalAction(input);
       if (activeProjectId) await refreshSignals(activeProjectId);
       // Self-heals a signal left unscored (e.g. a swallowed AIGenerationFailedError at
-      // creation time) — mirrors createSignal's fire-and-forget scoring above.
+      // creation time) — mirrors createSignal's fire-and-forget scoring above, including the
+      // matrix-data refresh so the dot gets classified as soon as scoring lands.
       if (activeProjectId && (row.impact == null || row.uncertainty == null)) {
         scoreOneSignal(activeProjectId, row.id)
-          .then(() => refreshSignals(activeProjectId))
+          .then(() => Promise.all([refreshSignals(activeProjectId), refreshMatrixData(activeProjectId)]))
           .catch((err) => console.error("[store] auto-score failed for edited signal", err));
       }
       return toSignal(row);
     },
-    [activeProjectId, refreshSignals]
+    [activeProjectId, refreshSignals, refreshMatrixData]
   );
 
   const deleteSignal = useCallback(
@@ -534,45 +574,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const scoreUnscoredSignals = useCallback(
     async (projectId: string) => {
       const result = await scoreUnscoredSignalsAction(projectId);
-      await refreshSignals(projectId);
+      // Batch scoring (the Build Plan's POST /signals/score) needs to trigger classification
+      // the same way the on-demand scoreSignal path already does below — otherwise a batch of
+      // newly-scored signals sits dot-positioned but bucket-null until the user happens to
+      // revisit the Matrix page.
+      await Promise.all([refreshSignals(projectId), refreshMatrixData(projectId)]);
       return result;
     },
-    [refreshSignals]
+    [refreshSignals, refreshMatrixData]
   );
-
-  // ---- Matrix (real, Supabase) — Matrix backend build, Step 4 (§7) ----
-  const [matrixDots, setMatrixDots] = useState<MatrixDot[]>([]);
-  const [matrixDotsLoading, setMatrixDotsLoading] = useState(true);
-  const [pendingScoringCount, setPendingScoringCount] = useState(0);
-  const [pendingScoringIds, setPendingScoringIds] = useState<string[]>([]);
-
-  const refreshMatrixData = useCallback(async (projectId: string) => {
-    // getMatrixData first — it auto-positions any newly-scored signal, which classification
-    // depends on (classifyMatrixBuckets only ever UPDATEs an existing matrix_dots row, never
-    // inserts one). Classify is best-effort: a failed classification leaves that signal's
-    // bucket null (an honest, valid "not yet classified" state) rather than blocking the
-    // whole page load — matches classifyMatrixBuckets' own per-signal failure tolerance.
-    await getMatrixData(projectId);
-    await classifyMatrixBuckets(projectId).catch((err) => console.error("[store] bucket classification failed", err));
-    const result = await getMatrixData(projectId);
-    setMatrixDots(result.dots.map(toMatrixDot));
-    setPendingScoringCount(result.pendingScoringCount);
-    setPendingScoringIds(result.pendingScoringIds);
-  }, []);
-
-  useEffect(() => {
-    if (!activeProjectId) {
-      setMatrixDots([]);
-      setPendingScoringCount(0);
-      setPendingScoringIds([]);
-      setMatrixDotsLoading(false);
-      return;
-    }
-    setMatrixDotsLoading(true);
-    refreshMatrixData(activeProjectId)
-      .catch((err) => console.error("[store] failed to load matrix data", err))
-      .finally(() => setMatrixDotsLoading(false));
-  }, [activeProjectId, refreshMatrixData]);
 
   // On-demand single-signal scoring — Signals Library's "Add to Matrix" on an unscored
   // signal. Unlike createSignal/updateSignal's fire-and-forget scoring, this awaits and lets

@@ -20,6 +20,8 @@ import {
   yToImpact,
   uncertaintyToX,
   xToUncertainty,
+  resolveDotCollisions,
+  DOT_MARGIN,
   type Uncertainty,
   type MatrixBucket,
 } from "../matrix-mapping";
@@ -73,13 +75,24 @@ async function fetchScoredSignalsWithDots(supabase: SupabaseClient, projectId: s
 
   const missing = scored.filter((s) => !dotBySignalId.has(s.id));
   if (missing.length > 0) {
+    // Impact x uncertainty only has 15 distinct grid cells, so identically-scored signals
+    // would otherwise land exactly on top of one another — resolveDotCollisions nudges the
+    // newly-placed dots apart (deterministically) from each other and from every already-
+    // positioned dot in the project, including ones a user has manually dragged.
+    const initialPositions = missing.map((s) => ({ id: s.id, x: uncertaintyToX(s.uncertainty), y: impactToY(s.impact) }));
+    const fixedDots = existingDots.map((d) => ({ x: d.x, y: d.y }));
+    const resolved = resolveDotCollisions(initialPositions, fixedDots);
+
     const { error: upsertError } = await supabase.from("matrix_dots").upsert(
-      missing.map((s) => ({
-        project_id: projectId,
-        signal_id: s.id,
-        x: uncertaintyToX(s.uncertainty),
-        y: impactToY(s.impact),
-      })),
+      missing.map((s) => {
+        const pos = resolved.get(s.id)!;
+        return {
+          project_id: projectId,
+          signal_id: s.id,
+          x: pos.x,
+          y: pos.y,
+        };
+      }),
       { onConflict: "project_id,signal_id", ignoreDuplicates: true }
     );
     if (upsertError) throw upsertError;
@@ -96,8 +109,11 @@ async function fetchScoredSignalsWithDots(supabase: SupabaseClient, projectId: s
     const dot = dotBySignalId.get(s.id)!;
     return {
       signalId: s.id,
-      x: dot.x,
-      y: dot.y,
+      // Display-only clamp — never rewrites the persisted row. Guards against dots placed
+      // before DOT_MARGIN existed (or any other stray out-of-range value) rendering flush
+      // against the plot's edge, where an "Axis" label or hover tooltip would get clipped.
+      x: Math.max(DOT_MARGIN, Math.min(100 - DOT_MARGIN, dot.x)),
+      y: Math.max(DOT_MARGIN, Math.min(100 - DOT_MARGIN, dot.y)),
       impact: s.impact,
       uncertainty: s.uncertainty,
       aiImpact: s.ai_impact,

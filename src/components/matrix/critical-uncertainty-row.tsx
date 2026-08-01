@@ -14,6 +14,7 @@ export function CriticalUncertaintyRow({
   dot,
   sig,
   isOn,
+  isLockedAxis = false,
   atCapacity,
   currentPicks,
   onToggle,
@@ -23,6 +24,10 @@ export function CriticalUncertaintyRow({
   dot: MatrixDot;
   sig?: Signal;
   isOn: boolean;
+  // True once this signal is one of the 2 locked scenario axes — independence-checked and
+  // passed, not just selected. Mirrors page-matrix.tsx's axesLocked gate on the plotted dot,
+  // so the "this is a locked axis" state reads identically everywhere the signal appears.
+  isLockedAxis?: boolean;
   atCapacity: boolean;
   currentPicks: Pick[];
   onToggle: () => void;
@@ -70,8 +75,11 @@ export function CriticalUncertaintyRow({
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       className={cn(
-        "relative mb-1.5 rounded-lg px-2.5 py-[7px] transition-[border-color]",
-        isOn ? "border-[1.5px] border-brand-orange bg-white" : "border border-brand-orange100 bg-white/50"
+        "relative mb-1.5 rounded-lg px-2.5 py-[7px] transition-[border-color,box-shadow]",
+        isOn ? "border-[1.5px] border-brand-orange bg-white" : "border border-brand-orange100 bg-white/50",
+        // Second outer halo once this pick is independence-checked and locked (see
+        // page-matrix.tsx's axesLocked) — same ring treatment as the plotted dot's "axis" state.
+        isLockedAxis && "shadow-[0_0_0_3px_rgba(249,115,22,0.2)]"
       )}
     >
       <button
@@ -93,6 +101,9 @@ export function CriticalUncertaintyRow({
         </span>
         <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ background: dot.color }} />
         <span className="flex-1 truncate">{title}</span>
+        {isLockedAxis && (
+          <span className="flex-shrink-0 text-[9px] font-semibold uppercase tracking-[0.4px] text-brand-orange">Axis</span>
+        )}
       </button>
 
       <div

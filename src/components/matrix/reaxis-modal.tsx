@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 import type { Navigate } from "@/lib/use-navigate";
 import type { Scenario, Signal, SteepCategory } from "@/lib/types";
+import { reaxisPreview, type ScenarioLogic } from "@/lib/actions/ai-scenarios";
+import { axisMeta } from "./axis-data";
 
 const SIGNAL_AXIS: Record<string, string> = {
   sg1: "Carbon Policy",
@@ -21,25 +23,6 @@ const SIGNAL_AXIS: Record<string, string> = {
   sg9: "FX Stability",
 };
 const rxAxisName = (sig?: Signal) => (sig ? SIGNAL_AXIS[sig.id] || (sig.title || "").split(" ").slice(0, 2).join(" ") : "—");
-
-const NAME_POOL = [
-  "Open Horizons", "Sovereign Silos", "Tidal Shift", "Monsoon Markets",
-  "Archipelago", "Crosscurrents", "Safe Harbor", "Riptide",
-  "Trade Winds", "Storm Front", "Calm Waters", "High Tide",
-];
-function pickNames(seedStr: string, n: number) {
-  let h = seedStr.split("").reduce((a, c) => ((a << 5) - a + c.charCodeAt(0)) | 0, 0);
-  const rand = () => {
-    h = (h * 1103515245 + 12345) & 0x7fffffff;
-    return h / 0x7fffffff;
-  };
-  const pool = [...NAME_POOL];
-  for (let i = pool.length - 1; i > 0; i--) {
-    const j = Math.floor(rand() * (i + 1));
-    [pool[i], pool[j]] = [pool[j], pool[i]];
-  }
-  return pool.slice(0, n);
-}
 
 const QUADS = ["TL", "TR", "BL", "BR"];
 
@@ -74,6 +57,14 @@ export function ReAxisModal({ open, onClose, navigate }: { open: boolean; onClos
   const [confirmDelete, setConfirmDelete] = React.useState<string | null>(null);
   const applyReaxisRef = React.useRef<() => void>(() => {});
 
+  // Real scenario-logic preview for the candidate new axes (§8) — replaces the old hash-based
+  // pickNames() fabrication. Grounded the same way as buildScenarios: predetermined/wildcard
+  // signals pulled from matrix_dots and fed into the same scenario-logic prompt, just not
+  // persisted (see reaxisPreview, ai-scenarios.ts).
+  const [previewScenarios, setPreviewScenarios] = React.useState<ScenarioLogic[] | null>(null);
+  const [previewLoading, setPreviewLoading] = React.useState(false);
+  const [previewError, setPreviewError] = React.useState<string | null>(null);
+
   React.useEffect(() => {
     if (open) {
       setStep(1);
@@ -99,8 +90,12 @@ export function ReAxisModal({ open, onClose, navigate }: { open: boolean; onClos
     };
   }, [open, onClose]);
 
+  // Axis-eligible candidates — critical_uncertainty bucket only (real, persisted classification),
+  // matching build-scenarios-modal.tsx's axis picker and page-matrix.tsx's click-to-select guard.
+  // Was previously a stale d.x > 50 && d.y < 50 position check, which could surface a
+  // wildcard/predetermined dot that just happened to be plotted in the top-right quadrant.
   const candidates = React.useMemo(
-    () => dots.filter((d) => d.x > 50 && d.y < 50).map((d) => signals.find((s) => s.id === d.sigId)).filter(Boolean),
+    () => dots.filter((d) => d.bucket === "critical_uncertainty").map((d) => signals.find((s) => s.id === d.sigId)).filter(Boolean),
     [dots, signals]
   ) as Signal[];
 
@@ -110,7 +105,44 @@ export function ReAxisModal({ open, onClose, navigate }: { open: boolean; onClos
   const newA = sigById(newAxes[0]);
   const newB = sigById(newAxes[1]);
 
-  const proposedNames = pickNames((newAxes[0] || "") + "|" + (newAxes[1] || ""), 4);
+  React.useEffect(() => {
+    if (!open || !newA || !newB || newAxes[0] === newAxes[1] || !store.activeProjectId) {
+      setPreviewScenarios(null);
+      setPreviewError(null);
+      return;
+    }
+    const metaA = axisMeta(newA);
+    const metaB = axisMeta(newB);
+    let cancelled = false;
+    setPreviewLoading(true);
+    setPreviewError(null);
+    reaxisPreview({
+      projectId: store.activeProjectId,
+      axisA: { signalId: newA.id, label: metaA.axis, polePos: metaA.pos, poleNeg: metaA.neg },
+      axisB: { signalId: newB.id, label: metaB.axis, polePos: metaB.pos, poleNeg: metaB.neg },
+    })
+      .then((result) => {
+        if (!cancelled) setPreviewScenarios(result.scenarios);
+      })
+      .catch((err) => {
+        console.error("[reaxis] preview failed", err);
+        if (!cancelled) {
+          setPreviewScenarios(null);
+          setPreviewError("Couldn't generate a preview for these axes — try again.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setPreviewLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, newAxes.join(), store.activeProjectId]);
+
+  const scenariosByQuad = React.useMemo(() => new Map<string, ScenarioLogic>((previewScenarios ?? []).map((s) => [s.quadrant, s])), [previewScenarios]);
+  const proposedNames = QUADS.map((q) => scenariosByQuad.get(q)?.name ?? "");
+  const proposedTaglines = QUADS.map((q) => scenariosByQuad.get(q)?.tagline ?? "");
 
   const migration = React.useMemo<MigrationRow[]>(() => {
     return dots.map((d) => {
@@ -257,7 +289,18 @@ export function ReAxisModal({ open, onClose, navigate }: { open: boolean; onClos
             />
           )}
           {step === 2 && (
-            <StepReviewImpact scenarios={scenarios} proposedNames={proposedNames} migration={migration} CONF={CONF} cleanCount={cleanCount} reviewCount={reviewCount} total={migration.length} />
+            <StepReviewImpact
+              scenarios={scenarios}
+              proposedNames={proposedNames}
+              proposedTaglines={proposedTaglines}
+              previewLoading={previewLoading}
+              previewError={previewError}
+              migration={migration}
+              CONF={CONF}
+              cleanCount={cleanCount}
+              reviewCount={reviewCount}
+              total={migration.length}
+            />
           )}
           {step === 3 && (
             <StepNarratives
@@ -409,6 +452,9 @@ function StepChooseAxes({
 function StepReviewImpact({
   scenarios,
   proposedNames,
+  proposedTaglines,
+  previewLoading,
+  previewError,
   migration,
   CONF,
   cleanCount,
@@ -417,6 +463,9 @@ function StepReviewImpact({
 }: {
   scenarios: Scenario[];
   proposedNames: string[];
+  proposedTaglines: string[];
+  previewLoading: boolean;
+  previewError: string | null;
   migration: MigrationRow[];
   CONF: Record<MigrationRow["confidence"], { color: string; label: string; icon: string }>;
   cleanCount: number;
@@ -454,15 +503,20 @@ function StepReviewImpact({
         </div>
         <div>
           <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.06em] text-text-3">Proposed scenarios</div>
-          {proposedNames.map((nm, i) => (
-            <div key={i} className="mb-1.5 flex items-center gap-2 rounded-md border border-dashed border-brand-orange100 bg-brand-orangeLight px-2.5 py-2">
-              <span className="font-mono text-[9.5px] font-semibold text-brand-orange">{QUADS[i]}</span>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[12.5px] font-semibold text-brand-dark">{nm}</div>
-                <div className="text-[10.5px] italic text-brand-orange700">auto-suggested</div>
+          {previewError && <div className="mb-1.5 text-[11.5px] text-[#EF4444]">{previewError}</div>}
+          {previewLoading && !proposedNames.some(Boolean) ? (
+            <div className="py-2 text-[11.5px] text-text-3">Generating scenario logic for these axes…</div>
+          ) : (
+            proposedNames.map((nm, i) => (
+              <div key={i} className="mb-1.5 flex items-center gap-2 rounded-md border border-dashed border-brand-orange100 bg-brand-orangeLight px-2.5 py-2">
+                <span className="font-mono text-[9.5px] font-semibold text-brand-orange">{QUADS[i]}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[12.5px] font-semibold text-brand-dark">{nm || "…"}</div>
+                  <div className="truncate text-[10.5px] italic text-brand-orange700">{proposedTaglines[i] || "auto-suggested"}</div>
+                </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </div>
 
