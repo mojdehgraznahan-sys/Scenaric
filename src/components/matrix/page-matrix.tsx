@@ -27,6 +27,7 @@ import {
 import { useStore } from "@/lib/store";
 import { Icons } from "@/lib/icons";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import type { MatrixDot, Signal } from "@/lib/types";
 import type { Navigate } from "@/lib/use-navigate";
 import { getMatrixBuckets, type MatrixDotData, type MatrixBucketGroups } from "@/lib/actions/matrix";
@@ -350,8 +351,11 @@ export function PageMatrix({ navigate }: { navigate: Navigate }) {
   const [reaxisOpen, setReaxisOpen] = React.useState(false);
   const [buildOpen, setBuildOpen] = React.useState(false);
   const hasScenarios = (store.scenarios || []).some((s) => !s.archived);
-  const onBuildClick = () => {
-    if (hasScenarios) setReaxisOpen(true);
+  // Once scenarios exist, the primary CTA takes the user straight to what they built instead
+  // of forcing them through the Re-axis wizard just to look at it — Re-axis is now only
+  // reachable via its own explicit ghost button below.
+  const onScenariosButtonClick = () => {
+    if (hasScenarios) navigate("/canvas");
     else setBuildOpen(true);
   };
 
@@ -420,12 +424,16 @@ export function PageMatrix({ navigate }: { navigate: Navigate }) {
           <div className="text-[13px] text-muted-foreground">
             Drag signals to rank them. The top-right quadrant becomes your scenario axes.
           </div>
-          <button
-            onClick={onBuildClick}
-            className="inline-flex items-center gap-2 whitespace-nowrap rounded-md border border-brand-orange bg-brand-orange px-[11px] py-[7px] text-[13px] font-medium leading-none text-white transition-colors hover:bg-brand-orangeHover hover:border-brand-orangeHover"
-          >
-            Build Scenario Matrix <Icons.ArrowRight size={12} />
-          </button>
+          <div className="flex gap-2">
+            {hasScenarios && (
+              <Button variant="ghost" size="sm" onClick={() => setReaxisOpen(true)}>
+                <Icons.Refresh size={12} /> Re-axis
+              </Button>
+            )}
+            <Button variant="primary" size="sm" onClick={onScenariosButtonClick}>
+              {hasScenarios ? "View Scenarios" : "Build Scenarios"} <Icons.ArrowRight size={12} />
+            </Button>
+          </div>
         </div>
 
         {store.pendingScoringCount > 0 && (

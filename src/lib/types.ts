@@ -86,6 +86,13 @@ export interface Scenario {
   narrative: string;
   archived?: boolean;
   reaxedAt?: number; // timestamp set when scenario axes were migrated (re-axis)
+  logic?: string;
+  plausible?: boolean;
+  implausibilityNote?: string;
+  // Axis A/B snapshot at creation time (from the axes row this scenario's axes_id points
+  // to, which never changes after the fact even once a later re-axis deactivates it).
+  axisA?: { signalId: string | null; label: string | null } | null;
+  axisB?: { signalId: string | null; label: string | null } | null;
 }
 
 export interface MatrixDot {

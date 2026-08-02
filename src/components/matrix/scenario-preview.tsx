@@ -101,10 +101,10 @@ export function ScenarioPreview({ signals }: { signals: Signal[] }) {
                     flagged ? "border-dashed border-[#F59E0B]" : "border-transparent"
                   )}
                 >
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-start justify-between">
                     <span className={cn("text-[10px] font-semibold", S.color)}>{q}</span>
                     {Q.tag && (
-                      <span className={cn("font-mono text-[8.5px] font-semibold uppercase tracking-[0.04em]", S.color)}>
+                      <span className={cn("whitespace-nowrap font-mono text-[8.5px] font-semibold uppercase tracking-[0.04em]", S.color)}>
                         {Q.tag}
                       </span>
                     )}

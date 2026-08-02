@@ -34,7 +34,8 @@ import {
 } from "./actions/ai-signals";
 import { getMatrixData, updateMatrixDotPosition as updateMatrixDotPositionAction, type MatrixDotData } from "./actions/matrix";
 import { classifyMatrixBuckets, reclassifySignal } from "./actions/ai-matrix";
-import { buildScenarios as buildScenariosAction, type AxisInput, type BuildScenariosResult } from "./actions/ai-scenarios";
+import { buildScenarios as buildScenariosAction, type AxisInput } from "./actions/ai-scenarios";
+import { getScenarios, setScenarioArchived, type ScenarioWithAxes } from "./actions/scenarios";
 import type {
   ScenaricData,
   Project,
@@ -153,7 +154,7 @@ function toMatrixDot(d: MatrixDotData): MatrixDot {
   };
 }
 
-function toScenario(row: BuildScenariosResult["scenarios"][number]): Scenario {
+function toScenario(row: ScenarioWithAxes): Scenario {
   return {
     id: row.id,
     name: row.name,
@@ -162,7 +163,13 @@ function toScenario(row: BuildScenariosResult["scenarios"][number]): Scenario {
     tagline: row.tagline || "",
     summary: row.summary || "",
     narrative: row.narrative || "",
-    archived: row.is_archived,
+    archived: row.archived,
+    reaxedAt: row.reaxedAt ? new Date(row.reaxedAt).getTime() : undefined,
+    logic: row.logic || undefined,
+    plausible: row.plausible ?? undefined,
+    implausibilityNote: row.implausibilityNote || undefined,
+    axisA: row.axisA,
+    axisB: row.axisB,
   };
 }
 
@@ -233,7 +240,10 @@ export interface Store {
   selectedDot: string;
   setSelectedDot: (v: string) => void;
   scenarios: Scenario[];
+  scenariosLoading: boolean;
   setScenarios: (v: Scenario[]) => void;
+  refreshScenarios: (projectId: string) => Promise<void>;
+  archiveScenario: (scenarioId: string, archived: boolean) => Promise<void>;
   buildScenarios: (input: {
     projectId: string;
     axisA: AxisInput;
@@ -241,7 +251,7 @@ export interface Store {
     independenceState: "independent" | "correlated" | "uncertain";
     independenceRationale?: string[];
     requestedNames?: Partial<Record<Quadrant, string>>;
-  }) => Promise<{ scenarios: Scenario[] }>;
+  }) => Promise<void>;
   indicators: Indicator[];
   setIndicators: (v: Indicator[]) => void;
   strategies: Strategy[];
@@ -614,9 +624,39 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [refreshMatrixData]
   );
 
+  // ---- Scenarios (real, Supabase) — Canvas backend build, Step 5 (§8) ----
+  const [scenarios, setScenarios] = useState<Scenario[]>([]);
+  const [scenariosLoading, setScenariosLoading] = useState(true);
+
+  const refreshScenarios = useCallback(async (projectId: string) => {
+    const rows = await getScenarios(projectId);
+    setScenarios(rows.map(toScenario));
+  }, []);
+
+  useEffect(() => {
+    if (!activeProjectId) {
+      setScenarios([]);
+      setScenariosLoading(false);
+      return;
+    }
+    setScenariosLoading(true);
+    refreshScenarios(activeProjectId)
+      .catch((err) => console.error("[store] failed to load scenarios", err))
+      .finally(() => setScenariosLoading(false));
+  }, [activeProjectId, refreshScenarios]);
+
+  // PATCH .../scenarios/:id restore/archive toggle — used by Canvas's "Past scenarios"
+  // restore action. No AI call, just a persisted field flip + refetch.
+  const archiveScenario = useCallback(
+    async (scenarioId: string, archived: boolean) => {
+      await setScenarioArchived(scenarioId, archived);
+      if (activeProjectId) await refreshScenarios(activeProjectId);
+    },
+    [activeProjectId, refreshScenarios]
+  );
+
   // ---- Everything below this line is still localStorage-simulated (later build-order steps) ----
   const [selectedDot, setSelectedDot] = useState("d2");
-  const [scenarios, setScenarios] = usePersistentState("fm.scenarios", seed.scenarios);
   const [indicators, setIndicators] = usePersistentState("fm.indicators", seed.indicators);
   const [strategies, setStrategies] = usePersistentState("fm.strategies", seed.strategies);
   const [criticalUncertainties, setCriticalUncertainties] = usePersistentState<string[]>(
@@ -625,10 +665,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
   const [navCollapsed, setNavCollapsed] = usePersistentState("fm.navCollapsed", false);
 
-  // buildScenarios ("Build Scenario Matrix" confirm) is real, Supabase-backed (Step 5, §8) —
-  // scenarios/criticalUncertainties above stay local-state containers so Canvas and the
-  // Re-axis flow (out of scope for this build) need zero changes; this just feeds them real
-  // data instead of the modal's previous 100%-client fabrication.
+  // buildScenarios ("Build Scenarios" confirm) is real, Supabase-backed (Step 5, §8) —
+  // criticalUncertainties above stays a local-state container so the Re-axis flow (its real
+  // commit/migration is out of scope for this build) needs zero changes. Refetches through
+  // the canonical GET path (refreshScenarios) rather than hand-mapping the build response, so
+  // the newly-built scenarios pick up their axisA/axisB snapshot the same way any other read
+  // does.
   const buildScenarios = useCallback(
     async (input: {
       projectId: string;
@@ -638,14 +680,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       independenceRationale?: string[];
       requestedNames?: Partial<Record<Quadrant, string>>;
     }) => {
-      const result = await buildScenariosAction(input);
-      const mapped = result.scenarios.map(toScenario);
-      setScenarios(mapped);
+      await buildScenariosAction(input);
       setCriticalUncertainties([input.axisA.signalId, input.axisB.signalId]);
-      await refreshMatrixData(input.projectId);
-      return { scenarios: mapped };
+      await Promise.all([refreshMatrixData(input.projectId), refreshScenarios(input.projectId)]);
     },
-    [setScenarios, setCriticalUncertainties, refreshMatrixData]
+    [setCriticalUncertainties, refreshMatrixData, refreshScenarios]
   );
 
   const store: Store = {
@@ -690,7 +729,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     selectedDot,
     setSelectedDot,
     scenarios,
+    scenariosLoading,
     setScenarios,
+    refreshScenarios,
+    archiveScenario,
     buildScenarios,
     indicators,
     setIndicators,

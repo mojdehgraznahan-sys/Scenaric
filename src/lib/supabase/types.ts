@@ -310,6 +310,7 @@ export interface Database {
           plausible: boolean | null;
           implausibility_note: string | null;
           is_archived: boolean;
+          reaxed_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -327,6 +328,7 @@ export interface Database {
           plausible?: boolean | null;
           implausibility_note?: string | null;
           is_archived?: boolean;
+          reaxed_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -344,6 +346,7 @@ export interface Database {
           plausible?: boolean | null;
           implausibility_note?: string | null;
           is_archived?: boolean;
+          reaxed_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };

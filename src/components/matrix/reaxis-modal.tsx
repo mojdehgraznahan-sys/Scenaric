@@ -237,7 +237,7 @@ export function ReAxisModal({ open, onClose, navigate }: { open: boolean; onClos
     >
       <div
         onMouseDown={(e) => e.stopPropagation()}
-        className="slide-up relative flex max-h-[calc(100vh-48px)] w-full max-w-[720px] flex-col rounded-xl bg-white p-6 shadow-[0_30px_80px_rgba(15,23,42,0.25),0_8px_24px_rgba(15,23,42,0.12)]"
+        className="slide-up relative flex max-h-[calc(100vh-48px)] w-full max-w-[900px] flex-col rounded-xl bg-white p-6 shadow-[0_30px_80px_rgba(15,23,42,0.25),0_8px_24px_rgba(15,23,42,0.12)]"
       >
         <button onClick={onClose} aria-label="Close" className="absolute right-4 top-4 flex h-[30px] w-[30px] items-center justify-center rounded-[7px] border-0 bg-transparent text-muted-foreground hover:bg-bg">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
@@ -272,7 +272,7 @@ export function ReAxisModal({ open, onClose, navigate }: { open: boolean; onClos
         </div>
 
         {/* Body */}
-        <div className="scroll-y min-h-[200px] flex-1 overflow-auto">
+        <div className="scroll-y min-h-[200px] flex-1 overflow-y-auto overflow-x-hidden">
           {step === 1 && (
             <StepChooseAxes
               currentAxes={currentAxes}

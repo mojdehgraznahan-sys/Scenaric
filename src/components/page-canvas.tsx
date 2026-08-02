@@ -184,9 +184,9 @@ export function PageCanvas() {
                   <div className="truncate text-[11px] text-text-3">{s.tagline}</div>
                 </div>
                 <button
-                  onClick={() =>
-                    store.setScenarios(store.scenarios.map((x) => (x.id === s.id ? { ...x, archived: false } : x)))
-                  }
+                  onClick={() => {
+                    store.archiveScenario(s.id, false).catch((err) => console.error("[canvas] failed to restore scenario", err));
+                  }}
                   className="flex-shrink-0 border-0 bg-transparent text-xs font-medium text-brand-orange"
                 >
                   Restore
