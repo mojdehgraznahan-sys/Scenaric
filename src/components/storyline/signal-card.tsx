@@ -153,7 +153,7 @@ export const SignalCard = React.forwardRef<HTMLDivElement, SignalCardProps>(func
 
       {/* Row 1 — STEEP pill + source */}
       <div className="flex items-center justify-between gap-2" style={{ paddingRight: hover ? 14 : 0 }}>
-        <Chip category={node.cat} />
+        {node.cat && <Chip category={node.cat} />}
         <span className="max-w-[100px] truncate font-mono text-[10px] tracking-[0.02em] text-muted-foreground">
           {node.source || node.year}
         </span>

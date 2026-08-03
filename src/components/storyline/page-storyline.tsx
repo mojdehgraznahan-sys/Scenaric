@@ -1,25 +1,46 @@
 "use client";
 
-// Storyline page — causal chain of signals showing HOW a scenario unfolds.
-// Faithful Tailwind/shadcn port of the handoff page-storyline.jsx PageStoryline.
+// Storyline page — causal chain of signals showing HOW a scenario unfolds, backed by the
+// real generation pipeline (autoSuggestStoryline + generateScenarioGrounding, exposed via
+// POST .../generate, POST .../refresh-grounding, GET .../storyline — all synchronous, so
+// "generating" is just the UI state while that fetch is in flight, no polling needed).
 import * as React from "react";
 import { Icons } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
 import { useStore, usePersistentState } from "@/lib/store";
-import { STORYLINE_DATA, DEFAULT_COLUMN_LABELS, edgeKey, enrichNode, type StoryNode, type StoryEdge } from "./data";
+import type { Database } from "@/lib/supabase/types";
+import { REAL_PHASES, toStoryNode, toStoryEdge } from "./story-adapter";
+import { DEFAULT_COLUMN_LABELS, edgeKey, type StoryNode, type StoryEdge } from "./data";
 import { ScenarioContextHeader } from "./scenario-context-header";
 import { StorylineCanvas } from "./canvas";
 import { StorylineSidePanel, StorylineToast, type StorylineToastState } from "./pieces";
 import { SignalPickerModal } from "./signal-picker-modal";
 
+type ScenarioStorylineRow = Database["public"]["Tables"]["scenario_storylines"]["Row"];
+type PlausibilityCheckRow = Database["public"]["Tables"]["plausibility_checks"]["Row"];
+type SignpostRow = Database["public"]["Tables"]["signposts"]["Row"];
+
+interface StorylineApiResult {
+  storyline: ScenarioStorylineRow | null;
+  nodes: Database["public"]["Tables"]["storyline_nodes"]["Row"][];
+  edges: Database["public"]["Tables"]["storyline_edges"]["Row"][];
+  plausibility: PlausibilityCheckRow | null;
+  signposts: SignpostRow[];
+}
+
+async function loadStoryline(scenarioId: string): Promise<StorylineApiResult> {
+  const res = await fetch(`/api/scenarios/${scenarioId}/storyline`);
+  if (!res.ok) throw new Error(`Failed to load storyline (${res.status}).`);
+  return res.json();
+}
+
 export function PageStoryline() {
   const store = useStore();
   const scenarios = store.scenarios;
   const [scenarioId] = usePersistentState<string>("fm.storylineScenario", (scenarios[0] && scenarios[0].id) || "sc1");
-  const data = STORYLINE_DATA[scenarioId] || STORYLINE_DATA.sc1;
   const scenario =
     scenarios.find((s) => s.id === scenarioId) ||
-    scenarios[0] || { id: scenarioId, name: "Scenario", color: "#F97316", tagline: "", quadrant: "TR" };
+    scenarios[0] || { id: scenarioId, name: "Scenario", color: "#F97316", tagline: "", quadrant: "TR" as const };
   const [selected, setSelected] = React.useState<string | null>(null);
 
   const [columnLabels, setColumnLabels] = usePersistentState<string[]>("fm.storyColumnLabels", DEFAULT_COLUMN_LABELS);
@@ -38,41 +59,81 @@ export function PageStoryline() {
     []
   );
 
-  // Per-scenario editable copies of edges + nodes.
-  const [edgesByScenario, setEdgesByScenario] = React.useState<Record<string, StoryEdge[]>>(() => {
-    const out: Record<string, StoryEdge[]> = {};
-    Object.keys(STORYLINE_DATA).forEach((k) => (out[k] = STORYLINE_DATA[k].edges.map((e) => ({ ...e }))));
-    return out;
-  });
-  const [nodesByScenario, setNodesByScenario] = React.useState<Record<string, StoryNode[]>>(() => {
-    const out: Record<string, StoryNode[]> = {};
-    Object.keys(STORYLINE_DATA).forEach((k) => (out[k] = STORYLINE_DATA[k].nodes.map(enrichNode)));
-    return out;
-  });
+  // ─── Real data load ───────────────────────────────────────────────────
+  const [loaded, setLoaded] = React.useState<StorylineApiResult | null>(null);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [generating, setGenerating] = React.useState(false);
+  const [refreshing, setRefreshing] = React.useState(false);
 
-  const dataKey = edgesByScenario[scenarioId] ? scenarioId : "sc1";
-  const edges = edgesByScenario[dataKey] || [];
-  const nodes = nodesByScenario[dataKey] || [];
-  const setEdges = (updater: StoryEdge[] | ((prev: StoryEdge[]) => StoryEdge[])) =>
-    setEdgesByScenario((prev) => ({ ...prev, [dataKey]: typeof updater === "function" ? updater(prev[dataKey]) : updater }));
-  const setNodes = (updater: StoryNode[] | ((prev: StoryNode[]) => StoryNode[])) =>
-    setNodesByScenario((prev) => ({ ...prev, [dataKey]: typeof updater === "function" ? updater(prev[dataKey]) : updater }));
+  React.useEffect(() => {
+    if (!scenarioId) return;
+    let cancelled = false;
+    setLoaded(null);
+    setLoadError(null);
+    loadStoryline(scenarioId)
+      .then((result) => {
+        if (!cancelled) setLoaded(result);
+      })
+      .catch((err) => {
+        console.error("[storyline] failed to load", err);
+        if (!cancelled) setLoadError("Couldn't load this scenario's storyline.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [scenarioId]);
 
-  const clearChain = () => {
-    setNodes([]);
-    setEdges([]);
+  const [nodes, setNodes] = React.useState<StoryNode[]>([]);
+  const [edges, setEdges] = React.useState<StoryEdge[]>([]);
+  React.useEffect(() => {
+    if (!loaded) return;
+    setNodes(loaded.nodes.map((n) => toStoryNode(n, n.signal_id ? store.signals.find((s) => s.id === n.signal_id) : undefined)));
+    setEdges(loaded.edges.map(toStoryEdge));
     setSelected(null);
+    // Deliberately not depending on store.signals — an unrelated global signals refresh
+    // shouldn't clobber in-progress local edits between reloads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
+
+  const reload = React.useCallback(async () => {
     try {
-      localStorage.removeItem("fm.storyOnboardSeen");
-    } catch {}
-  };
-  const autoSuggestChain = () => {
-    const fresh = STORYLINE_DATA[scenarioId];
-    if (!fresh) return;
-    setNodes(fresh.nodes.map(enrichNode));
-    setEdges(fresh.edges.map((e) => ({ ...e })));
-    setSelected(null);
-  };
+      setLoaded(await loadStoryline(scenarioId));
+    } catch (err) {
+      console.error("[storyline] failed to reload", err);
+    }
+  }, [scenarioId]);
+
+  const runGenerate = React.useCallback(async () => {
+    setGenerating(true);
+    try {
+      const res = await fetch(`/api/scenarios/${scenarioId}/storyline/generate`, { method: "POST" });
+      if (!res.ok) throw new Error(`Generate failed (${res.status}).`);
+    } catch (err) {
+      console.error("[storyline] generate request failed", err);
+      showToast("Couldn't generate the storyline", "error");
+    } finally {
+      await reload();
+      setGenerating(false);
+    }
+  }, [scenarioId, reload, showToast]);
+
+  const runRefreshGrounding = React.useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const res = await fetch(`/api/scenarios/${scenarioId}/storyline/refresh-grounding`, { method: "POST" });
+      if (!res.ok) throw new Error(`Refresh failed (${res.status}).`);
+      showToast("Plausibility refreshed");
+    } catch (err) {
+      console.error("[storyline] refresh-grounding request failed", err);
+      showToast("Refresh failed", "error");
+    } finally {
+      await reload();
+      setRefreshing(false);
+    }
+  }, [scenarioId, reload, showToast]);
+
+  const status = generating ? "generating" : (loaded?.storyline?.status ?? "not_generated");
+  const errorMessage = loaded?.storyline?.error_message ?? null;
 
   // Highlight path from a selected node (ancestors + descendants).
   const highlighted = React.useMemo(() => {
@@ -101,6 +162,12 @@ export function PageStoryline() {
     return { nodes: nodeSet, edges: new Set(allEdges.map(edgeKey)) };
   }, [selected, edges]);
 
+  if (loadError) {
+    return (
+      <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground">{loadError}</div>
+    );
+  }
+
   return (
     <div data-screen-label="App · storyline" className="flex flex-1 flex-col overflow-hidden">
       {/* Scenario context header + actions */}
@@ -109,15 +176,6 @@ export function PageStoryline() {
           <ScenarioContextHeader view="storyline" />
         </div>
         <div className="flex items-center gap-2.5 pt-6">
-          {nodes.length > 0 && (
-            <Button variant="ghost" size="sm" onClick={clearChain} title="Clear the chain to see the empty state">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="3 6 5 6 21 6" />
-                <path d="M 19 6 l -1 14 a 2 2 0 0 1 -2 2 H 8 a 2 2 0 0 1 -2 -2 L 5 6" />
-              </svg>
-              Clear
-            </Button>
-          )}
           <Button variant="primary" size="sm" onClick={() => setAddModalOpen(true)}>
             <Icons.Plus size={12} /> Add Signal to Chain
           </Button>
@@ -139,10 +197,10 @@ export function PageStoryline() {
             <div className="font-mono text-[10.5px] tracking-[0.06em] text-text-3">CONFIDENCE</div>
             <div className="mt-1 flex items-center gap-1.5">
               <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[#F3F4F6]">
-                <div className="h-full" style={{ width: data.confidence * 100 + "%", background: scenario.color }} />
+                <div className="h-full" style={{ width: (loaded?.plausibility?.score ?? 0) + "%", background: scenario.color }} />
               </div>
               <span className="font-mono text-xs font-semibold" style={{ color: scenario.color }}>
-                {Math.round(data.confidence * 100)}%
+                {loaded?.plausibility ? `${loaded.plausibility.score}%` : "—"}
               </span>
             </div>
           </div>
@@ -152,37 +210,56 @@ export function PageStoryline() {
       {/* Main row: canvas + context panel */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <div className="scroll-y flex-1 overflow-auto bg-bg py-6">
-          <StorylineCanvas
-            data={data}
-            scenarioColor={scenario.color}
-            selected={selected}
-            setSelected={setSelected}
-            highlighted={highlighted}
-            columnLabels={columnLabels}
-            setColumnLabels={setColumnLabels}
-            nodes={nodes}
-            setNodes={setNodes}
-            edges={edges}
-            setEdges={setEdges}
-            onAutoSuggest={autoSuggestChain}
-            onBrowseLibrary={() => setAddModalOpen(true)}
-            showToast={showToast}
-          />
+          {!loaded ? (
+            <div className="flex min-h-full items-center justify-center text-sm text-muted-foreground">Loading…</div>
+          ) : (
+            <StorylineCanvas
+              phases={REAL_PHASES}
+              scenarioColor={scenario.color}
+              selected={selected}
+              setSelected={setSelected}
+              highlighted={highlighted}
+              columnLabels={columnLabels}
+              setColumnLabels={setColumnLabels}
+              nodes={nodes}
+              setNodes={setNodes}
+              edges={edges}
+              setEdges={setEdges}
+              scenarioId={scenarioId}
+              generationStatus={status}
+              generationError={errorMessage}
+              onGenerate={runGenerate}
+              onBrowseLibrary={() => setAddModalOpen(true)}
+              showToast={showToast}
+            />
+          )}
         </div>
-        <StorylineSidePanel open={panelOpen} onToggle={() => setPanelOpen(!panelOpen)} scenario={scenario} data={data} nodes={nodes} edges={edges} />
+        <StorylineSidePanel
+          open={panelOpen}
+          onToggle={() => setPanelOpen(!panelOpen)}
+          scenario={scenario}
+          scenarioId={scenarioId}
+          nodes={nodes}
+          edges={edges}
+          plausibility={loaded?.plausibility ?? null}
+          onRefreshGrounding={runRefreshGrounding}
+          refreshing={refreshing}
+          signposts={loaded?.signposts ?? []}
+          showToast={showToast}
+        />
       </div>
 
       {/* Page-level toast */}
       <StorylineToast toast={toast} />
 
-      {/* Add-signal modal (stub; full picker in #12) */}
+      {/* Add-signal modal */}
       <SignalPickerModal
         open={addModalOpen}
         onClose={() => setAddModalOpen(false)}
         scenarioId={scenarioId}
         nodes={nodes}
         edges={edges}
-        phases={data.phases}
+        phases={REAL_PHASES}
         columnLabels={columnLabels}
         setNodes={setNodes}
         setEdges={setEdges}

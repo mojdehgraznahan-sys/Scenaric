@@ -134,6 +134,11 @@ export function ScenarioContextHeader({ view }: { view: string }) {
         onSelect={setScenarioId}
       />
       <div className="mt-2.5 max-w-[672px] text-[13px] leading-[1.5] text-muted-foreground [text-wrap:pretty]">{tagline}</div>
+      {view === "storyline" && (scenario.axisA?.label || scenario.axisB?.label) && (
+        <div className="mt-1 font-mono text-[11px] uppercase tracking-[0.04em] text-text-3">
+          {scenario.axisA?.label || "—"} / {scenario.axisB?.label || "—"}
+        </div>
+      )}
     </div>
   );
 }

@@ -228,6 +228,7 @@ export interface Database {
           x: number;
           y: number;
           is_critical_axis: boolean;
+          axis_label: "x" | "y" | null;
           bucket: "critical_uncertainty" | "predetermined" | "background" | "wildcard" | null;
           bucket_rationale: string | null;
           created_at: string;
@@ -239,6 +240,7 @@ export interface Database {
           x: number;
           y: number;
           is_critical_axis?: boolean;
+          axis_label?: "x" | "y" | null;
           bucket?: "critical_uncertainty" | "predetermined" | "background" | "wildcard" | null;
           bucket_rationale?: string | null;
           created_at?: string;
@@ -250,6 +252,7 @@ export interface Database {
           x?: number;
           y?: number;
           is_critical_axis?: boolean;
+          axis_label?: "x" | "y" | null;
           bucket?: "critical_uncertainty" | "predetermined" | "background" | "wildcard" | null;
           bucket_rationale?: string | null;
           created_at?: string;
@@ -347,6 +350,189 @@ export interface Database {
           implausibility_note?: string | null;
           is_archived?: boolean;
           reaxed_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      storyline_nodes: {
+        Row: {
+          id: string;
+          project_id: string;
+          scenario_id: string;
+          phase: "precursors" | "catalysts" | "first_order" | "second_order" | "realized";
+          category: "Social" | "Technology" | "Economic" | "Ecological" | "Political" | null;
+          title: string;
+          body: string | null;
+          year: number | null;
+          strength: string | null;
+          signal_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          scenario_id: string;
+          phase: "precursors" | "catalysts" | "first_order" | "second_order" | "realized";
+          category?: "Social" | "Technology" | "Economic" | "Ecological" | "Political" | null;
+          title: string;
+          body?: string | null;
+          year?: number | null;
+          strength?: string | null;
+          signal_id?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          scenario_id?: string;
+          phase?: "precursors" | "catalysts" | "first_order" | "second_order" | "realized";
+          category?: "Social" | "Technology" | "Economic" | "Ecological" | "Political" | null;
+          title?: string;
+          body?: string | null;
+          year?: number | null;
+          strength?: string | null;
+          signal_id?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      storyline_edges: {
+        Row: {
+          id: string;
+          project_id: string;
+          scenario_id: string;
+          from_node_id: string;
+          to_node_id: string;
+          relationship: "Leads to" | "Enables" | "Amplifies" | "Blocks";
+          confidence: "Strong" | "Moderate" | "Weak";
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          scenario_id: string;
+          from_node_id: string;
+          to_node_id: string;
+          relationship: "Leads to" | "Enables" | "Amplifies" | "Blocks";
+          confidence: "Strong" | "Moderate" | "Weak";
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          scenario_id?: string;
+          from_node_id?: string;
+          to_node_id?: string;
+          relationship?: "Leads to" | "Enables" | "Amplifies" | "Blocks";
+          confidence?: "Strong" | "Moderate" | "Weak";
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      signposts: {
+        Row: {
+          id: string;
+          project_id: string;
+          scenario_id: string;
+          storyline_id: string | null;
+          name: string;
+          rationale: string | null;
+          status: "On track" | "Watch" | "Alert";
+          citations: unknown;
+          generated_at: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          scenario_id: string;
+          storyline_id?: string | null;
+          name: string;
+          rationale?: string | null;
+          status?: "On track" | "Watch" | "Alert";
+          citations?: unknown;
+          generated_at?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          scenario_id?: string;
+          storyline_id?: string | null;
+          name?: string;
+          rationale?: string | null;
+          status?: "On track" | "Watch" | "Alert";
+          citations?: unknown;
+          generated_at?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      plausibility_checks: {
+        Row: {
+          id: string;
+          project_id: string;
+          scenario_id: string;
+          storyline_id: string | null;
+          score: number;
+          rationale: string;
+          citations: unknown;
+          checked_at: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          scenario_id: string;
+          storyline_id?: string | null;
+          score: number;
+          rationale: string;
+          citations?: unknown;
+          checked_at?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          scenario_id?: string;
+          storyline_id?: string | null;
+          score?: number;
+          rationale?: string;
+          citations?: unknown;
+          checked_at?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      scenario_storylines: {
+        Row: {
+          id: string;
+          project_id: string;
+          scenario_id: string;
+          status: "not_generated" | "generating" | "completed" | "failed";
+          generated_at: string | null;
+          error_message: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          scenario_id: string;
+          status?: "not_generated" | "generating" | "completed" | "failed";
+          generated_at?: string | null;
+          error_message?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          scenario_id?: string;
+          status?: "not_generated" | "generating" | "completed" | "failed";
+          generated_at?: string | null;
+          error_message?: string | null;
           created_at?: string;
           updated_at?: string;
         };

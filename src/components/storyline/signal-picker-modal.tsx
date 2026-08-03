@@ -9,6 +9,8 @@ import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 import { Chip } from "@/components/chip";
 import { ImpactStars } from "./signal-card";
+import { toBackendPhase } from "./story-adapter";
+import { createStorylineNode, updateStorylineNode, createStorylineEdge } from "@/lib/actions/storyline";
 import type { Signal, SteepCategory } from "@/lib/types";
 import type { StoryNode, StoryEdge, StoryPhase } from "./data";
 
@@ -41,7 +43,7 @@ interface NewSignalForm {
   uncertainty: "Low" | "Medium" | "High";
 }
 
-export function SignalPickerModal({ open, onClose, nodes, phases, columnLabels, setNodes, setEdges, showToast }: SignalPickerModalProps) {
+export function SignalPickerModal({ open, onClose, scenarioId, nodes, phases, columnLabels, setNodes, setEdges, showToast }: SignalPickerModalProps) {
   const store = useStore();
   const [tab, setTab] = React.useState<"library" | "create">("library");
   const [search, setSearch] = React.useState("");
@@ -58,6 +60,7 @@ export function SignalPickerModal({ open, onClose, nodes, phases, columnLabels, 
 
   const [form, setForm] = React.useState<NewSignalForm>({ title: "", body: "", category: "Technology", source: "", impact: 3, uncertainty: "Medium" });
   const [formError, setFormError] = React.useState<string | null>(null);
+  const [submitting, setSubmitting] = React.useState(false);
 
   React.useEffect(() => {
     if (open) {
@@ -107,10 +110,13 @@ export function SignalPickerModal({ open, onClose, nodes, phases, columnLabels, 
     });
   };
 
-  const commitAdd = (newChainNodes: StoryNode[], moveTitles: Set<string>) => {
-    if (newChainNodes.length === 0 && moveTitles.size === 0) return;
+  // Local-state commit only — the backend write already happened by the time this is called
+  // (both callers below await creation first, same "write, then render" pattern as
+  // canvas.tsx's insertBetween, needed because real node ids come from the server).
+  const commitAdd = (newChainNodes: StoryNode[], movedIds: Set<string>, newEdges: StoryEdge[] = []) => {
+    if (newChainNodes.length === 0 && movedIds.size === 0) return;
     setNodes((prev) => {
-      const updated = prev.map((n) => (moveTitles.has((n.title || "").toLowerCase()) ? { ...n, phase: placement } : n));
+      const updated = prev.map((n) => (movedIds.has(n.id) ? { ...n, phase: placement } : n));
       const phaseStart = updated.findIndex((n) => n.phase === placement);
       const insertAt =
         phaseStart === -1
@@ -123,41 +129,64 @@ export function SignalPickerModal({ open, onClose, nodes, phases, columnLabels, 
       return [...updated.slice(0, insertAt), ...newChainNodes, ...updated.slice(insertAt)];
     });
 
-    if (connectFrom && newChainNodes.length > 0) {
-      setEdges((es) => [...es, ...newChainNodes.map((n) => ({ from: connectFrom, to: n.id, relationship: "Leads to", confidence: "Moderate" }))]);
+    if (newEdges.length > 0) {
+      setEdges((es) => [...es, ...newEdges]);
     }
 
     const colLabelIdx = phases.findIndex((p) => p.id === placement);
     const colLabel = columnLabels[colLabelIdx] || (phases[colLabelIdx] && phases[colLabelIdx].id) || placement;
-    const total = newChainNodes.length + moveTitles.size;
+    const total = newChainNodes.length + movedIds.size;
     showToast(total === 1 ? `Added 1 signal to ${colLabel}` : `Added ${total} signals to ${colLabel}`);
     onClose();
   };
 
-  const handleAddFromLibrary = () => {
+  const handleAddFromLibrary = async () => {
     if (selected.size === 0) return;
     const picked = library.filter((s) => selected.has(s.id));
-    const newChainNodes: StoryNode[] = [];
-    const moveTitles = new Set<string>();
-    for (const s of picked) {
-      if (chainTitles.has((s.title || "").toLowerCase())) {
-        moveTitles.add(s.title.toLowerCase());
-        continue;
+    // Signals already represented in the chain (matched by whether a node already links to
+    // this signal_id) move to the new placement instead of creating a duplicate node.
+    const alreadyInChain = new Map(nodes.filter((n) => n.signalId).map((n) => [n.signalId as string, n.id]));
+    const toMove = picked.filter((s) => alreadyInChain.has(s.id));
+    const toCreate = picked.filter((s) => !alreadyInChain.has(s.id));
+
+    setSubmitting(true);
+    try {
+      const movedIds = new Set<string>();
+      for (const s of toMove) {
+        const nodeId = alreadyInChain.get(s.id)!;
+        await updateStorylineNode({ id: nodeId, phase: toBackendPhase(placement) });
+        movedIds.add(nodeId);
       }
-      newChainNodes.push({
-        id: "lib_" + s.id + "_" + Date.now().toString(36),
-        phase: placement,
-        cat: s.category,
-        title: s.title,
-        body: s.body || "",
-        year: "—",
-        source: s.source || "Library",
-        impact: s.impact || 3,
-        uncertainty: s.uncertainty || "Medium",
-        strength: 0.6,
-      });
+
+      const newChainNodes: StoryNode[] = [];
+      const newEdges: StoryEdge[] = [];
+      for (const s of toCreate) {
+        const created = await createStorylineNode({ scenarioId, phase: toBackendPhase(placement), signalId: s.id });
+        if (connectFrom) {
+          const edge = await createStorylineEdge({ scenarioId, fromNodeId: connectFrom, toNodeId: created.id, relationship: "Leads to", confidence: "Moderate" });
+          newEdges.push({ id: edge.id, from: connectFrom, to: created.id, relationship: edge.relationship, confidence: edge.confidence });
+        }
+        newChainNodes.push({
+          id: created.id,
+          phase: placement,
+          cat: created.category,
+          title: created.title,
+          body: created.body || "",
+          year: created.year != null ? String(created.year) : "—",
+          source: s.source,
+          impact: s.impact ?? undefined,
+          uncertainty: s.uncertainty ?? undefined,
+          strength: 0.65,
+          signalId: s.id,
+        });
+      }
+      commitAdd(newChainNodes, movedIds, newEdges);
+    } catch (err) {
+      console.error("[signal-picker] failed to add signal(s) to chain", err);
+      showToast("Couldn't add those signals", "error");
+    } finally {
+      setSubmitting(false);
     }
-    commitAdd(newChainNodes, moveTitles);
   };
 
   const handleCreateNew = async () => {
@@ -170,9 +199,9 @@ export function SignalPickerModal({ open, onClose, nodes, phases, columnLabels, 
       return;
     }
     setFormError(null);
-    let newSignal: Signal;
+    setSubmitting(true);
     try {
-      newSignal = await store.createSignal({
+      const newSignal = await store.createSignal({
         projectId: store.activeProjectId,
         category: form.category,
         source: form.source.trim() || "Internal research",
@@ -181,32 +210,41 @@ export function SignalPickerModal({ open, onClose, nodes, phases, columnLabels, 
         impact: form.impact,
         uncertainty: form.uncertainty,
       });
+      const created = await createStorylineNode({ scenarioId, phase: toBackendPhase(placement), signalId: newSignal.id });
+      const newEdges: StoryEdge[] = [];
+      if (connectFrom) {
+        const edge = await createStorylineEdge({ scenarioId, fromNodeId: connectFrom, toNodeId: created.id, relationship: "Leads to", confidence: "Moderate" });
+        newEdges.push({ id: edge.id, from: connectFrom, to: created.id, relationship: edge.relationship, confidence: edge.confidence });
+      }
+      commitAdd(
+        [
+          {
+            id: created.id,
+            phase: placement,
+            cat: created.category,
+            title: created.title,
+            body: created.body || "",
+            year: "—",
+            source: newSignal.source,
+            impact: newSignal.impact ?? undefined,
+            uncertainty: newSignal.uncertainty ?? undefined,
+            strength: 0.65,
+            signalId: newSignal.id,
+          },
+        ],
+        new Set(),
+        newEdges
+      );
     } catch (err) {
       console.error("[signal-picker] failed to create signal", err);
       setFormError("Couldn't create the signal — try again.");
-      return;
+    } finally {
+      setSubmitting(false);
     }
-    commitAdd(
-      [
-        {
-          id: "new_" + Date.now().toString(36),
-          phase: placement,
-          cat: newSignal.category,
-          title: newSignal.title,
-          body: newSignal.body,
-          year: "—",
-          source: newSignal.source,
-          impact: newSignal.impact ?? undefined,
-          uncertainty: newSignal.uncertainty ?? undefined,
-          strength: 0.6,
-        },
-      ],
-      new Set()
-    );
   };
 
   const totalSelectedCount = selected.size;
-  const primaryDisabled = tab === "library" ? totalSelectedCount === 0 : !form.title.trim();
+  const primaryDisabled = submitting || (tab === "library" ? totalSelectedCount === 0 : !form.title.trim());
 
   return (
     <div

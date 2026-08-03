@@ -67,7 +67,7 @@ async function fetchScoredSignalsWithDots(supabase: SupabaseClient, projectId: s
 
   const { data: existingDots, error: dotsError } = await supabase
     .from("matrix_dots")
-    .select("id, signal_id, x, y, is_critical_axis, bucket, bucket_rationale, project_id, created_at")
+    .select("id, signal_id, x, y, is_critical_axis, axis_label, bucket, bucket_rationale, project_id, created_at")
     .eq("project_id", projectId);
   if (dotsError) throw dotsError;
 
@@ -99,7 +99,7 @@ async function fetchScoredSignalsWithDots(supabase: SupabaseClient, projectId: s
 
     const { data: refreshed, error: refreshedError } = await supabase
       .from("matrix_dots")
-      .select("id, signal_id, x, y, is_critical_axis, bucket, bucket_rationale, project_id, created_at")
+      .select("id, signal_id, x, y, is_critical_axis, axis_label, bucket, bucket_rationale, project_id, created_at")
       .eq("project_id", projectId);
     if (refreshedError) throw refreshedError;
     for (const d of refreshed) dotBySignalId.set(d.signal_id, d);

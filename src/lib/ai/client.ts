@@ -57,6 +57,16 @@ interface RunStructuredOptions<T extends z.ZodTypeAny> {
   thinking?: boolean;
   effort?: "low" | "medium" | "high" | "xhigh" | "max";
   maxTokens?: number;
+  /** Grants the model Anthropic's server-executed web_search tool for calls that need to
+   *  ground against live, current information (Signpost, Plausibility score) rather than
+   *  only the project's own stored data — off by default; every existing caller omits this
+   *  and is unaffected. The final answer still comes back as schema-validated structured
+   *  output via output_config below; web_search is an additional tool available in the same
+   *  turn, not a replacement for it. Since runStructured only ever surfaces `parsed_output`,
+   *  any call that turns this on should ask the model to report the real URLs/titles it
+   *  found directly inside its own JSON output (e.g. a `citations` field) rather than relying
+   *  on the caller to parse intermediate web_search_tool_result content blocks. */
+  webSearch?: { maxUses?: number };
 }
 
 function inputHashFor(input: unknown): string {
@@ -102,7 +112,7 @@ async function logRun(args: {
  * (success or final failure) is logged to ai_runs.
  */
 export async function runStructured<T extends z.ZodTypeAny>(opts: RunStructuredOptions<T>): Promise<z.infer<T>> {
-  const { step, projectId, taskPrompt, input, schema, effort = "medium", thinking = false, maxTokens = 4096 } = opts;
+  const { step, projectId, taskPrompt, input, schema, effort = "medium", thinking = false, maxTokens = 4096, webSearch } = opts;
   const promptVersion = opts.promptVersion || "v1";
   const inputHash = inputHashFor(input);
 
@@ -111,6 +121,9 @@ export async function runStructured<T extends z.ZodTypeAny>(opts: RunStructuredO
       model: MODEL,
       max_tokens: maxTokens,
       ...(thinking ? { thinking: { type: "adaptive" } as const } : {}),
+      ...(webSearch
+        ? { tools: [{ type: "web_search_20250305" as const, name: "web_search" as const, max_uses: webSearch.maxUses ?? 5 }] }
+        : {}),
       system: [
         { type: "text", text: SYSTEM_PREAMBLE, cache_control: { type: "ephemeral" } },
         { type: "text", text: taskPrompt },
@@ -139,7 +152,12 @@ export async function runStructured<T extends z.ZodTypeAny>(opts: RunStructuredO
       response = await attempt(
         i === 0 ? undefined : "Your previous response didn't validate against the required schema — return JSON matching it exactly."
       );
-    } catch {
+    } catch (err) {
+      // A real API/transport error (auth, rate limit, permission, etc.) is not a retryable
+      // schema-validation failure — masking it here would discard status/type the caller
+      // needs (e.g. distinguishing "web search unavailable" from "model gave bad JSON").
+      // Only genuine parse/shape failures (truncated/unparseable JSON) fall through to retry.
+      if (err instanceof Anthropic.APIError) throw err;
       lastReason = "schema_validation_failed";
       continue;
     }

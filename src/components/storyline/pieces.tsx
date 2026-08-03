@@ -8,20 +8,21 @@ import { Icons } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 import { FM_DATA } from "@/lib/data";
 import type { Quadrant, Scenario, Signal } from "@/lib/types";
+import type { Database } from "@/lib/supabase/types";
+import { PHASES } from "@/lib/storyline-mapping";
+import { findSignalForGap, type FindSignalCandidate } from "@/lib/actions/ai-storyline";
 import {
   CARD_W,
   RELATIONSHIPS,
   CONFIDENCES,
   DEFAULT_COLUMN_LABELS,
   QUADRANT_LABELS,
-  AXES,
-  SIGNPOSTS_BY_SCENARIO,
-  GAP_BY_SCENARIO,
-  computeChainStrength,
-  type StoryData,
   type StoryNode,
   type StoryEdge,
 } from "./data";
+
+type PlausibilityCheckRow = Database["public"]["Tables"]["plausibility_checks"]["Row"];
+type SignpostRow = Database["public"]["Tables"]["signposts"]["Row"];
 
 export function Divider() {
   return <div className="my-[18px] h-px bg-border" />;
@@ -317,7 +318,52 @@ function EmptyChainIllustration() {
   );
 }
 
-export function StorylineEmptyState({ onAutoSuggest, onBrowseLibrary }: { onAutoSuggest: () => void; onBrowseLibrary: () => void }) {
+export interface StorylineEmptyStateProps {
+  status: "empty" | "generating" | "failed";
+  errorMessage?: string | null;
+  onGenerate: () => void;
+  onBrowseLibrary: () => void;
+}
+
+export function StorylineEmptyState({ status, errorMessage, onGenerate, onBrowseLibrary }: StorylineEmptyStateProps) {
+  if (status === "generating") {
+    return (
+      <div className="flex min-h-full items-center justify-center px-6 py-[60px]">
+        <div className="slide-up flex w-full max-w-[480px] flex-col items-center text-center">
+          <Icons.Refresh size={32} className="animate-spin" stroke="#F97316" />
+          <h3 className="mb-2 mt-5 text-xl font-semibold tracking-[-0.01em] text-brand-dark">Generating your storyline</h3>
+          <p className="m-0 max-w-[420px] text-sm leading-[1.55] text-muted-foreground [text-wrap:pretty]">
+            Building the causal chain and researching current plausibility — this can take a minute or two.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (status === "failed") {
+    return (
+      <div className="flex min-h-full items-center justify-center px-6 py-[60px]">
+        <div className="slide-up flex w-full max-w-[480px] flex-col items-center text-center">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          <h3 className="mb-2 mt-5 text-xl font-semibold tracking-[-0.01em] text-brand-dark">Storyline generation failed</h3>
+          <p className="m-0 max-w-[420px] text-sm leading-[1.55] text-muted-foreground [text-wrap:pretty]">
+            {errorMessage || "Something went wrong while generating this storyline."}
+          </p>
+          <button
+            onClick={onGenerate}
+            className="mt-[22px] inline-flex items-center gap-2 rounded-md border-0 bg-brand-orange px-4 py-2.5 text-[13.5px] font-semibold text-white transition-[background] duration-[120ms] hover:bg-brand-orangeHover"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-full items-center justify-center px-6 py-[60px]">
       <div className="slide-up flex w-full max-w-[480px] flex-col items-center text-center">
@@ -341,18 +387,15 @@ export function StorylineEmptyState({ onAutoSuggest, onBrowseLibrary }: { onAuto
             Browse Signals Library
           </button>
           <button
-            onClick={onAutoSuggest}
+            onClick={onGenerate}
             className="inline-flex items-center gap-2 rounded-md border border-border bg-white px-4 py-2.5 text-[13.5px] font-medium text-brand-dark transition-[border,background] duration-[120ms] hover:border-border-strong hover:bg-[#FAFAFA]"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F97316" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 2 L13.5 8.5 L20 10 L13.5 11.5 L12 18 L10.5 11.5 L4 10 L10.5 8.5 z" />
               <path d="M19 17 L19.8 19.2 L22 20 L19.8 20.8 L19 23 L18.2 20.8 L16 20 L18.2 19.2 z" />
             </svg>
-            Auto-suggest chain from AI
+            Generate storyline
           </button>
-        </div>
-        <div className="mt-7 font-mono text-[11.5px] tracking-[0.04em] text-text-3">
-          Tip · You can also paste a list of events to chain them automatically.
         </div>
       </div>
     </div>
@@ -406,21 +449,43 @@ export function OnboardingTooltip({
 
 /* ─────────────────────── Side panel ─────────────────────── */
 
+export interface StorylineSidePanelProps {
+  open: boolean;
+  onToggle: () => void;
+  scenario: Scenario;
+  scenarioId: string;
+  nodes: StoryNode[];
+  edges: StoryEdge[];
+  plausibility: PlausibilityCheckRow | null;
+  onRefreshGrounding: () => void;
+  refreshing: boolean;
+  signposts: SignpostRow[];
+  showToast: (msg: string, kind?: "success" | "error") => void;
+}
+
+function timeAgo(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const mins = Math.round(ms / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
 export function StorylineSidePanel({
   open,
   onToggle,
   scenario,
-  data,
+  scenarioId,
   nodes,
   edges,
-}: {
-  open: boolean;
-  onToggle: () => void;
-  scenario: Scenario;
-  data: StoryData;
-  nodes: StoryNode[];
-  edges: StoryEdge[];
-}) {
+  plausibility,
+  onRefreshGrounding,
+  refreshing,
+  signposts,
+  showToast,
+}: StorylineSidePanelProps) {
   const [reaxReview, setReaxReview] = React.useState<string[]>(() => {
     try {
       return JSON.parse(localStorage.getItem("fm.reaxReview") || "[]");
@@ -446,21 +511,53 @@ export function StorylineSidePanel({
       localStorage.setItem("fm.reaxReview", JSON.stringify(next));
     } catch {}
   };
-  const strength = computeChainStrength(nodes, edges);
   const quadrantLabel = QUADRANT_LABELS[scenario.quadrant] || "Critical";
-  const signposts = SIGNPOSTS_BY_SCENARIO[scenario.id] || SIGNPOSTS_BY_SCENARIO.sc1;
-  const gap = GAP_BY_SCENARIO[scenario.id] || GAP_BY_SCENARIO.sc1;
 
-  const phaseIdx = (id: string) => {
-    const n = nodes.find((x) => x.id === id);
-    if (!n) return -1;
-    return data.phases.findIndex((p) => p.id === n.phase);
-  };
   const backwardEdges = edges.filter((e) => {
-    const a = phaseIdx(e.from);
-    const b = phaseIdx(e.to);
-    return a >= 0 && b >= 0 && a > b;
+    const a = nodes.find((n) => n.id === e.from);
+    const b = nodes.find((n) => n.id === e.to);
+    if (!a || !b) return false;
+    return PHASES.indexOf(a.phase as (typeof PHASES)[number]) > PHASES.indexOf(b.phase as (typeof PHASES)[number]);
   });
+
+  // First empty phase that a later, populated phase implies should have had something —
+  // the one gap "Find signals" targets. No interior gap (chain empty, or every phase
+  // populated) means nothing to search for.
+  const presentPhases = new Set(nodes.map((n) => n.phase));
+  const gapPhaseIdx = PHASES.findIndex((p, i) => !presentPhases.has(p) && PHASES.slice(i + 1).some((later) => presentPhases.has(later)));
+  const gapPhase = gapPhaseIdx >= 0 ? PHASES[gapPhaseIdx] : null;
+
+  const [gapLoading, setGapLoading] = React.useState(false);
+  const [gapCandidates, setGapCandidates] = React.useState<FindSignalCandidate[] | null>(null);
+  const [gapMessage, setGapMessage] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    setGapCandidates(null);
+    setGapMessage(null);
+  }, [gapPhase]);
+
+  const runFindSignals = async () => {
+    if (!gapPhase) return;
+    setGapLoading(true);
+    setGapCandidates(null);
+    setGapMessage(null);
+    try {
+      const result = await findSignalForGap({
+        scenarioId,
+        phase: gapPhase,
+        gapDescription: `No signals are placed in the ${gapPhase.replace("_", "-")} phase yet, between phases that do have signals.`,
+      });
+      if (!result.sufficientEvidence || result.candidates.length === 0) {
+        setGapMessage(result.gap || "No matching signals found for this gap.");
+      } else {
+        setGapCandidates(result.candidates);
+      }
+    } catch (err) {
+      console.error("[storyline] find-signal-for-gap failed", err);
+      showToast("Couldn't search for signals", "error");
+    } finally {
+      setGapLoading(false);
+    }
+  };
 
   if (!open) {
     return (
@@ -503,29 +600,57 @@ export function StorylineSidePanel({
           <QuadrantMini active={scenario.quadrant} color={scenario.color} />
           <div className="flex-1 text-xs leading-[1.45] text-muted-foreground">
             From <span className="font-medium text-brand-dark">{quadrantLabel}</span> quadrant
-            <div className="mt-0.5 text-text-3">
-              ({AXES.x} × {AXES.y})
-            </div>
+            {(scenario.axisA?.label || scenario.axisB?.label) && (
+              <div className="mt-0.5 text-text-3">
+                ({scenario.axisA?.label || "—"} × {scenario.axisB?.label || "—"})
+              </div>
+            )}
           </div>
         </div>
       </section>
 
       <Divider />
 
-      {/* 2. Chain strength meter */}
+      {/* 2. Plausibility */}
       <section>
         <div className="mb-2 flex items-baseline justify-between">
-          <span className="text-[13px] font-semibold text-brand-dark">Evidence Strength</span>
-          <span className="font-mono text-xs font-semibold text-brand-orange">{strength.pct}%</span>
+          <span className="text-[13px] font-semibold text-brand-dark">Plausibility</span>
+          <span className="font-mono text-xs font-semibold text-brand-orange">{plausibility ? `${plausibility.score}%` : "—"}</span>
         </div>
         <div className="h-1.5 overflow-hidden rounded-full bg-border">
-          <div className="h-full rounded-full bg-brand-orange transition-[width] duration-[600ms] ease-[cubic-bezier(.4,.0,.2,1)]" style={{ width: strength.pct + "%" }} />
+          <div
+            className="h-full rounded-full bg-brand-orange transition-[width] duration-[600ms] ease-[cubic-bezier(.4,.0,.2,1)]"
+            style={{ width: (plausibility?.score ?? 0) + "%" }}
+          />
         </div>
-        <div className="mt-2 text-xs text-muted-foreground">
-          <span className="font-mono font-semibold text-brand-dark">{strength.signalCount}</span> signals chained
-          <span className="mx-1.5 text-border-strong">·</span>
-          <span className="font-mono font-semibold text-brand-dark">{strength.confidence}%</span> confidence
-        </div>
+        {plausibility ? (
+          <>
+            <p className="mt-2 text-xs leading-[1.5] text-muted-foreground [text-wrap:pretty]">{plausibility.rationale}</p>
+            <div className="mt-2 flex items-center justify-between">
+              <span className="font-mono text-[10.5px] text-text-3">Checked {timeAgo(plausibility.checked_at)}</span>
+              <button
+                onClick={onRefreshGrounding}
+                disabled={refreshing}
+                className="inline-flex items-center gap-1 border-0 bg-transparent p-0 text-[12px] font-medium text-brand-orange disabled:opacity-50"
+              >
+                <Icons.Refresh size={11} className={refreshing ? "animate-spin" : undefined} />
+                {refreshing ? "Refreshing…" : "Refresh"}
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="mt-2 flex items-center justify-between">
+            <span className="text-xs text-text-3">Not yet checked.</span>
+            <button
+              onClick={onRefreshGrounding}
+              disabled={refreshing}
+              className="inline-flex items-center gap-1 border-0 bg-transparent p-0 text-[12px] font-medium text-brand-orange disabled:opacity-50"
+            >
+              <Icons.Refresh size={11} className={refreshing ? "animate-spin" : undefined} />
+              {refreshing ? "Checking…" : "Check plausibility"}
+            </button>
+          </div>
+        )}
       </section>
 
       <Divider />
@@ -536,22 +661,37 @@ export function StorylineSidePanel({
           <span className="font-mono text-xs font-semibold uppercase tracking-[0.6px] text-muted-foreground">Signposts to watch</span>
           <span className="text-[11px] text-text-3">{signposts.length}</span>
         </div>
-        <ul className="m-0 flex list-none flex-col gap-3 p-0">
-          {signposts.map((sp, i) => (
-            <li key={i} className="flex gap-2.5">
-              <Icons.Eye size={16} stroke="#F97316" className="mt-px flex-shrink-0" />
-              <div className="min-w-0 flex-1">
-                <div className="text-[13px] leading-[1.4] text-brand-dark [text-wrap:pretty]">{sp}</div>
-                <span className="mt-[5px] inline-block rounded-full bg-bg px-[7px] py-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
-                  Not yet observed
-                </span>
-              </div>
-            </li>
-          ))}
-        </ul>
-        <button className="mt-3 inline-flex items-center gap-1 border-0 bg-transparent p-0 text-[13px] font-medium text-brand-orange">
-          <span className="text-[15px] leading-none">+</span> Add signpost
-        </button>
+        {signposts.length === 0 ? (
+          <div className="py-1 text-[11.5px] text-text-3">None yet — refresh plausibility to generate some.</div>
+        ) : (
+          <ul className="m-0 flex list-none flex-col gap-3 p-0">
+            {signposts.map((sp) => {
+              const citations = Array.isArray(sp.citations) ? (sp.citations as { title?: string; url?: string }[]) : [];
+              const citation = citations[0];
+              return (
+                <li key={sp.id} className="flex gap-2.5">
+                  <Icons.Eye size={16} stroke="#F97316" className="mt-px flex-shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13px] leading-[1.4] text-brand-dark [text-wrap:pretty]">{sp.name}</div>
+                    {citation?.url && (
+                      <a
+                        href={citation.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-0.5 block truncate text-[11px] text-brand-orange hover:underline"
+                      >
+                        {citation.title || citation.url}
+                      </a>
+                    )}
+                    <span className="mt-[5px] inline-block rounded-full bg-bg px-[7px] py-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
+                      {sp.status}
+                    </span>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </section>
 
       <Divider />
@@ -613,27 +753,45 @@ export function StorylineSidePanel({
           </div>
         )}
 
-        <div className="rounded-[10px] border border-brand-orange100 bg-brand-orangeLight p-3">
-          <div className="mb-1.5 flex items-center gap-1.5">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#F97316" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-              <line x1="12" y1="9" x2="12" y2="13" />
-              <line x1="12" y1="17" x2="12.01" y2="17" />
-            </svg>
-            <span className="text-xs font-semibold tracking-[-0.005em] text-brand-orange700">Gap detected</span>
+        {gapPhase && (
+          <div className="rounded-[10px] border border-brand-orange100 bg-brand-orangeLight p-3">
+            <div className="mb-1.5 flex items-center gap-1.5">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#F97316" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                <line x1="12" y1="9" x2="12" y2="13" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+              <span className="text-xs font-semibold tracking-[-0.005em] text-brand-orange700">Gap detected</span>
+            </div>
+            <div className="text-[12.5px] leading-[1.5] text-[#7C2D12] [text-wrap:pretty]">
+              No signals are placed in the <strong className="font-semibold text-brand-dark">{gapPhase.replace("_", "-")}</strong> phase yet.
+            </div>
+            <button
+              onClick={runFindSignals}
+              disabled={gapLoading}
+              className="mt-2.5 inline-flex items-center gap-1 border-0 bg-transparent p-0 text-[13px] font-semibold text-brand-orange disabled:opacity-50"
+            >
+              {gapLoading ? "Searching…" : "Find signals"}
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="5" y1="12" x2="19" y2="12" />
+                <polyline points="12 5 19 12 12 19" />
+              </svg>
+            </button>
+
+            {gapMessage && <div className="mt-2 text-[11.5px] text-[#7C2D12]">{gapMessage}</div>}
+
+            {gapCandidates && gapCandidates.length > 0 && (
+              <ul className="m-0 mt-2.5 flex list-none flex-col gap-2 border-t border-brand-orange100 p-0 pt-2.5">
+                {gapCandidates.map((c) => (
+                  <li key={c.signalId}>
+                    <div className="text-[12.5px] font-semibold text-brand-dark">{c.title}</div>
+                    <div className="text-[11.5px] leading-[1.4] text-[#7C2D12]">{c.rationale}</div>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
-          <div className="text-[12.5px] leading-[1.5] text-[#7C2D12] [text-wrap:pretty]">
-            No signals connect <strong className="font-semibold text-brand-dark">&quot;{gap.from}&quot;</strong> to{" "}
-            <strong className="font-semibold text-brand-dark">&quot;{gap.to}&quot;</strong>. Suggested: {gap.suggest}.
-          </div>
-          <button className="mt-2.5 inline-flex items-center gap-1 border-0 bg-transparent p-0 text-[13px] font-semibold text-brand-orange">
-            Find signals
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="5" y1="12" x2="19" y2="12" />
-              <polyline points="12 5 19 12 12 19" />
-            </svg>
-          </button>
-        </div>
+        )}
       </section>
     </aside>
   );

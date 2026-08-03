@@ -88,13 +88,13 @@ export function PageCanvas() {
         <div className="text-[12.5px] leading-[1.5] text-muted-foreground">{s.summary}</div>
 
         {/* Primary + secondary actions */}
-        <div className="mt-auto flex flex-col items-start gap-1 pt-1">
+        <div className="mt-auto flex items-center justify-between pt-1">
           <button
             onClick={(e) => {
               e.stopPropagation();
               openStoryline(s);
             }}
-            className={"border-0 bg-transparent p-0 text-xs font-medium" + (isHover ? " underline" : "")}
+            className="border-0 bg-transparent p-0 text-[13px] font-semibold"
             style={{ color: s.color }}
           >
             Open storyline →
@@ -104,7 +104,7 @@ export function PageCanvas() {
               e.stopPropagation();
               navigate("/narrative");
             }}
-            className="border-0 bg-transparent p-0 text-xs font-normal text-muted-foreground transition-colors hover:text-brand-dark"
+            className="border-0 bg-transparent p-0 text-[13px] font-medium text-[#374151] transition-colors hover:text-brand-dark"
           >
             View narrative
           </button>

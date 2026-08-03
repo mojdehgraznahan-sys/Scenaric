@@ -16,11 +16,29 @@ import {
   CAT_STYLE,
   DEFAULT_COLUMN_LABELS,
   edgeKey,
-  enrichNode,
-  type StoryData,
+  type StoryPhase,
   type StoryNode,
   type StoryEdge,
 } from "./data";
+import { toBackendPhase } from "./story-adapter";
+import {
+  createStorylineNode,
+  updateStorylineNode,
+  createStorylineEdge,
+  updateStorylineEdge,
+  deleteStorylineEdge,
+  type CreateStorylineEdgeInput,
+} from "@/lib/actions/storyline";
+
+// StoryEdge.relationship/confidence are plain strings client-side (ArrowPopover's <select>
+// works against RELATIONSHIPS/CONFIDENCES, not the narrower backend union) — narrow at the
+// boundary instead of threading the union type through every UI callback.
+function asRelationship(v: string): CreateStorylineEdgeInput["relationship"] {
+  return v as CreateStorylineEdgeInput["relationship"];
+}
+function asConfidence(v: string): CreateStorylineEdgeInput["confidence"] {
+  return v as CreateStorylineEdgeInput["confidence"];
+}
 import { SignalCard, SignalCardPlaceholder } from "./signal-card";
 import { ColumnHeader, ArrowPopover, EndpointHandle, StorylineEmptyState, OnboardingTooltip } from "./pieces";
 
@@ -75,7 +93,7 @@ interface Highlighted {
 }
 
 export interface StorylineCanvasProps {
-  data: StoryData;
+  phases: StoryPhase[];
   scenarioColor: string;
   selected: string | null;
   setSelected: React.Dispatch<React.SetStateAction<string | null>>;
@@ -86,13 +104,16 @@ export interface StorylineCanvasProps {
   setNodes: (u: NodesUpdater) => void;
   edges: StoryEdge[];
   setEdges: (u: EdgesUpdater) => void;
-  onAutoSuggest: () => void;
+  scenarioId: string;
+  generationStatus: "not_generated" | "generating" | "completed" | "failed";
+  generationError: string | null;
+  onGenerate: () => void;
   onBrowseLibrary: () => void;
   showToast: (msg: string, kind?: "success" | "error") => void;
 }
 
 export function StorylineCanvas({
-  data,
+  phases: data,
   scenarioColor,
   selected,
   setSelected,
@@ -103,7 +124,10 @@ export function StorylineCanvas({
   setNodes,
   edges,
   setEdges,
-  onAutoSuggest,
+  scenarioId,
+  generationStatus,
+  generationError,
+  onGenerate,
   onBrowseLibrary,
   showToast,
 }: StorylineCanvasProps) {
@@ -154,13 +178,13 @@ export function StorylineCanvas({
 
   // Group nodes by phase, preserving local order.
   const nodesByPhase: Record<string, StoryNode[]> = {};
-  data.phases.forEach((p) => (nodesByPhase[p.id] = []));
+  data.forEach((p) => (nodesByPhase[p.id] = []));
   nodes.forEach((n) => {
     if (nodesByPhase[n.phase]) nodesByPhase[n.phase].push(n);
-    else nodesByPhase[data.phases[data.phases.length - 1].id].push(n);
+    else nodesByPhase[data[data.length - 1].id].push(n);
   });
 
-  const phaseIdx = React.useCallback((phaseId: string) => data.phases.findIndex((p) => p.id === phaseId), [data]);
+  const phaseIdx = React.useCallback((phaseId: string) => data.findIndex((p) => p.id === phaseId), [data]);
   const isBackward = React.useCallback(
     (fromId: string, toId: string) => {
       const a = nodes.find((n) => n.id === fromId);
@@ -274,7 +298,7 @@ export function StorylineCanvas({
           let overPhase: string | null = null;
           let overIndex = -1;
           if (moved) {
-            for (const phase of data.phases) {
+            for (const phase of data) {
               const colEl = columnRefs.current[phase.id];
               if (!colEl) continue;
               const cr = colEl.getBoundingClientRect();
@@ -341,6 +365,10 @@ export function StorylineCanvas({
               return [...without.slice(0, insertAt), { ...moving, phase: prev.overPhase! }, ...without.slice(insertAt)];
             });
             showToast("Saved");
+            updateStorylineNode({ id: prev.id, phase: toBackendPhase(prev.overPhase!) }).catch((err) => {
+              console.error("[storyline] failed to persist phase move", err);
+              showToast("Couldn't save that move", "error");
+            });
           }
         } else {
           if (prev.overId && !prev.invalid) {
@@ -355,11 +383,32 @@ export function StorylineCanvas({
                 }
               }, 0);
               showToast("Connection created");
+              createStorylineEdge({
+                scenarioId,
+                fromNodeId: newEdge.from,
+                toNodeId: newEdge.to,
+                relationship: asRelationship(newEdge.relationship),
+                confidence: asConfidence(newEdge.confidence),
+              })
+                .then((created) => {
+                  setEdges((es) => es.map((e) => (edgeKey(e) === edgeKey(newEdge) ? { ...e, id: created.id } : e)));
+                })
+                .catch((err) => {
+                  console.error("[storyline] failed to persist new connection", err);
+                  showToast("Couldn't save that connection", "error");
+                });
             } else {
               const newFrom = prev.anchorIsSource ? prev.anchorId : prev.overId;
               const newTo = prev.anchorIsSource ? prev.overId : prev.anchorId;
+              const existingId = edges.find((ed) => edgeKey(ed) === prev.dragEdgeKey)?.id;
               setEdges((es) => es.map((ed) => (edgeKey(ed) === prev.dragEdgeKey ? { ...ed, from: newFrom, to: newTo } : ed)));
               showToast("Connection updated");
+              if (existingId) {
+                updateStorylineEdge({ id: existingId, fromNodeId: newFrom, toNodeId: newTo }).catch((err) => {
+                  console.error("[storyline] failed to persist rewired connection", err);
+                  showToast("Couldn't save that connection", "error");
+                });
+              }
             }
           } else if (prev.overId && prev.invalid) {
             if (prev.overId === prev.anchorId) {
@@ -389,50 +438,91 @@ export function StorylineCanvas({
   }, [pointerDrag && pointerDrag.kind, data, layout, edges, wouldCreateCycle]);
 
   // ─── Insert / edge edits ────────────────────────────────────────────
-  const insertBetween = (edge: StoryEdge) => {
+  // Fully async (write-then-render, not optimistic-first like the drag handlers above) — this
+  // is a discrete button click, not continuous pointer feedback, and needs the new node's real
+  // id before either replacement edge can be created.
+  const insertBetween = async (edge: StoryEdge) => {
     const fromNode = nodes.find((n) => n.id === edge.from);
     const toNode = nodes.find((n) => n.id === edge.to);
-    if (!fromNode || !toNode) return;
-    const fromIdx = data.phases.findIndex((p) => p.id === fromNode.phase);
-    const toIdx = data.phases.findIndex((p) => p.id === toNode.phase);
+    const oldEdgeId = edges.find((e) => e.from === edge.from && e.to === edge.to)?.id;
+    if (!fromNode || !toNode || !oldEdgeId) return;
+    const fromIdx = data.findIndex((p) => p.id === fromNode.phase);
+    const toIdx = data.findIndex((p) => p.id === toNode.phase);
     let midIdx = Math.round((fromIdx + toIdx) / 2);
-    if (midIdx === fromIdx) midIdx = Math.min(data.phases.length - 1, fromIdx + 1);
+    if (midIdx === fromIdx) midIdx = Math.min(data.length - 1, fromIdx + 1);
     if (midIdx === toIdx) midIdx = Math.max(0, toIdx - 1);
     if (midIdx === fromIdx) midIdx = toIdx;
-    const newPhase = data.phases[midIdx].id;
-    const newId = "ins" + Date.now().toString(36);
-    const newNode = enrichNode({
-      id: newId,
-      phase: newPhase,
-      cat: fromNode.cat,
-      title: "New signal",
-      body: "Click Edit to describe how this links the chain.",
-      year: "—",
-      strength: 0.5,
-      source: "Draft",
-      uncertainty: "Medium",
-      impact: 3,
-    });
-    setNodes((ns) => [...ns, newNode]);
-    setEdges((es) => [
-      ...es.filter((e) => !(e.from === edge.from && e.to === edge.to)),
-      { from: edge.from, to: newId, relationship: edge.relationship || "Leads to", confidence: "Moderate" },
-      { from: newId, to: edge.to, relationship: "Leads to", confidence: "Moderate" },
-    ]);
+    const newPhase = data[midIdx].id;
     setHoveredEdge(null);
     setPopover(null);
-    setSelected(newId);
-    showToast("Signal inserted");
+    try {
+      const created = await createStorylineNode({
+        scenarioId,
+        phase: toBackendPhase(newPhase),
+        title: "New signal",
+        body: "Click Edit to describe how this links the chain.",
+        category: fromNode.cat,
+      });
+      const [, newFromEdge, newToEdge] = await Promise.all([
+        deleteStorylineEdge(oldEdgeId),
+        createStorylineEdge({
+          scenarioId,
+          fromNodeId: edge.from,
+          toNodeId: created.id,
+          relationship: asRelationship(edge.relationship || "Leads to"),
+          confidence: "Moderate",
+        }),
+        createStorylineEdge({ scenarioId, fromNodeId: created.id, toNodeId: edge.to, relationship: "Leads to", confidence: "Moderate" }),
+      ]);
+      const newNode: StoryNode = {
+        id: created.id,
+        phase: newPhase,
+        cat: fromNode.cat,
+        title: created.title,
+        body: created.body || "",
+        year: "—",
+        strength: 0.65,
+      };
+      setNodes((ns) => [...ns, newNode]);
+      setEdges((es) => [
+        ...es.filter((e) => !(e.from === edge.from && e.to === edge.to)),
+        { id: newFromEdge.id, from: edge.from, to: created.id, relationship: newFromEdge.relationship, confidence: newFromEdge.confidence },
+        { id: newToEdge.id, from: created.id, to: edge.to, relationship: newToEdge.relationship, confidence: newToEdge.confidence },
+      ]);
+      setSelected(created.id);
+      showToast("Signal inserted");
+    } catch (err) {
+      console.error("[storyline] failed to insert signal", err);
+      showToast("Couldn't insert a signal here", "error");
+    }
   };
 
-  const updateEdge = (key: string, patch: Partial<StoryEdge>) => {
+  const updateEdge = (key: string, patch: { relationship?: string; confidence?: string }) => {
+    const id = edges.find((e) => edgeKey(e) === key)?.id;
     setEdges((es) => es.map((e) => (edgeKey(e) === key ? { ...e, ...patch } : e)));
     showToast("Saved");
+    if (id) {
+      updateStorylineEdge({
+        id,
+        relationship: patch.relationship ? asRelationship(patch.relationship) : undefined,
+        confidence: patch.confidence ? asConfidence(patch.confidence) : undefined,
+      }).catch((err) => {
+        console.error("[storyline] failed to persist connection edit", err);
+        showToast("Couldn't save that change", "error");
+      });
+    }
   };
   const removeEdge = (key: string) => {
+    const id = edges.find((e) => edgeKey(e) === key)?.id;
     setEdges((es) => es.filter((e) => edgeKey(e) !== key));
     setPopover(null);
     showToast("Connection removed");
+    if (id) {
+      deleteStorylineEdge(id).catch((err) => {
+        console.error("[storyline] failed to persist connection removal", err);
+        showToast("Couldn't remove that connection", "error");
+      });
+    }
   };
 
   React.useEffect(() => {
@@ -446,16 +536,39 @@ export function StorylineCanvas({
 
   // Empty state — after all hooks so hook count is stable.
   if (nodes.length === 0) {
-    return <StorylineEmptyState onAutoSuggest={onAutoSuggest} onBrowseLibrary={onBrowseLibrary} />;
+    return (
+      <StorylineEmptyState
+        status={generationStatus === "generating" ? "generating" : generationStatus === "failed" ? "failed" : "empty"}
+        errorMessage={generationError}
+        onGenerate={onGenerate}
+        onBrowseLibrary={onBrowseLibrary}
+      />
+    );
   }
 
   const TOTAL_W = 5 * CARD_W + 4 * COL_GAP;
 
   return (
     <div style={{ minWidth: TOTAL_W + 48, padding: "0 24px", position: "relative" }}>
+      {/* Regeneration in progress / last regeneration failed, but prior data still shown below */}
+      {generationStatus === "generating" && (
+        <div className="mb-4 flex items-center gap-2 rounded-[10px] border border-brand-orange100 bg-brand-orangeLight px-3.5 py-2.5 text-[12.5px] font-medium text-brand-orange700">
+          <Icons.Refresh size={13} className="animate-spin" stroke="#F97316" />
+          Regenerating this storyline — the chain below is still the last completed version.
+        </div>
+      )}
+      {generationStatus === "failed" && (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-[10px] border border-[#FECACA] bg-[#FEF2F2] px-3.5 py-2.5 text-[12.5px] text-[#B91C1C]">
+          <span>Last regeneration failed{generationError ? `: ${generationError}` : "."} The chain below is unaffected.</span>
+          <button onClick={onGenerate} className="flex-shrink-0 border-0 bg-transparent p-0 font-semibold text-[#B91C1C] underline">
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Column headers */}
       <div style={{ display: "grid", gridTemplateColumns: `repeat(5, ${CARD_W}px)`, columnGap: COL_GAP, marginBottom: 18 }}>
-        {data.phases.map((p, i) => (
+        {data.map((p, i) => (
           <ColumnHeader
             key={p.id}
             index={i}
@@ -673,7 +786,7 @@ export function StorylineCanvas({
           })}
 
         {/* Phase columns */}
-        {data.phases.map((phase) => {
+        {data.map((phase) => {
           const items = nodesByPhase[phase.id] || [];
           const cardDragging = pointerDrag && pointerDrag.kind === "card";
           const showPlaceholderAt = cardDragging && pointerDrag.overPhase === phase.id ? pointerDrag.overIndex : -1;
