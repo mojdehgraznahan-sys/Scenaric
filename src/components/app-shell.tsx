@@ -27,7 +27,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     >
       <SideNav navigate={navigate} page={page} />
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", marginLeft: 0 }}>
-        <TopBar page={page} navigate={navigate} />
+        <TopBar page={page} />
         <div style={{ flex: 1, overflow: "hidden", display: "flex" }}>{children}</div>
       </div>
       <AskAI context={page === "signals" ? "signals" : page === "storyline" ? "storyline" : undefined} />

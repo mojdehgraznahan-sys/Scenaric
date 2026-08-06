@@ -5,7 +5,6 @@
 import { Icons } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
 import { useStore } from "@/lib/store";
-import type { Navigate } from "@/lib/use-navigate";
 
 // Breadcrumb labels for the TopBar's left segment (short trail, not the page's own
 // large title). Each page still renders its own big heading below the TopBar.
@@ -24,7 +23,7 @@ const TITLES: Record<string, string> = {
   settings: "Settings",
 };
 
-export function TopBar({ page, navigate }: { page: string; navigate: Navigate }) {
+export function TopBar({ page }: { page: string }) {
   const store = useStore();
   return (
     <div className="flex h-topbar flex-shrink-0 items-center gap-3 border-b border-border bg-white px-5">
@@ -47,12 +46,6 @@ export function TopBar({ page, navigate }: { page: string; navigate: Navigate })
           <Icons.Bell size={14} />
           <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-brand-orange" />
         </Button>
-        {/* Signals/Projects pages have their own primary CTA — suppress the global one there to avoid a duplicate. */}
-        {page !== "signals" && page !== "projects" && (
-          <Button variant="primary" size="sm" onClick={() => navigate("/signals")}>
-            <Icons.Plus size={13} /> Add Signal
-          </Button>
-        )}
       </div>
     </div>
   );

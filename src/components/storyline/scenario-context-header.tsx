@@ -109,7 +109,7 @@ function ScenarioBreadcrumbPicker({
   );
 }
 
-export function ScenarioContextHeader({ view }: { view: string }) {
+export function ScenarioContextHeader({ view, className }: { view: string; className?: string }) {
   const store = useStore();
   const scenarios = store.scenarios || [];
   const [scenarioId, setScenarioId] = usePersistentState<string | undefined>(
@@ -121,11 +121,26 @@ export function ScenarioContextHeader({ view }: { view: string }) {
   const v = SCENARIO_VIEWS.find((x) => x.id === view);
   const viewLabel = v ? v.label : "";
 
+  // Matrix has no per-scenario content — one shared matrix/axis pair produces all 4
+  // scenarios at once, so there's nothing for a scenario picker to switch here. Show a
+  // plain, non-interactive breadcrumb instead of the Storyline/Narrative scenario picker.
+  if (view === "matrix") {
+    return (
+      <div className={cn("py-4", className)}>
+        <div className="flex items-center gap-1">
+          <span className="text-sm font-semibold tracking-[-0.01em] text-brand-dark">{store.project.name}</span>
+          <span className="font-mono text-xs text-text-3">/</span>
+          <span className="font-mono text-xs text-text-3">{viewLabel}</span>
+        </div>
+      </div>
+    );
+  }
+
   if (!scenario) return null;
   const tagline = SCENARIO_TAGLINES[scenario.id] || scenario.summary || scenario.tagline || "";
 
   return (
-    <div className="py-4">
+    <div className={cn("py-4", className)}>
       <ScenarioBreadcrumbPicker
         label={viewLabel}
         scenario={scenario}

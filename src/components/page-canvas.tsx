@@ -5,7 +5,6 @@
 import * as React from "react";
 import { Icons } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
-import { ReAxisModal } from "@/components/matrix/modals";
 import { useStore } from "@/lib/store";
 import { useNavigate } from "@/lib/use-navigate";
 import type { Scenario, Quadrant } from "@/lib/types";
@@ -17,7 +16,24 @@ export function PageCanvas() {
   const scenarios = store.scenarios;
   const navigate = useNavigate();
   const [hovered, setHovered] = React.useState<string | null>(null);
-  const [reaxisOpen, setReaxisOpen] = React.useState(false);
+  const [devPickerOpen, setDevPickerOpen] = React.useState(false);
+  const devPickerRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!devPickerOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (devPickerRef.current && !devPickerRef.current.contains(e.target as Node)) setDevPickerOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDevPickerOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [devPickerOpen]);
 
   const isRecentlyReaxed = (s: Scenario) => !!s.reaxedAt && Date.now() - s.reaxedAt < REAX_BADGE_MS;
   const fmtReaxDate = (ts: number) => new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
@@ -123,14 +139,46 @@ export function PageCanvas() {
               Four coherent futures from your two critical uncertainties.
             </div>
           </div>
-          <div className="flex gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setReaxisOpen(true)}>
-              <Icons.Refresh size={12} /> Re-axis
-            </Button>
-            <Button variant="primary" size="sm" onClick={() => navigate("/narrative")}>
-              Develop narratives <Icons.ArrowRight size={12} />
-            </Button>
-          </div>
+          {scenarios.length > 0 && (
+            <div ref={devPickerRef} className="relative flex">
+              <Button
+                variant="primary"
+                size="sm"
+                className="rounded-r-none"
+                onClick={() => openStoryline(scenarios[0])}
+              >
+                Develop storyline <Icons.ArrowRight size={12} />
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                className="rounded-l-none border-l border-l-white/25 px-2"
+                onClick={() => setDevPickerOpen((o) => !o)}
+                aria-label="Choose scenario to develop"
+              >
+                <Icons.ChevronDown size={12} />
+              </Button>
+
+              {devPickerOpen && (
+                <div className="slide-up absolute right-0 top-[calc(100%+6px)] z-[60] w-60 rounded-[9px] border border-border bg-white p-[5px] shadow-[0_10px_28px_rgba(15,23,42,0.12)]">
+                  {scenarios.map((s, i) => (
+                    <button
+                      key={s.id}
+                      onClick={() => {
+                        openStoryline(s);
+                        setDevPickerOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-[9px] py-[7px] text-left text-[12.5px] hover:bg-[#FAFAFA]"
+                    >
+                      <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ background: s.color }} />
+                      <span className="min-w-0 flex-1 truncate text-brand-dark">{s.name}</span>
+                      <span className="flex-shrink-0 font-mono text-[10.5px] text-text-3">{i + 1}/4</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Axis labels + grid */}
@@ -196,9 +244,6 @@ export function PageCanvas() {
           </div>
         </div>
       )}
-
-      {/* Re-axis migration modal */}
-      <ReAxisModal open={reaxisOpen} onClose={() => setReaxisOpen(false)} navigate={navigate} />
     </div>
   );
 }

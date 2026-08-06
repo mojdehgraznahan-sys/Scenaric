@@ -415,16 +415,10 @@ export function PageMatrix({ navigate }: { navigate: Navigate }) {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden p-5">
-      <div className="flex-shrink-0">
-        <ScenarioContextHeader view="matrix" />
-      </div>
-
       <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-card p-[18px] shadow-card">
-        <div className="mb-3.5 flex flex-shrink-0 items-center justify-between">
-          <div className="text-[13px] text-muted-foreground">
-            Drag signals to rank them. The top-right quadrant becomes your scenario axes.
-          </div>
-          <div className="flex gap-2">
+        <div className="mb-3.5 flex flex-shrink-0 items-start justify-between">
+          <ScenarioContextHeader view="matrix" className="flex-shrink-0 p-0" />
+          <div className="flex flex-shrink-0 gap-2">
             {hasScenarios && (
               <Button variant="ghost" size="sm" onClick={() => setReaxisOpen(true)}>
                 <Icons.Refresh size={12} /> Re-axis
@@ -434,6 +428,9 @@ export function PageMatrix({ navigate }: { navigate: Navigate }) {
               {hasScenarios ? "View Scenarios" : "Build Scenarios"} <Icons.ArrowRight size={12} />
             </Button>
           </div>
+        </div>
+        <div className="mb-3.5 flex-shrink-0 text-[13px] text-muted-foreground">
+          Drag signals to rank them. The top-right quadrant becomes your scenario axes.
         </div>
 
         {store.pendingScoringCount > 0 && (

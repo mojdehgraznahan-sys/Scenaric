@@ -8,6 +8,7 @@ import * as React from "react";
 import { Icons } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
 import { useStore, usePersistentState } from "@/lib/store";
+import { useNavigate } from "@/lib/use-navigate";
 import type { Database } from "@/lib/supabase/types";
 import { REAL_PHASES, toStoryNode, toStoryEdge, computeChainConfidence } from "./story-adapter";
 import { DEFAULT_COLUMN_LABELS, edgeKey, type StoryNode, type StoryEdge } from "./data";
@@ -36,6 +37,7 @@ async function loadStoryline(scenarioId: string): Promise<StorylineApiResult> {
 
 export function PageStoryline() {
   const store = useStore();
+  const navigate = useNavigate();
   const scenarios = store.scenarios;
   const [scenarioId] = usePersistentState<string>("fm.storylineScenario", (scenarios[0] && scenarios[0].id) || "sc1");
   const scenario =
@@ -207,15 +209,8 @@ export function PageStoryline() {
           <ScenarioContextHeader view="storyline" />
         </div>
         <div className="flex items-center gap-2.5 pt-6">
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => {
-              setModalInitialPhase(undefined);
-              setAddModalOpen(true);
-            }}
-          >
-            <Icons.Plus size={12} /> Add Signal to Chain
+          <Button variant="primary" size="sm" onClick={() => navigate("/narrative")}>
+            Develop narratives <Icons.ArrowRight size={12} />
           </Button>
         </div>
       </div>

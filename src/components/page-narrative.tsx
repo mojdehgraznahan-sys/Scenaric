@@ -28,18 +28,20 @@ export function PageNarrative() {
   if (!scenarios.length || !current) {
     return (
       <div className="scroll-y flex-1 overflow-y-auto p-5">
-        <ScenarioContextHeader view="narrative" />
-        <div className="mt-10 flex flex-col items-center justify-center px-6 py-12 text-center">
-          <div className="mb-4 flex h-[52px] w-[52px] items-center justify-center rounded-[14px] bg-brand-orangeLight">
-            <Icons.Edit3 size={22} stroke="#F97316" />
+        <div className="rounded-xl border border-border bg-card p-7 shadow-card">
+          <ScenarioContextHeader view="narrative" className="pt-0 pb-4" />
+          <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
+            <div className="mb-4 flex h-[52px] w-[52px] items-center justify-center rounded-[14px] bg-brand-orangeLight">
+              <Icons.Edit3 size={22} stroke="#F97316" />
+            </div>
+            <h3 className="mb-2 text-lg font-semibold text-brand-dark">No scenarios yet</h3>
+            <p className="mb-[18px] max-w-[360px] text-sm leading-[1.5] text-muted-foreground">
+              Build your four scenarios from the Matrix, then come back to write their narratives.
+            </p>
+            <Button variant="primary" size="sm" onClick={() => navigate("/matrix")}>
+              <Icons.Grid size={12} /> Go to Matrix
+            </Button>
           </div>
-          <h3 className="mb-2 text-lg font-semibold text-brand-dark">No scenarios yet</h3>
-          <p className="mb-[18px] max-w-[360px] text-sm leading-[1.5] text-muted-foreground">
-            Build your four scenarios from the Matrix, then come back to write their narratives.
-          </p>
-          <Button variant="primary" size="sm" onClick={() => navigate("/matrix")}>
-            <Icons.Grid size={12} /> Go to Matrix
-          </Button>
         </div>
       </div>
     );
@@ -47,7 +49,6 @@ export function PageNarrative() {
 
   return (
     <div className="scroll-y flex-1 overflow-y-auto p-5">
-      <ScenarioContextHeader view="narrative" />
       <div className="grid grid-cols-[240px_1fr] gap-4">
         {/* Scenarios list */}
         <div className="self-start rounded-xl border border-border bg-card p-3 shadow-card">
@@ -72,6 +73,7 @@ export function PageNarrative() {
 
         {/* Narrative reading view */}
         <div className="rounded-xl border border-border bg-card p-7 shadow-card">
+          <ScenarioContextHeader view="narrative" className="pt-0 pb-4" />
           <div className="mb-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <span className="h-4 w-4 rounded-full" style={{ background: current.color }} />
