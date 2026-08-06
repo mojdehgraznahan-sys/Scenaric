@@ -239,6 +239,14 @@ export interface Store {
   updateMatrixDotPosition: (projectId: string, signalId: string, x: number, y: number) => Promise<void>;
   selectedDot: string;
   setSelectedDot: (v: string) => void;
+  // Storyline's Ask AI drawer (ask-ai.tsx, context="storyline") lives in AppShell, a sibling
+  // of the page content — this is how it learns which scenario + highlighted path (the
+  // currently-selected node's ancestors/descendants) page-storyline.tsx currently has, for
+  // the "Validate this chain"/"Explain this chain" tasks. nodeTitleById covers every node in
+  // the current chain (not just the highlighted subset) so task results can show real titles
+  // instead of raw node ids.
+  storylineAskAiContext: { scenarioId: string; nodeIds: string[]; nodeTitleById: Record<string, string> } | null;
+  setStorylineAskAiContext: (v: { scenarioId: string; nodeIds: string[]; nodeTitleById: Record<string, string> } | null) => void;
   scenarios: Scenario[];
   scenariosLoading: boolean;
   setScenarios: (v: Scenario[]) => void;
@@ -657,6 +665,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   // ---- Everything below this line is still localStorage-simulated (later build-order steps) ----
   const [selectedDot, setSelectedDot] = useState("d2");
+  const [storylineAskAiContext, setStorylineAskAiContext] = useState<{
+    scenarioId: string;
+    nodeIds: string[];
+    nodeTitleById: Record<string, string>;
+  } | null>(null);
   const [indicators, setIndicators] = usePersistentState("fm.indicators", seed.indicators);
   const [strategies, setStrategies] = usePersistentState("fm.strategies", seed.strategies);
   const [criticalUncertainties, setCriticalUncertainties] = usePersistentState<string[]>(
@@ -728,6 +741,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     updateMatrixDotPosition,
     selectedDot,
     setSelectedDot,
+    storylineAskAiContext,
+    setStorylineAskAiContext,
     scenarios,
     scenariosLoading,
     setScenarios,

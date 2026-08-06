@@ -32,6 +32,10 @@ export interface SignalPickerModalProps {
   setNodes: (updater: StoryNode[] | ((prev: StoryNode[]) => StoryNode[])) => void;
   setEdges: (updater: StoryEdge[] | ((prev: StoryEdge[]) => StoryEdge[])) => void;
   showToast: (msg: string, kind?: "success" | "error") => void;
+  // Set when opened from a specific phase column's "+ Add signal" slot — wins over
+  // defaultColumn's fewest-nodes heuristic below, but still just seeds the same editable
+  // dropdown rather than skipping it.
+  initialPlacement?: string;
 }
 
 interface NewSignalForm {
@@ -43,7 +47,7 @@ interface NewSignalForm {
   uncertainty: "Low" | "Medium" | "High";
 }
 
-export function SignalPickerModal({ open, onClose, scenarioId, nodes, phases, columnLabels, setNodes, setEdges, showToast }: SignalPickerModalProps) {
+export function SignalPickerModal({ open, onClose, scenarioId, nodes, phases, columnLabels, setNodes, setEdges, showToast, initialPlacement }: SignalPickerModalProps) {
   const store = useStore();
   const [tab, setTab] = React.useState<"library" | "create">("library");
   const [search, setSearch] = React.useState("");
@@ -68,12 +72,12 @@ export function SignalPickerModal({ open, onClose, scenarioId, nodes, phases, co
       setSearch("");
       setFilterCat("All");
       setSelected(new Set());
-      setPlacement(defaultColumn);
+      setPlacement(initialPlacement ?? defaultColumn);
       setConnectFrom("");
       setForm({ title: "", body: "", category: "Technology", source: "", impact: 3, uncertainty: "Medium" });
       setFormError(null);
     }
-  }, [open, defaultColumn]);
+  }, [open, defaultColumn, initialPlacement]);
 
   React.useEffect(() => {
     if (!open) return;

@@ -66,3 +66,20 @@ export function toStoryEdge(row: StorylineEdgeRow): StoryEdge {
 export function toBackendPhase(phaseId: string): Phase {
   return PHASES.includes(phaseId as Phase) ? (phaseId as Phase) : "precursors";
 }
+
+// Confidence — a property of the chain itself (evidentiary strength), deliberately NOT the
+// same thing as Plausibility (an AI-assessed causal-logic judgment, generateScenarioGrounding
+// in ai-grounding.ts). A plain formula over data already loaded client-side, no AI call, no
+// DB round-trip, so it's always current — recomputed on every render from whatever nodes/
+// edges are currently in state.
+//
+// Weighted: grounding ratio highest (most direct read of "is this backed by real signals or
+// freeform text"), then the linked signals' own impact rating, then how densely the nodes are
+// connected relative to a minimally-connected chain (nodes - 1 edges).
+export function computeChainConfidence(nodes: StoryNode[], edges: StoryEdge[]): number {
+  if (nodes.length === 0) return 0;
+  const groundedRatio = nodes.filter((n) => n.signalId).length / nodes.length;
+  const avgImpact = nodes.reduce((sum, n) => sum + (n.impact ?? 3), 0) / nodes.length / 5;
+  const edgeRatio = Math.min(1, edges.length / Math.max(1, nodes.length - 1));
+  return Math.round(100 * (0.5 * groundedRatio + 0.3 * avgImpact + 0.2 * edgeRatio));
+}

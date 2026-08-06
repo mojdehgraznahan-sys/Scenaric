@@ -97,20 +97,36 @@ satisfies the step-8 gate.
 - **Always labeled as the product's own extension**, same as Strategic Options —
   never implied to be Schwartz's step 8 itself in UI copy or docs.
 
-## Plausibility / confidence score — live, re-checkable, and separate from `scenarios.plausible`
+## Confidence and Plausibility — two different questions about a storyline, not one
 
-`scenarios.plausible` (step 5's own boolean + `implausibility_note`) is a **static**
-judgment made once, at scenario-build time, about whether a quadrant's axis-pole
-combination is internally coherent (see step 5's hard constraints below). It is
-never re-evaluated after the scenario is built.
+Both are product-level additions layered on top of step 6's Storyline. They used
+to accidentally read the same number; they are deliberately different questions
+and must stay that way — never let one be derived from or default to the other.
 
-**Plausibility score is a different, separate, product-level concept**: a live
-estimate (0-100 + rationale + citations) of how plausible a scenario currently
-looks *given the state of the world right now*, generated via AI + live web search,
-explicitly re-checkable and expected to shift over time as real-world events unfold.
-Never store it in or derive it from `scenarios.plausible`, and never present a stale
-plausibility check as current without a visible "last checked" timestamp — the whole
-point of this concept is that yesterday's check can be wrong today.
+**Confidence** (Storyline page header stat) — evidentiary strength of the chain
+itself: is it actually backed by real signals, or mostly freeform text? A plain
+formula (`computeChainConfidence`, `story-adapter.ts`) over data already loaded —
+proportion of nodes with a real `signal_id`, the average impact rating of the
+signals they're grounded in, and edge density relative to node count. Not an AI
+call, not stored, not re-checked — recomputed on every read from whatever the
+chain currently is.
+
+**Plausibility** (Storyline page side panel, "Checked Xm ago" / "Refresh") — an
+AI-assessed, re-checkable judgment of whether the chain's own **causal logic**
+holds together: does each edge represent a believable cause-effect link, are
+there logical gaps or contradictions between nodes, does the chain actually
+arrive at the scenario's stated `logic`. Generated via a dedicated AI call
+(`generateScenarioGrounding`, `ai-grounding.ts`) that reasons over the storyline's
+own nodes/edges — not web search, not "how plausible does this look given
+current events" (an earlier version of this concept was defined that way; it
+no longer is). Always re-checkable, always shows when it was last checked.
+
+Separate from both: `scenarios.plausible` (step 5's own boolean +
+`implausibility_note`) is a **static** judgment made once, at scenario-build
+time, about whether a quadrant's axis-pole combination is internally coherent
+(see step 5's hard constraints below). It is never re-evaluated after the
+scenario is built, and neither Confidence nor Plausibility should be stored in
+or derived from it.
 
 ## Hard constraints (never violate these when building any page/endpoint)
 

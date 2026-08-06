@@ -8,7 +8,7 @@ import * as React from "react";
 import { Chip } from "@/components/chip";
 import { CARD_W, type StoryNode } from "./data";
 
-const CARD_MIN_H = 140;
+const CARD_MIN_H = 144;
 
 const UNCERTAINTY_STYLE: Record<string, { bg: string; fg: string }> = {
   High: { bg: "#FEF2F2", fg: "#EF4444" },
@@ -183,7 +183,7 @@ export const SignalCard = React.forwardRef<HTMLDivElement, SignalCardProps>(func
       {/* Hover-revealed action row */}
       <div
         className="-mt-0.5 overflow-hidden transition-[height,opacity] duration-[120ms]"
-        style={{ height: hover && !dragging ? 16 : 0, opacity: hover && !dragging ? 1 : 0 }}
+        style={{ height: hover && !dragging ? 20 : 0, opacity: hover && !dragging ? 1 : 0 }}
       >
         <button
           onPointerDown={(e) => e.stopPropagation()}

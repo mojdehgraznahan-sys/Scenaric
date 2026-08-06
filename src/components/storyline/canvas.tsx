@@ -109,6 +109,9 @@ export interface StorylineCanvasProps {
   generationError: string | null;
   onGenerate: () => void;
   onBrowseLibrary: () => void;
+  // Same modal/flow as onBrowseLibrary, but from a specific column's "+ Add signal" slot —
+  // pre-selects that phase instead of the modal's own fewest-nodes default.
+  onAddSignalToPhase: (phaseId: string) => void;
   showToast: (msg: string, kind?: "success" | "error") => void;
 }
 
@@ -129,6 +132,7 @@ export function StorylineCanvas({
   generationError,
   onGenerate,
   onBrowseLibrary,
+  onAddSignalToPhase,
   showToast,
 }: StorylineCanvasProps) {
   const [onboardSeen, setOnboardSeen] = usePersistentState("fm.storyOnboardSeen", false);
@@ -846,6 +850,7 @@ export function StorylineCanvas({
 
               {/* Add slot */}
               <button
+                onClick={() => onAddSignalToPhase(phase.id)}
                 style={{
                   border: "1.5px dashed #E5E7EB",
                   borderRadius: 10,

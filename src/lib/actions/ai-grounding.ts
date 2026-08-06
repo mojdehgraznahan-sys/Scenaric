@@ -1,11 +1,23 @@
 "use server";
 
-// Scenario grounding — combines Signpost and Plausibility score (SCHWARTZ_METHODOLOGY_SKILL.md's
-// "Signpost" and "Plausibility / confidence score" sections) into ONE web-search-grounded Claude
-// call instead of two, since both need the same current-news research. Replaces the earlier
-// separate checkScenarioPlausibility (ai-plausibility.ts) and generateSignposts (ai-signposts.ts) —
-// neither had any caller yet, so this is a straight replacement, not a parallel path. Still
-// distinct from the static, build-order Step 8 `indicators` table and from
+// Scenario grounding — combines Plausibility and Signpost (SCHWARTZ_METHODOLOGY_SKILL.md's
+// "Plausibility / confidence score" and "Signpost" sections) into ONE Claude call. Two
+// deliberately different kinds of judgment sharing one call for cost reasons, not because
+// they're the same thing:
+//   - Plausibility: does the storyline chain's own causal logic hold together (every edge a
+//     believable cause->effect link, no gaps/contradictions, the realized end state actually
+//     following from the chain and the scenario's own `logic`) — reasoning over data already
+//     in the DB, no web search needed for this half.
+//   - Signposts: real, current, externally observable developments — needs web search.
+// The model can still use web_search selectively within the same turn for the signposts half
+// even though the plausibility half doesn't need it, so combining still saves a call.
+//
+// Distinct from Confidence (page-storyline.tsx's header stat, computeChainConfidence in
+// story-adapter.ts) — a plain formula over the chain's own evidentiary strength (signal
+// linkage, signal ratings, edge density), not an AI judgment, not stored here. The two used to
+// accidentally read the same number; they're deliberately different questions now.
+//
+// Also distinct from the static, build-order Step 8 `indicators` table and from
 // `scenarios.plausible`/`implausibility_note` (Step 5's one-time, static axis-logic coherence
 // judgment) — never conflate either with its canonical cousin.
 import { createClient } from "@/lib/supabase/server";
@@ -18,19 +30,19 @@ import type { Database } from "@/lib/supabase/types";
 type SignpostRow = Database["public"]["Tables"]["signposts"]["Row"];
 
 const ScenarioGroundingSchema = z.object({
-  // Plausibility half — unconditional: always produce a score + rationale, even if current
-  // events say nothing either way, same as the standalone check this replaces. Never gated on
-  // sufficient_evidence — "nothing directly relevant found" is itself a valid, honestly-
-  // reported answer here, not a failure state.
-  confidence_score: z.number().int().min(0).max(100),
+  // Plausibility half — unconditional: always produce a score + rationale, even for a thin or
+  // empty chain (the prompt asks the model to say so honestly rather than fabricate a
+  // judgment). Never gated on sufficient_evidence — that gate is for signposts, where forcing
+  // a weak candidate is worse than returning none; a coherence judgment doesn't have that
+  // failure mode.
+  plausibility_score: z.number().int().min(0).max(100),
   // min(20): observed in testing that the model can occasionally return an empty rationale
-  // alongside a nonsensical/inconsistent score and garbled gap text — internally inconsistent
-  // output that still satisfied a bare z.string(). This is short enough to allow a terse real
+  // alongside a nonsensical/inconsistent score and garbled text — internally inconsistent
+  // output that still satisfied a bare z.string(). Short enough to allow a terse real
   // rationale but rejects the empty-string degenerate case, which sends it back through
   // runStructured's existing retry-once-on-schema-failure path instead of writing garbage to
   // plausibility_checks.
   plausibility_rationale: z.string().min(20),
-  sources: z.array(z.object({ title: z.string(), url: z.string(), snippet: z.string() })),
   // Signposts half — gated: forcing weak/generic signposts when nothing discriminating was
   // found is worse than returning none.
   signposts_sufficient_evidence: z.boolean(),
@@ -49,53 +61,64 @@ const ScenarioGroundingSchema = z.object({
     .max(6),
 });
 
-const GROUNDING_TASK_PROMPT = `Task: Ground ONE scenario against the real, current state of the world, using
-live web search. Produce two things from the same research pass:
+const GROUNDING_TASK_PROMPT = `Task: Produce two different judgments about ONE scenario in a single pass.
 
-(1) A plausibility assessment — how plausible this scenario currently
-    looks given what's actually happening right now, NOT whether the
-    scenario's internal axis-pole logic is coherent (that was already
-    judged once, statically, when the scenario was built, and is a
-    separate field you don't touch here).
+(1) Plausibility — does this scenario's storyline chain (chain_nodes,
+    chain_edges, given below) actually hold together as a causal
+    argument? This is NOT about whether real-world current events
+    support the scenario (that's not what this field measures), and NOT
+    the scenario's internal axis-pole logic (scenario_logic already
+    passed step 5's static coherence check when the scenario was built —
+    don't re-judge that). Specifically assess:
+    - Does each edge represent a believable, defensible cause-effect
+      link between its two nodes, respecting the stated relationship
+      (Leads to / Enables / Amplifies / Blocks)?
+    - Are there logical gaps — a node whose causal justification from
+      what precedes it is weak or missing?
+    - Are there contradictions — nodes that undermine or work against
+      each other?
+    - Does the "realized" phase node plausibly follow from the rest of
+      the chain, and does the overall chain actually arrive at
+      scenario_logic (not just gesture at it)?
+    If chain_nodes is empty or too thin to assess (no storyline
+    generated yet, or only 1-2 nodes), say so plainly in the rationale
+    and give a low score reflecting "not yet assessable" — never
+    fabricate a coherence judgment for a chain that isn't there.
 
-(2) 3-6 signposts — specific, observable, near-term developments that,
-    if they happened, would suggest this scenario is becoming more
-    likely. Each must be discriminating: it should NOT equally well
-    signal one of this scenario's sibling scenarios (same axes,
-    different quadrant).
-
-Use the web_search tool to find real, current news/developments relevant
-to the forces underpinning this scenario (the axis forces, and the
-causal logic in the scenario's own end-state description) before
-answering either part.
-
-Critical distinction for BOTH parts: a genuine signal is real-world
-movement you found via search that bears on whether this future is
-unfolding — NOT a restatement of the scenario's own premise dressed up
-as evidence. If your rationale or a signpost could be written without
-having searched anything, it's not grounded — discard it.
+(2) 3-6 signposts — specific, observable, near-term real-world
+    developments that, if they happened, would suggest this scenario is
+    becoming more likely. Each must be discriminating: it should NOT
+    equally well signal one of this scenario's sibling scenarios (same
+    axes, different quadrant). Use the web_search tool to find real,
+    current news/developments relevant to the forces underpinning this
+    scenario before answering this part — a genuine signpost is grounded
+    in something you actually found, not a restatement of the scenario's
+    own premise dressed up as evidence.
 
 Input: { focal_question: string,
-         scenario: {name, end_state} /* end_state is the scenario's own
-         already-written narrative/summary — the target to assess
-         plausibility of and build signposts toward, not something to
-         re-derive */,
+         scenario: {name, end_state, logic} /* end_state is the scenario's own
+         already-written narrative/summary; logic is step 5's causal argument
+         for the quadrant — the target chain_nodes/chain_edges should arrive
+         at */,
+         chain_nodes: [{phase, title, signal_id}] /* signal_id: null means a
+         freeform/manual node, still valid, just not signal-grounded */,
+         chain_edges: [{from, to, relationship, confidence}],
          axis_a: {signal_id, label}, axis_b: {signal_id, label} /* the 2
-         forces that define this scenario's quadrant */,
+         forces that define this scenario's quadrant — signposts context only */,
          sibling_scenarios: [{name, tagline}] /* other scenarios sharing
          this project's axes, for signpost discrimination */,
          horizon: string }
 
 Rules:
-- Every source (plausibility) and source_title/source_url (each
-  signpost) must be a real URL/title you actually found via web_search —
-  never fabricated, never a plausible-sounding source you didn't
-  actually retrieve. snippet is a short quote or paraphrase of what that
-  source actually said, not a generic description.
-- confidence_score: 0 (current events strongly undermine this
-  trajectory) to 100 (current events strongly support it).
-- plausibility_rationale: 2-4 sentences, citing specific real
-  developments (or their genuine absence) that inform the score.
+- plausibility_score: 0 (the chain doesn't hold together — major gaps
+  or contradictions) to 100 (every link is well-justified and the chain
+  clearly arrives at scenario_logic).
+- plausibility_rationale: 2-4 sentences, citing the SPECIFIC node(s) or
+  edge(s) that most support or undermine the score — not a generic
+  restatement of the scenario.
+- source_title/source_url (each signpost) must be a real URL/title you
+  actually found via web_search — never fabricated, never a
+  plausible-sounding source you didn't actually retrieve.
 - Each signpost must be phrased as a checkable, dated, or thresholded
   event ("X ruling published", "Y index crosses Z%") — never a vague
   directional claim ("regulation increases"). rationale is one sentence:
@@ -107,11 +130,10 @@ Rules:
   signposts, set signposts_sufficient_evidence:false, a one-sentence
   signposts_gap, and an empty signposts array — do not force weak or
   generic signposts. This does not affect the plausibility half, which
-  is never gated.
+  is never gated the same way.
 
 Output schema:
-{ confidence_score: number (0-100), plausibility_rationale: string,
-  sources: [{ title, url, snippet }],
+{ plausibility_score: number (0-100), plausibility_rationale: string,
   signposts_sufficient_evidence: boolean, signposts_gap?: string,
   signposts: [{ text, rationale, source_title, source_url }] }`;
 
@@ -119,7 +141,6 @@ export interface ScenarioGroundingResult {
   plausibility: {
     score: number;
     rationale: string;
-    sources: { title: string; url: string; snippet: string }[];
     checkedAt: string;
   };
   signposts: {
@@ -175,6 +196,30 @@ export async function generateScenarioGrounding(scenarioId: string): Promise<Sce
     siblingScenarios = siblings.map((s) => ({ name: s.name, tagline: s.tagline }));
   }
 
+  // The storyline chain itself — what the plausibility half actually reasons over. Absent
+  // until autoSuggestStoryline (or manual editing) has produced nodes; an empty chain is a
+  // valid, honestly-reportable input, not an error (see the prompt's own instruction for it).
+  const { data: storylineNodes, error: nodesError } = await supabase
+    .from("storyline_nodes")
+    .select("id, phase, title, signal_id")
+    .eq("scenario_id", scenarioId)
+    .order("created_at", { ascending: true });
+  if (nodesError) throw nodesError;
+
+  const { data: storylineEdges, error: edgesError } = await supabase
+    .from("storyline_edges")
+    .select("from_node_id, to_node_id, relationship, confidence")
+    .eq("scenario_id", scenarioId);
+  if (edgesError) throw edgesError;
+
+  const chainNodes = storylineNodes.map((n) => ({ phase: n.phase, title: n.title, signal_id: n.signal_id }));
+  const chainEdges = storylineEdges.map((e) => ({
+    from: e.from_node_id,
+    to: e.to_node_id,
+    relationship: e.relationship,
+    confidence: e.confidence,
+  }));
+
   const focalQuestion = project.refined_focal_question ?? project.focal_question;
   // narrative is the scenario's own manually-written end-state description (Step 6) — nullable,
   // since not every scenario has one written yet. Fall back to the always-AI-generated summary
@@ -189,7 +234,9 @@ export async function generateScenarioGrounding(scenarioId: string): Promise<Sce
       taskPrompt: GROUNDING_TASK_PROMPT,
       input: {
         focal_question: focalQuestion,
-        scenario: { name: scenario.name, end_state: endState },
+        scenario: { name: scenario.name, end_state: endState, logic: scenario.logic },
+        chain_nodes: chainNodes,
+        chain_edges: chainEdges,
         axis_a: axisA,
         axis_b: axisB,
         sibling_scenarios: siblingScenarios,
@@ -200,9 +247,9 @@ export async function generateScenarioGrounding(scenarioId: string): Promise<Sce
       thinking: false,
       webSearch: { maxUses: 5 },
       // Default (4096) left one observed response looking truncated (garbled gap text cut off
-      // mid-word) — this call's output can run long (rationale + up to 6 signposts + sources),
-      // on top of whatever the web_search tool turns consumed. A bit of headroom, not a fix in
-      // itself; the schema tightening above is what actually rejects a bad response.
+      // mid-word) — this call's output can run long (rationale + up to 6 signposts), on top of
+      // whatever the web_search tool turns consumed. A bit of headroom, not a fix in itself;
+      // the schema tightening above is what actually rejects a bad response.
       maxTokens: 6000,
     });
   } catch (err) {
@@ -212,30 +259,26 @@ export async function generateScenarioGrounding(scenarioId: string): Promise<Sce
 
   // Plausibility is append-only — every call inserts a new row, never overwrites a prior
   // check. "Current score" is just the most recent row for a scenario_id; history is the
-  // point of this table.
+  // point of this table. citations is always [] now — this is a reasoning judgment over the
+  // chain itself, not a web-search-grounded claim, so there's nothing to cite (the column
+  // stays for schema compatibility with signposts' own citations, unused here).
   const { data: plausibilityRow, error: plausibilityError } = await supabase
     .from("plausibility_checks")
     .insert({
       project_id: scenario.project_id,
       scenario_id: scenarioId,
-      score: output.confidence_score,
+      score: output.plausibility_score,
       rationale: output.plausibility_rationale,
-      citations: output.sources,
+      citations: [],
     })
     .select()
     .single();
   if (plausibilityError) throw plausibilityError;
 
+  const plausibility = { score: plausibilityRow.score, rationale: plausibilityRow.rationale, checkedAt: plausibilityRow.checked_at };
+
   if (!output.signposts_sufficient_evidence || output.signposts.length === 0) {
-    return {
-      plausibility: {
-        score: plausibilityRow.score,
-        rationale: plausibilityRow.rationale,
-        sources: output.sources,
-        checkedAt: plausibilityRow.checked_at,
-      },
-      signposts: { sufficientEvidence: false, gap: output.signposts_gap, signposts: [] },
-    };
+    return { plausibility, signposts: { sufficientEvidence: false, gap: output.signposts_gap, signposts: [] } };
   }
 
   // Replace any prior generated set for this scenario — same "regenerate replaces"
@@ -258,13 +301,5 @@ export async function generateScenarioGrounding(scenarioId: string): Promise<Sce
     .select();
   if (insertError) throw insertError;
 
-  return {
-    plausibility: {
-      score: plausibilityRow.score,
-      rationale: plausibilityRow.rationale,
-      sources: output.sources,
-      checkedAt: plausibilityRow.checked_at,
-    },
-    signposts: { sufficientEvidence: true, signposts: insertedSignposts },
-  };
+  return { plausibility, signposts: { sufficientEvidence: true, signposts: insertedSignposts } };
 }

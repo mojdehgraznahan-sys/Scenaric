@@ -1,10 +1,11 @@
 "use client";
 
 // Floating "Ask AI" launcher + chat drawer — available on every app page.
-// Faithful Tailwind/shadcn port of the handoff ask-ai.jsx (canned-reply demo chat), now
-// with one real path: context="signals" (passed from app-shell.tsx when on the Signals
-// page) calls askSignalsChat for real, grounded answers instead of picking a canned
-// reply. Every other page keeps the original canned-reply behavior untouched.
+// Faithful Tailwind/shadcn port of the handoff ask-ai.jsx (canned-reply demo chat). Two real
+// paths now: context="signals" (app-shell.tsx, on the Signals page) calls askSignalsChat for
+// real, grounded freeform chat; context="storyline" (on the Storyline page) is a fixed task
+// menu, never freeform — see the STORYLINE_TASKS branch below. Every other page keeps the
+// original canned-reply demo behavior untouched.
 import * as React from "react";
 import { Icons } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,11 @@ import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 import { askSignalsChat, type SignalsChatResult } from "@/lib/actions/ai-signals";
 import { AIGenerationFailedError } from "@/lib/ai/errors";
+import type {
+  ValidatePlausibilityResult,
+  ValidateChainResult,
+  MissingLinksResult,
+} from "@/lib/actions/ai-storyline-tasks";
 
 interface ChatMsg {
   role: "ai" | "user";
@@ -59,11 +65,31 @@ const SIGNALS_SUGGESTED = [
   "Summarize my Economic signals",
 ];
 
+type StorylineTaskId = "validate_plausibility" | "validate_chain" | "find_missing_links" | "explain_chain";
+
+const STORYLINE_TASKS: { id: StorylineTaskId; label: string; needsPath: boolean }[] = [
+  { id: "validate_plausibility", label: "Validate plausibility", needsPath: false },
+  { id: "validate_chain", label: "Validate this chain", needsPath: true },
+  { id: "find_missing_links", label: "Find missing links", needsPath: false },
+  { id: "explain_chain", label: "Explain this chain", needsPath: true },
+];
+
+interface StorylineResultEntry {
+  task: StorylineTaskId;
+  ts: number;
+  ok: boolean;
+  error?: string;
+  plausibility?: ValidatePlausibilityResult;
+  chain?: ValidateChainResult;
+  missing?: MissingLinksResult;
+  explanation?: string;
+}
+
 function Dot({ delay = 0 }: { delay?: number }) {
   return <span className="h-1.5 w-1.5 rounded-full bg-text-3" style={{ animation: "blink 1.2s infinite ease-in-out", animationDelay: delay + "ms" }} />;
 }
 
-export function AskAI({ context }: { context?: "signals" }) {
+export function AskAI({ context }: { context?: "signals" | "storyline" }) {
   const store = useStore();
   const [open, setOpen] = React.useState(false);
   const [messages, setMessages] = React.useState<ChatMsg[]>(context === "signals" ? SIGNALS_INITIAL : INITIAL);
@@ -167,6 +193,38 @@ export function AskAI({ context }: { context?: "signals" }) {
     }
   };
 
+  // Storyline mode — fixed task menu, never freeform. Results are ephemeral (not persisted
+  // to localStorage like the other two modes' text-only messages), since they're structured
+  // diagnostics tied to the current live chain rather than a conversation worth keeping.
+  const [storylineResults, setStorylineResults] = React.useState<StorylineResultEntry[]>([]);
+  const [runningTask, setRunningTask] = React.useState<StorylineTaskId | null>(null);
+
+  const runStorylineTask = async (taskId: StorylineTaskId) => {
+    const ctx = store.storylineAskAiContext;
+    if (!ctx) return;
+    setRunningTask(taskId);
+    try {
+      const res = await fetch(`/api/scenarios/${ctx.scenarioId}/storyline/ask-ai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task: taskId, nodeIds: ctx.nodeIds }),
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      const data = await res.json();
+      const entry: StorylineResultEntry = { task: taskId, ts: Date.now(), ok: true };
+      if (taskId === "validate_plausibility") entry.plausibility = data as ValidatePlausibilityResult;
+      else if (taskId === "validate_chain") entry.chain = data as ValidateChainResult;
+      else if (taskId === "find_missing_links") entry.missing = data as MissingLinksResult;
+      else entry.explanation = (data as { explanation: string }).explanation;
+      setStorylineResults((r) => [entry, ...r]);
+    } catch (err) {
+      console.error("[ask-ai] storyline task failed", err);
+      setStorylineResults((r) => [{ task: taskId, ts: Date.now(), ok: false, error: "Something went wrong running that task." }, ...r]);
+    } finally {
+      setRunningTask(null);
+    }
+  };
+
   const suggested = context === "signals" ? SIGNALS_SUGGESTED : SUGGESTED;
   const emptyGreetingCount = context === "signals" ? SIGNALS_INITIAL.length : INITIAL.length;
 
@@ -199,12 +257,20 @@ export function AskAI({ context }: { context?: "signals" }) {
               <div className="flex-1">
                 <div className="text-sm font-semibold tracking-[-0.01em]">Ask AI</div>
                 <div className="font-mono text-[11px] tracking-[0.04em] text-text-3">
-                  {context === "signals" ? "SIGNALS MODE · GROUNDED IN YOUR SIGNALS" : "ANALYST · READING APAC EXPANSION 2030"}
+                  {context === "signals"
+                    ? "SIGNALS MODE · GROUNDED IN YOUR SIGNALS"
+                    : context === "storyline"
+                      ? "STORYLINE MODE · SCOPED TASKS ONLY"
+                      : "ANALYST · READING APAC EXPANSION 2030"}
                 </div>
               </div>
               <button
-                onClick={() => setMessages([{ role: "ai", text: "Cleared. What would you like to explore?" }])}
-                title="New conversation"
+                onClick={() =>
+                  context === "storyline"
+                    ? setStorylineResults([])
+                    : setMessages([{ role: "ai", text: "Cleared. What would you like to explore?" }])
+                }
+                title={context === "storyline" ? "Clear results" : "New conversation"}
                 className="rounded-md border-0 bg-transparent p-1.5 text-text-3"
               >
                 <Icons.Refresh size={14} />
@@ -214,6 +280,109 @@ export function AskAI({ context }: { context?: "signals" }) {
               </button>
             </div>
 
+            {context === "storyline" ? (
+              // Fixed task menu, never freeform — no input bar at all for this mode (replaced,
+              // not just hidden). Results render as cards below the menu, newest first.
+              <div className="scroll-y flex flex-1 flex-col gap-2.5 p-4">
+                <div className="flex flex-col gap-1.5">
+                  <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">TASKS</div>
+                  {STORYLINE_TASKS.map((t) => {
+                    const pathEmpty = (store.storylineAskAiContext?.nodeIds.length ?? 0) === 0;
+                    const disabled = !!runningTask || !store.storylineAskAiContext || (t.needsPath && pathEmpty);
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => runStorylineTask(t.id)}
+                        disabled={disabled}
+                        title={t.needsPath && pathEmpty ? "Select a node to highlight a path first" : undefined}
+                        className="rounded-[10px] border border-border bg-white px-3 py-2.5 text-left text-[12.5px] text-[#374151] transition-[border,background] duration-[120ms] hover:border-brand-orange100 hover:bg-brand-orangeLight disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {runningTask === t.id ? "Running…" : t.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {storylineResults.length > 0 && (
+                  <div className="mt-1 flex flex-col gap-2.5">
+                    <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">RESULTS</div>
+                    {storylineResults.map((r, i) => {
+                      const label = STORYLINE_TASKS.find((t) => t.id === r.task)?.label ?? r.task;
+                      const titleFor = (id: string) => store.storylineAskAiContext?.nodeTitleById[id] ?? id;
+                      return (
+                        <div key={i} className="rounded-[10px] border border-border bg-bg p-3 text-brand-dark">
+                          <div className="mb-1.5 flex items-center justify-between gap-2">
+                            <span className="text-[12.5px] font-semibold">{label}</span>
+                            <span className="font-mono text-[10px] text-text-3">{new Date(r.ts).toLocaleTimeString()}</span>
+                          </div>
+                          {!r.ok && <div className="text-[12.5px] text-[#EF4444]">{r.error}</div>}
+                          {r.ok && r.plausibility && (
+                            <div className="text-[12.5px] leading-[1.5]">
+                              <div className="mb-1 font-mono text-xs font-semibold text-brand-orange">{r.plausibility.score}%</div>
+                              <p className="m-0 text-muted-foreground">{r.plausibility.rationale}</p>
+                              {r.plausibility.weakLinks.length > 0 && (
+                                <ul className="m-0 mt-2 flex list-none flex-col gap-1 p-0">
+                                  {r.plausibility.weakLinks.map((w, j) => (
+                                    <li key={j} className="text-[11.5px] text-[#92400E]">
+                                      — {titleFor(w.fromNodeId)} → {titleFor(w.toNodeId)}: {w.issue}
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          )}
+                          {r.ok && r.chain && (
+                            <div className="text-[12.5px] leading-[1.5]">
+                              {r.chain.findings.length === 0 ? (
+                                <p className="m-0 text-muted-foreground">Not enough of a path selected to validate.</p>
+                              ) : (
+                                <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+                                  {r.chain.findings.map((f, j) => (
+                                    <li key={j} className={f.sound ? "text-[#065F46]" : "text-[#92400E]"}>
+                                      {f.sound ? "✓" : "⚠"} {titleFor(f.fromNodeId)} → {titleFor(f.toNodeId)}
+                                      {f.issue ? `: ${f.issue}` : ""}
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          )}
+                          {r.ok && r.missing && (
+                            <div className="text-[12.5px] leading-[1.5]">
+                              {r.missing.thinChain && <p className="mb-1.5 text-[#92400E]">This chain is thin (fewer than 4 signals).</p>}
+                              {r.missing.gaps.length === 0 ? (
+                                <p className="m-0 text-muted-foreground">No gaps detected.</p>
+                              ) : (
+                                r.missing.gaps.map((g, j) => (
+                                  <div key={j} className="mb-2">
+                                    <div className="font-semibold">{g.phase.replace("_", "-")}</div>
+                                    {!g.sufficientEvidence || g.candidates.length === 0 ? (
+                                      <p className="m-0 text-muted-foreground">{g.gap || "No matching signals found."}</p>
+                                    ) : (
+                                      <ul className="m-0 flex list-none flex-col gap-1 p-0">
+                                        {g.candidates.map((c) => (
+                                          <li key={c.signalId}>
+                                            — {c.title}: {c.rationale}
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    )}
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          )}
+                          {r.ok && r.explanation !== undefined && (
+                            <p className="m-0 text-[12.5px] leading-[1.5] text-muted-foreground [text-wrap:pretty]">{r.explanation}</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <>
             {/* Messages */}
             <div ref={scrollRef} className="scroll-y flex flex-1 flex-col gap-2.5 p-4">
               {messages.map((m, i) => (
@@ -304,6 +473,8 @@ export function AskAI({ context }: { context?: "signals" }) {
                 AI ANALYST · CLAUDE 4 · GROUNDED IN YOUR SOURCES
               </div>
             </div>
+              </>
+            )}
           </aside>
         </>
       )}

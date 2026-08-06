@@ -4,9 +4,16 @@ import { autoSuggestStoryline, markStorylineStatus } from "@/lib/actions/ai-stor
 import { generateScenarioGrounding } from "@/lib/actions/ai-grounding";
 import { describeError } from "@/lib/api/error-response";
 
-// Two concurrent medium-effort model calls, one with web search enabled — no after()/
-// waitUntil() available on this Next.js version (14.2.35) to run them in the background, so
-// this awaits both within a generous budget instead. Adjust to your hosting plan's actual cap.
+// Two medium-effort model calls, one with web search enabled — no after()/waitUntil()
+// available on this Next.js version (14.2.35) to run them in the background, so this awaits
+// both within a generous budget instead. Adjust to your hosting plan's actual cap.
+//
+// Sequential, not concurrent: generateScenarioGrounding's plausibility half now reads
+// storyline_nodes/storyline_edges (to judge the chain's causal coherence), and
+// autoSuggestStoryline replaces those rows wholesale (delete then insert) — running both at
+// once would race grounding's read against storyline's write, reading a stale or
+// half-written chain. Storyline must fully commit first. This makes total latency additive
+// instead of the max of the two, which is why this budget is generous.
 export const maxDuration = 300;
 
 export async function POST(_request: Request, { params }: { params: { id: string } }) {
@@ -23,19 +30,28 @@ export async function POST(_request: Request, { params }: { params: { id: string
 
   // Belt-and-suspenders: autoSuggestStoryline re-asserts 'generating' itself as its first
   // action, but marking it here too means a client polling GET /storyline sees 'generating'
-  // immediately, even before either call below has actually started.
+  // immediately, even before the storyline call below has actually started.
   await markStorylineStatus(supabase, scenario.project_id, scenarioId, { status: "generating", error_message: null });
 
-  // allSettled, not all — these are independent calls; one failing shouldn't cancel or hide
-  // the other's result. The storyline half already manages scenario_storylines.status
-  // internally (autoSuggestStoryline); the grounding half has no persisted status column
-  // (deliberate — plausibility_checks is append-only history, no "failed" concept), so its
-  // outcome is reported directly in this response instead. POST /refresh-grounding is the
-  // retry path for a failed grounding half.
-  const [storylineResult, groundingResult] = await Promise.allSettled([
-    autoSuggestStoryline(scenarioId),
-    generateScenarioGrounding(scenarioId),
-  ]);
+  // Each call is independent for reporting purposes (one failing shouldn't hide the other's
+  // result) even though they now run sequentially rather than concurrently. The storyline half
+  // already manages scenario_storylines.status internally (autoSuggestStoryline); the
+  // grounding half has no persisted status column (deliberate — plausibility_checks is
+  // append-only history, no "failed" concept), so its outcome is reported directly in this
+  // response instead. POST /refresh-grounding is the retry path for a failed grounding half.
+  let storylineResult: { status: "fulfilled"; value: Awaited<ReturnType<typeof autoSuggestStoryline>> } | { status: "rejected"; reason: unknown };
+  try {
+    storylineResult = { status: "fulfilled", value: await autoSuggestStoryline(scenarioId) };
+  } catch (reason) {
+    storylineResult = { status: "rejected", reason };
+  }
+
+  let groundingResult: { status: "fulfilled"; value: Awaited<ReturnType<typeof generateScenarioGrounding>> } | { status: "rejected"; reason: unknown };
+  try {
+    groundingResult = { status: "fulfilled", value: await generateScenarioGrounding(scenarioId) };
+  } catch (reason) {
+    groundingResult = { status: "rejected", reason };
+  }
 
   return NextResponse.json({
     storyline:
@@ -52,7 +68,7 @@ export async function POST(_request: Request, { params }: { params: { id: string
       groundingResult.status === "fulfilled"
         ? {
             ok: true,
-            confidenceScore: groundingResult.value.plausibility.score,
+            plausibilityScore: groundingResult.value.plausibility.score,
             signpostsSufficientEvidence: groundingResult.value.signposts.sufficientEvidence,
             signpostCount: groundingResult.value.signposts.signposts.length,
           }

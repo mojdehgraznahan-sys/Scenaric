@@ -9,7 +9,7 @@ import { Icons } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
 import { useStore, usePersistentState } from "@/lib/store";
 import type { Database } from "@/lib/supabase/types";
-import { REAL_PHASES, toStoryNode, toStoryEdge } from "./story-adapter";
+import { REAL_PHASES, toStoryNode, toStoryEdge, computeChainConfidence } from "./story-adapter";
 import { DEFAULT_COLUMN_LABELS, edgeKey, type StoryNode, type StoryEdge } from "./data";
 import { ScenarioContextHeader } from "./scenario-context-header";
 import { StorylineCanvas } from "./canvas";
@@ -46,6 +46,9 @@ export function PageStoryline() {
   const [columnLabels, setColumnLabels] = usePersistentState<string[]>("fm.storyColumnLabels", DEFAULT_COLUMN_LABELS);
   const [panelOpen, setPanelOpen] = usePersistentState("fm.storyPanelOpen", true);
   const [addModalOpen, setAddModalOpen] = React.useState(false);
+  // Set when the modal is opened from a specific phase column's "+ Add signal" slot, so the
+  // modal can pre-select that column instead of its own fewest-nodes default.
+  const [modalInitialPhase, setModalInitialPhase] = React.useState<string | undefined>(undefined);
 
   // Page-level toast
   const [toast, setToast] = React.useState<StorylineToastState | null>(null);
@@ -117,14 +120,24 @@ export function PageStoryline() {
     }
   }, [scenarioId, reload, showToast]);
 
+  // Calls the same Ask AI "Validate plausibility" task as the storyline-mode Ask AI menu
+  // (ai-storyline-tasks.ts's validateStorylinePlausibility) — not /refresh-grounding, which
+  // is signposts+plausibility combined; this is plausibility only, no web search, reasoning
+  // over the chain itself. The side panel only renders score/rationale/checked-at, same as
+  // before — the richer per-weak-link breakdown this task also returns is shown in the Ask AI
+  // drawer, not here.
   const runRefreshGrounding = React.useCallback(async () => {
     setRefreshing(true);
     try {
-      const res = await fetch(`/api/scenarios/${scenarioId}/storyline/refresh-grounding`, { method: "POST" });
+      const res = await fetch(`/api/scenarios/${scenarioId}/storyline/ask-ai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task: "validate_plausibility" }),
+      });
       if (!res.ok) throw new Error(`Refresh failed (${res.status}).`);
       showToast("Plausibility refreshed");
     } catch (err) {
-      console.error("[storyline] refresh-grounding request failed", err);
+      console.error("[storyline] validate-plausibility request failed", err);
       showToast("Refresh failed", "error");
     } finally {
       await reload();
@@ -134,6 +147,10 @@ export function PageStoryline() {
 
   const status = generating ? "generating" : (loaded?.storyline?.status ?? "not_generated");
   const errorMessage = loaded?.storyline?.error_message ?? null;
+
+  // Evidentiary strength of the chain itself — a formula, not the AI-assessed Plausibility
+  // judgment shown in the side panel (deliberately distinct concepts, see story-adapter.ts).
+  const confidence = React.useMemo(() => computeChainConfidence(nodes, edges), [nodes, edges]);
 
   // Highlight path from a selected node (ancestors + descendants).
   const highlighted = React.useMemo(() => {
@@ -162,6 +179,20 @@ export function PageStoryline() {
     return { nodes: nodeSet, edges: new Set(allEdges.map(edgeKey)) };
   }, [selected, edges]);
 
+  // Keeps the Ask AI drawer (mounted in AppShell, a sibling of this page) current on which
+  // scenario + highlighted path to scope "Validate this chain"/"Explain this chain" to, and
+  // node titles (every node, not just the highlighted subset) so its results can name nodes
+  // instead of showing raw ids.
+  React.useEffect(() => {
+    store.setStorylineAskAiContext({
+      scenarioId,
+      nodeIds: highlighted ? Array.from(highlighted.nodes) : [],
+      nodeTitleById: Object.fromEntries(nodes.map((n) => [n.id, n.title])),
+    });
+    return () => store.setStorylineAskAiContext(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scenarioId, highlighted, nodes]);
+
   if (loadError) {
     return (
       <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground">{loadError}</div>
@@ -176,7 +207,14 @@ export function PageStoryline() {
           <ScenarioContextHeader view="storyline" />
         </div>
         <div className="flex items-center gap-2.5 pt-6">
-          <Button variant="primary" size="sm" onClick={() => setAddModalOpen(true)}>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => {
+              setModalInitialPhase(undefined);
+              setAddModalOpen(true);
+            }}
+          >
             <Icons.Plus size={12} /> Add Signal to Chain
           </Button>
         </div>
@@ -197,10 +235,10 @@ export function PageStoryline() {
             <div className="font-mono text-[10.5px] tracking-[0.06em] text-text-3">CONFIDENCE</div>
             <div className="mt-1 flex items-center gap-1.5">
               <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[#F3F4F6]">
-                <div className="h-full" style={{ width: (loaded?.plausibility?.score ?? 0) + "%", background: scenario.color }} />
+                <div className="h-full" style={{ width: confidence + "%", background: scenario.color }} />
               </div>
               <span className="font-mono text-xs font-semibold" style={{ color: scenario.color }}>
-                {loaded?.plausibility ? `${loaded.plausibility.score}%` : "—"}
+                {nodes.length > 0 ? `${confidence}%` : "—"}
               </span>
             </div>
           </div>
@@ -229,7 +267,14 @@ export function PageStoryline() {
               generationStatus={status}
               generationError={errorMessage}
               onGenerate={runGenerate}
-              onBrowseLibrary={() => setAddModalOpen(true)}
+              onBrowseLibrary={() => {
+                setModalInitialPhase(undefined);
+                setAddModalOpen(true);
+              }}
+              onAddSignalToPhase={(phaseId) => {
+                setModalInitialPhase(phaseId);
+                setAddModalOpen(true);
+              }}
               showToast={showToast}
             />
           )}
@@ -256,6 +301,7 @@ export function PageStoryline() {
       <SignalPickerModal
         open={addModalOpen}
         onClose={() => setAddModalOpen(false)}
+        initialPlacement={modalInitialPhase}
         scenarioId={scenarioId}
         nodes={nodes}
         edges={edges}

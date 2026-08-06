@@ -38,7 +38,7 @@ export function SideNav({ navigate, page }: { navigate: Navigate; page: string }
     {
       label: "INPUTS",
       items: [
-        { id: "knowledge", label: "Knowledge Base", icon: <Icons.Database size={14} />, dot: true },
+        { id: "knowledge", label: "Knowledge Base", icon: <Icons.Database size={14} /> },
         { id: "signals", label: "Signals", icon: <Icons.Radio size={14} /> },
       ],
     },
@@ -52,7 +52,7 @@ export function SideNav({ navigate, page }: { navigate: Navigate; page: string }
       label: "SCENARIOS",
       items: [
         { id: "canvas", label: "Canvas", icon: <Icons.Compass size={14} /> },
-        { id: "storyline", label: "Storyline", icon: <Icons.Trending size={14} />, badge: "NEW", shortcut: "2" },
+        { id: "storyline", label: "Storyline", icon: <Icons.Trending size={14} />, shortcut: "2" },
         { id: "narrative", label: "Narrative", icon: <Icons.Edit3 size={14} />, shortcut: "3" },
       ],
     },
