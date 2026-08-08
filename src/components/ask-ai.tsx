@@ -1,10 +1,12 @@
 "use client";
 
 // Floating "Ask AI" launcher + chat drawer — available on every app page.
-// Faithful Tailwind/shadcn port of the handoff ask-ai.jsx (canned-reply demo chat). Two real
-// paths now: context="signals" (app-shell.tsx, on the Signals page) calls askSignalsChat for
-// real, grounded freeform chat; context="storyline" (on the Storyline page) is a fixed task
-// menu, never freeform — see the STORYLINE_TASKS branch below. Every other page keeps the
+// Faithful Tailwind/shadcn port of the handoff ask-ai.jsx (canned-reply demo chat). Real
+// paths now: context="signals" (Signals page) calls askSignalsChat for real, grounded
+// freeform chat; context="storyline"/"narrative" (Storyline/Narrative pages) are each a
+// fixed task menu — see STORYLINE_TASKS/NARRATIVE_TASKS below — PLUS a real grounded
+// "Ask anything…" freeform input alongside it (ScenarioChatPanel, backed by
+// askScenarioChat), never in place of the scoped tasks. Every other page keeps the
 // original canned-reply demo behavior untouched.
 import * as React from "react";
 import { Icons } from "@/lib/icons";
@@ -113,6 +115,71 @@ interface NarrativeResultEntry {
 
 function Dot({ delay = 0 }: { delay?: number }) {
   return <span className="h-1.5 w-1.5 rounded-full bg-text-3" style={{ animation: "blink 1.2s infinite ease-in-out", animationDelay: delay + "ms" }} />;
+}
+
+// "Ask anything…" freeform input, sitting alongside (below) Storyline's and Narrative's
+// fixed task menus — never replacing them. Backed by askScenarioChat (ai-scenario-chat.ts),
+// a real grounded chat scoped to the current scenario's own storyline/narrative/implications/
+// indicators, same discipline as Signals' askSignalsChat — not the canned-reply demo.
+function ScenarioChatPanel({
+  messages,
+  input,
+  setInput,
+  thinking,
+  onSend,
+}: {
+  messages: ChatMsg[];
+  input: string;
+  setInput: (v: string) => void;
+  thinking: boolean;
+  onSend: (text?: string) => void;
+}) {
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages, thinking]);
+
+  return (
+    <div className="mt-1 flex flex-col gap-2 border-t border-[#F3F4F6] pt-3">
+      <div className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">ASK ANYTHING</div>
+      {messages.length > 0 && (
+        <div ref={scrollRef} className="flex max-h-[240px] flex-col gap-2 overflow-y-auto">
+          {messages.map((m, i) => (
+            <div
+              key={i}
+              className={cn(
+                "max-w-[90%] whitespace-pre-wrap rounded-xl px-3 py-2 text-[12.5px] leading-[1.5]",
+                m.role === "ai" ? "self-start bg-bg text-brand-dark" : "self-end bg-brand-orange text-white"
+              )}
+            >
+              {m.text}
+            </div>
+          ))}
+          {thinking && (
+            <div className="flex items-center gap-1.5 self-start rounded-xl bg-bg px-3 py-2">
+              <Dot delay={0} />
+              <Dot delay={150} />
+              <Dot delay={300} />
+            </div>
+          )}
+        </div>
+      )}
+      <div className="flex items-center gap-1 rounded-xl border border-border bg-white p-1.5 focus-within:border-brand-orange">
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onSend();
+          }}
+          placeholder="Ask anything…"
+          className="flex-1 border-0 bg-transparent px-2.5 py-[7px] text-[13px] outline-none"
+        />
+        <Button variant="primary" onClick={() => onSend()} disabled={!input.trim() || thinking} className="h-8 w-8 p-2">
+          <Icons.Send size={12} />
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 export function AskAI({ context }: { context?: "signals" | "storyline" | "narrative" }) {
@@ -283,6 +350,46 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
     }
   };
 
+  // "Ask anything…" alongside the fixed task menus above — shared between storyline and
+  // narrative context since both are scoped to the same scenario and hit the same grounded
+  // chat endpoint. Ephemeral like storylineResults/narrativeResults (not persisted to
+  // localStorage): resets whenever the scoped scenario id changes, including switching
+  // between the Storyline and Narrative pages for a DIFFERENT scenario — but a scenario
+  // stays continuous across those two pages if it's the same one, since both draw the id
+  // from the same underlying source (fm.storylineScenario).
+  const scenarioChatScenarioId =
+    context === "storyline" ? store.storylineAskAiContext?.scenarioId : context === "narrative" ? store.narrativeAskAiContext?.scenarioId : undefined;
+  const [scenarioChatMessages, setScenarioChatMessages] = React.useState<ChatMsg[]>([]);
+  const [scenarioChatInput, setScenarioChatInput] = React.useState("");
+  const [scenarioChatThinking, setScenarioChatThinking] = React.useState(false);
+
+  React.useEffect(() => {
+    setScenarioChatMessages([]);
+  }, [scenarioChatScenarioId]);
+
+  const sendScenarioChat = async (text?: string) => {
+    const t = (text || scenarioChatInput).trim();
+    if (!t || !scenarioChatScenarioId) return;
+    setScenarioChatMessages((m) => [...m, { role: "user", text: t }]);
+    setScenarioChatInput("");
+    setScenarioChatThinking(true);
+    try {
+      const res = await fetch(`/api/scenarios/${scenarioChatScenarioId}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: t }),
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      const data: { answer: string; cites: string[] } = await res.json();
+      setScenarioChatMessages((m) => [...m, { role: "ai", text: data.answer, cites: data.cites }]);
+    } catch (err) {
+      console.error("[ask-ai] scenario chat failed", err);
+      setScenarioChatMessages((m) => [...m, { role: "ai", text: "Something went wrong answering that — try again." }]);
+    } finally {
+      setScenarioChatThinking(false);
+    }
+  };
+
   const suggested = context === "signals" ? SIGNALS_SUGGESTED : SUGGESTED;
   const emptyGreetingCount = context === "signals" ? SIGNALS_INITIAL.length : INITIAL.length;
 
@@ -442,6 +549,14 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
                     })}
                   </div>
                 )}
+
+                <ScenarioChatPanel
+                  messages={scenarioChatMessages}
+                  input={scenarioChatInput}
+                  setInput={setScenarioChatInput}
+                  thinking={scenarioChatThinking}
+                  onSend={sendScenarioChat}
+                />
               </div>
             ) : context === "narrative" ? (
               // Fixed task menu, never freeform — same structure as the storyline branch above.
@@ -558,6 +673,14 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
                     })}
                   </div>
                 )}
+
+                <ScenarioChatPanel
+                  messages={scenarioChatMessages}
+                  input={scenarioChatInput}
+                  setInput={setScenarioChatInput}
+                  thinking={scenarioChatThinking}
+                  onSend={sendScenarioChat}
+                />
               </div>
             ) : (
               <>
