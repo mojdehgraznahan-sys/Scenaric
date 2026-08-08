@@ -16,6 +16,10 @@ const SOURCE_TYPE_LABEL: Record<string, "Docs" | "Audio" | "Survey" | "Web"> = {
   audio: "Audio",
   survey: "Survey",
   web: "Web",
+  // The news-feed connector's items (ai-news-feed.ts) are web-sourced too — reuses the
+  // "Web" label/tab rather than introducing a 5th insights.source_type value (the DB
+  // constraint only allows Docs/Audio/Survey/Web, 0009_insight_source_type_speaker.sql).
+  web_feed: "Web",
 };
 
 const ExtractInsightsSchema = z.object({

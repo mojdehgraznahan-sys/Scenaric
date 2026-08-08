@@ -19,6 +19,12 @@ import type {
   ValidateChainResult,
   MissingLinksResult,
 } from "@/lib/actions/ai-storyline-tasks";
+import type {
+  CheckNarrativeFidelityResult,
+  StressTestImplicationsResult,
+} from "@/lib/actions/ai-narrative-tasks";
+import type { GenerateImplicationsResult } from "@/lib/actions/ai-implications";
+import type { GenerateIndicatorsResult } from "@/lib/actions/ai-indicators";
 
 interface ChatMsg {
   role: "ai" | "user";
@@ -85,11 +91,31 @@ interface StorylineResultEntry {
   explanation?: string;
 }
 
+type NarrativeTaskId = "check_fidelity" | "regenerate_implications" | "stress_test_implications" | "suggest_indicators";
+
+const NARRATIVE_TASKS: { id: NarrativeTaskId; label: string; needsImplications: boolean }[] = [
+  { id: "check_fidelity", label: "Check narrative fidelity to storyline", needsImplications: false },
+  { id: "regenerate_implications", label: "Regenerate implications", needsImplications: false },
+  { id: "stress_test_implications", label: "Stress-test implications", needsImplications: true },
+  { id: "suggest_indicators", label: "Suggest indicators from this narrative", needsImplications: false },
+];
+
+interface NarrativeResultEntry {
+  task: NarrativeTaskId;
+  ts: number;
+  ok: boolean;
+  error?: string;
+  fidelity?: CheckNarrativeFidelityResult;
+  implications?: GenerateImplicationsResult;
+  stressTest?: StressTestImplicationsResult;
+  indicators?: GenerateIndicatorsResult;
+}
+
 function Dot({ delay = 0 }: { delay?: number }) {
   return <span className="h-1.5 w-1.5 rounded-full bg-text-3" style={{ animation: "blink 1.2s infinite ease-in-out", animationDelay: delay + "ms" }} />;
 }
 
-export function AskAI({ context }: { context?: "signals" | "storyline" }) {
+export function AskAI({ context }: { context?: "signals" | "storyline" | "narrative" }) {
   const store = useStore();
   const [open, setOpen] = React.useState(false);
   const [messages, setMessages] = React.useState<ChatMsg[]>(context === "signals" ? SIGNALS_INITIAL : INITIAL);
@@ -225,6 +251,38 @@ export function AskAI({ context }: { context?: "signals" | "storyline" }) {
     }
   };
 
+  // Narrative mode — fixed task menu, never freeform, same convention as storyline mode
+  // above. Results are ephemeral for the same reason (structured diagnostics tied to the
+  // current live scenario, not a conversation worth keeping).
+  const [narrativeResults, setNarrativeResults] = React.useState<NarrativeResultEntry[]>([]);
+  const [runningNarrativeTask, setRunningNarrativeTask] = React.useState<NarrativeTaskId | null>(null);
+
+  const runNarrativeTask = async (taskId: NarrativeTaskId) => {
+    const ctx = store.narrativeAskAiContext;
+    if (!ctx) return;
+    setRunningNarrativeTask(taskId);
+    try {
+      const res = await fetch(`/api/scenarios/${ctx.scenarioId}/narrative/ask-ai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task: taskId }),
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      const data = await res.json();
+      const entry: NarrativeResultEntry = { task: taskId, ts: Date.now(), ok: true };
+      if (taskId === "check_fidelity") entry.fidelity = data as CheckNarrativeFidelityResult;
+      else if (taskId === "regenerate_implications") entry.implications = data as GenerateImplicationsResult;
+      else if (taskId === "stress_test_implications") entry.stressTest = data as StressTestImplicationsResult;
+      else entry.indicators = data as GenerateIndicatorsResult;
+      setNarrativeResults((r) => [entry, ...r]);
+    } catch (err) {
+      console.error("[ask-ai] narrative task failed", err);
+      setNarrativeResults((r) => [{ task: taskId, ts: Date.now(), ok: false, error: "Something went wrong running that task." }, ...r]);
+    } finally {
+      setRunningNarrativeTask(null);
+    }
+  };
+
   const suggested = context === "signals" ? SIGNALS_SUGGESTED : SUGGESTED;
   const emptyGreetingCount = context === "signals" ? SIGNALS_INITIAL.length : INITIAL.length;
 
@@ -261,16 +319,20 @@ export function AskAI({ context }: { context?: "signals" | "storyline" }) {
                     ? "SIGNALS MODE · GROUNDED IN YOUR SIGNALS"
                     : context === "storyline"
                       ? "STORYLINE MODE · SCOPED TASKS ONLY"
-                      : "ANALYST · READING APAC EXPANSION 2030"}
+                      : context === "narrative"
+                        ? "NARRATIVE MODE · SCOPED TASKS ONLY"
+                        : "ANALYST · READING APAC EXPANSION 2030"}
                 </div>
               </div>
               <button
                 onClick={() =>
                   context === "storyline"
                     ? setStorylineResults([])
-                    : setMessages([{ role: "ai", text: "Cleared. What would you like to explore?" }])
+                    : context === "narrative"
+                      ? setNarrativeResults([])
+                      : setMessages([{ role: "ai", text: "Cleared. What would you like to explore?" }])
                 }
-                title={context === "storyline" ? "Clear results" : "New conversation"}
+                title={context === "storyline" || context === "narrative" ? "Clear results" : "New conversation"}
                 className="rounded-md border-0 bg-transparent p-1.5 text-text-3"
               >
                 <Icons.Refresh size={14} />
@@ -374,6 +436,122 @@ export function AskAI({ context }: { context?: "signals" | "storyline" }) {
                           )}
                           {r.ok && r.explanation !== undefined && (
                             <p className="m-0 text-[12.5px] leading-[1.5] text-muted-foreground [text-wrap:pretty]">{r.explanation}</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ) : context === "narrative" ? (
+              // Fixed task menu, never freeform — same structure as the storyline branch above.
+              <div className="scroll-y flex flex-1 flex-col gap-2.5 p-4">
+                <div className="flex flex-col gap-1.5">
+                  <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">TASKS</div>
+                  {NARRATIVE_TASKS.map((t) => {
+                    const disabled = !!runningNarrativeTask || !store.narrativeAskAiContext;
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => runNarrativeTask(t.id)}
+                        disabled={disabled}
+                        className="rounded-[10px] border border-border bg-white px-3 py-2.5 text-left text-[12.5px] text-[#374151] transition-[border,background] duration-[120ms] hover:border-brand-orange100 hover:bg-brand-orangeLight disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {runningNarrativeTask === t.id ? "Running…" : t.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {narrativeResults.length > 0 && (
+                  <div className="mt-1 flex flex-col gap-2.5">
+                    <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">RESULTS</div>
+                    {narrativeResults.map((r, i) => {
+                      const label = NARRATIVE_TASKS.find((t) => t.id === r.task)?.label ?? r.task;
+                      return (
+                        <div key={i} className="rounded-[10px] border border-border bg-bg p-3 text-brand-dark">
+                          <div className="mb-1.5 flex items-center justify-between gap-2">
+                            <span className="text-[12.5px] font-semibold">{label}</span>
+                            <span className="font-mono text-[10px] text-text-3">{new Date(r.ts).toLocaleTimeString()}</span>
+                          </div>
+                          {!r.ok && <div className="text-[12.5px] text-[#EF4444]">{r.error}</div>}
+
+                          {r.ok && r.fidelity && (
+                            <div className="text-[12.5px] leading-[1.5]">
+                              {!r.fidelity.hasNarrative || !r.fidelity.hasStoryline ? (
+                                <p className="m-0 text-muted-foreground">
+                                  {!r.fidelity.hasNarrative ? "This scenario has no narrative yet." : "This scenario has no storyline chain yet."}
+                                </p>
+                              ) : (
+                                <>
+                                  <div className="mb-1 font-mono text-xs font-semibold text-brand-orange">
+                                    {r.fidelity.nodesCovered.filter((n) => n.covered).length}/{r.fidelity.nodesCovered.length} nodes covered
+                                  </div>
+                                  {r.fidelity.nodesCovered.some((n) => !n.covered) && (
+                                    <ul className="m-0 mb-1.5 flex list-none flex-col gap-1 p-0">
+                                      {r.fidelity.nodesCovered
+                                        .filter((n) => !n.covered)
+                                        .map((n, j) => (
+                                          <li key={j} className="text-[11.5px] text-[#92400E]">
+                                            — Missing: {n.note || n.nodeId}
+                                          </li>
+                                        ))}
+                                    </ul>
+                                  )}
+                                  {!r.fidelity.causalOrderOk && (
+                                    <p className="m-0 mb-1.5 text-[11.5px] text-[#92400E]">Out of order: {r.fidelity.orderIssue}</p>
+                                  )}
+                                  {r.fidelity.inventedDetails.length > 0 ? (
+                                    <ul className="m-0 flex list-none flex-col gap-1 p-0">
+                                      {r.fidelity.inventedDetails.map((d, j) => (
+                                        <li key={j} className="text-[11.5px] text-[#EF4444]">
+                                          — Invented: &quot;{d.text}&quot; ({d.note})
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  ) : (
+                                    <p className="m-0 text-muted-foreground">No invented details found.</p>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          )}
+
+                          {r.ok && r.implications && (
+                            <div className="text-[12.5px] leading-[1.5]">
+                              {r.implications.sufficientEvidence ? (
+                                <p className="m-0 text-muted-foreground">Regenerated {r.implications.count} implication(s).</p>
+                              ) : (
+                                <p className="m-0 text-[#92400E]">{r.implications.gap}</p>
+                              )}
+                            </div>
+                          )}
+
+                          {r.ok && r.stressTest && (
+                            <div className="text-[12.5px] leading-[1.5]">
+                              {r.stressTest.results.length === 0 ? (
+                                <p className="m-0 text-muted-foreground">No implications yet to stress-test.</p>
+                              ) : (
+                                <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+                                  {r.stressTest.results.map((res, j) => (
+                                    <li key={j} className={res.scenarioSpecific ? "text-[#065F46]" : "text-[#92400E]"}>
+                                      {res.scenarioSpecific ? "✓" : "⚠ generic —"} {res.text}
+                                      <div className="text-[11.5px] text-muted-foreground">{res.rationale}</div>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          )}
+
+                          {r.ok && r.indicators && (
+                            <div className="text-[12.5px] leading-[1.5]">
+                              {r.indicators.sufficientEvidence ? (
+                                <p className="m-0 text-muted-foreground">Generated {r.indicators.count} indicator(s) — see Monitoring.</p>
+                              ) : (
+                                <p className="m-0 text-[#92400E]">{r.indicators.gap}</p>
+                              )}
+                            </div>
                           )}
                         </div>
                       );

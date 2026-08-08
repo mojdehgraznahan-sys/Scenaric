@@ -23,6 +23,7 @@ export interface ScenarioWithAxes {
   implausibilityNote: string | null;
   archived: boolean;
   reaxedAt: string | null;
+  narrativeEditedByUser: boolean;
   // axes_id is nullable (on delete set null) and a scenario's axes row never changes after
   // creation (a re-axis deactivates the old axes row and creates a new one, rather than
   // mutating it) — so this is a stable creation-time snapshot, not a live/derived value.
@@ -69,6 +70,7 @@ export async function getScenarios(projectId: string): Promise<ScenarioWithAxes[
       implausibilityNote: s.implausibility_note,
       archived: s.is_archived,
       reaxedAt: s.reaxed_at,
+      narrativeEditedByUser: s.narrative_edited_by_user,
       axisA: axes ? { signalId: axes.y_signal_id, label: axes.y_label } : null,
       axisB: axes ? { signalId: axes.x_signal_id, label: axes.x_label } : null,
     };
@@ -82,4 +84,19 @@ export async function setScenarioArchived(scenarioId: string, archived: boolean)
   const { error } = await supabase.from("scenarios").update({ is_archived: archived }).eq("id", scenarioId);
   if (error) throw error;
   revalidatePath("/canvas");
+}
+
+// PATCH .../scenarios/:id — Narrative page's manual Edit mode (Build Plan §9, Step 6). Plain
+// field update, no AI. Always stamps narrative_edited_by_user:true — this is a human typing
+// into the textarea, the exact case that flag exists to record — so a later "Expand with AI"
+// run on this scenario knows to confirm before overwriting (expandNarrativeWithAI, in
+// ai-narrative.ts, clears the flag again once the user has accepted an AI regeneration).
+export async function updateScenarioNarrative(scenarioId: string, fields: { narrative?: string; summary?: string }): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("scenarios")
+    .update({ ...fields, narrative_edited_by_user: true })
+    .eq("id", scenarioId);
+  if (error) throw error;
+  revalidatePath("/narrative");
 }

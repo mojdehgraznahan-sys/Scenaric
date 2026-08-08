@@ -90,7 +90,7 @@ export interface Database {
           id: string;
           project_id: string;
           name: string;
-          type: "doc" | "audio" | "survey" | "web";
+          type: "doc" | "audio" | "survey" | "web" | "web_feed";
           status: "processing" | "complete" | "failed" | "unsupported";
           storage_url: string | null;
           extracted_text: string | null;
@@ -101,7 +101,7 @@ export interface Database {
           id?: string;
           project_id: string;
           name: string;
-          type: "doc" | "audio" | "survey" | "web";
+          type: "doc" | "audio" | "survey" | "web" | "web_feed";
           status?: "processing" | "complete" | "failed" | "unsupported";
           storage_url?: string | null;
           extracted_text?: string | null;
@@ -112,7 +112,7 @@ export interface Database {
           id?: string;
           project_id?: string;
           name?: string;
-          type?: "doc" | "audio" | "survey" | "web";
+          type?: "doc" | "audio" | "survey" | "web" | "web_feed";
           status?: "processing" | "complete" | "failed" | "unsupported";
           storage_url?: string | null;
           extracted_text?: string | null;
@@ -314,6 +314,7 @@ export interface Database {
           implausibility_note: string | null;
           is_archived: boolean;
           reaxed_at: string | null;
+          narrative_edited_by_user: boolean;
           created_at: string;
           updated_at: string;
         };
@@ -332,6 +333,7 @@ export interface Database {
           implausibility_note?: string | null;
           is_archived?: boolean;
           reaxed_at?: string | null;
+          narrative_edited_by_user?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -350,6 +352,7 @@ export interface Database {
           implausibility_note?: string | null;
           is_archived?: boolean;
           reaxed_at?: string | null;
+          narrative_edited_by_user?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -426,6 +429,75 @@ export interface Database {
           to_node_id?: string;
           relationship?: "Leads to" | "Enables" | "Amplifies" | "Blocks";
           confidence?: "Strong" | "Moderate" | "Weak";
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      implications: {
+        Row: {
+          id: string;
+          project_id: string;
+          scenario_id: string;
+          text: string;
+          category: "capital" | "hiring" | "tech" | "partners" | "other" | null;
+          grounded_in_text: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          scenario_id: string;
+          text: string;
+          category?: "capital" | "hiring" | "tech" | "partners" | "other" | null;
+          grounded_in_text: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          scenario_id?: string;
+          text?: string;
+          category?: "capital" | "hiring" | "tech" | "partners" | "other" | null;
+          grounded_in_text?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      indicators: {
+        Row: {
+          id: string;
+          project_id: string;
+          scenario_id: string | null;
+          name: string;
+          status: "On track" | "Watch" | "Alert";
+          trend: string | null;
+          note: string | null;
+          grounded_in: string | null;
+          last_checked: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          scenario_id?: string | null;
+          name: string;
+          status?: "On track" | "Watch" | "Alert";
+          trend?: string | null;
+          note?: string | null;
+          grounded_in?: string | null;
+          last_checked?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          scenario_id?: string | null;
+          name?: string;
+          status?: "On track" | "Watch" | "Alert";
+          trend?: string | null;
+          note?: string | null;
+          grounded_in?: string | null;
+          last_checked?: string | null;
           created_at?: string;
         };
         Relationships: [];

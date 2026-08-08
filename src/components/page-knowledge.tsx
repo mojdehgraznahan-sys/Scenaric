@@ -25,6 +25,7 @@ import {
 import { listInsights, deleteInsight, type InsightRow } from "@/lib/actions/insights";
 import { listInterviews, createInterview, type InterviewRow, type SteepTag } from "@/lib/actions/interviews";
 import { extractInsightsForProject } from "@/lib/actions/ai-insights";
+import { pullNewsFeed } from "@/lib/actions/ai-news-feed";
 
 const TYPE_OPTIONS = [
   { id: "Docs", icon: <Icons.File size={16} />, label: "Docs" },
@@ -81,6 +82,8 @@ export function PageKnowledge() {
   const [uploadError, setUploadError] = React.useState<string | null>(null);
   const [extracting, setExtracting] = React.useState(false);
   const [extractResult, setExtractResult] = React.useState<string | null>(null);
+  const [pullingNews, setPullingNews] = React.useState(false);
+  const [newsResult, setNewsResult] = React.useState<string | null>(null);
   const [activeType, setActiveType] = React.useState("Docs");
   const [dragOver, setDragOver] = React.useState(false);
   const [tab, setTab] = React.useState<(typeof RIGHT_TABS)[number]>("All");
@@ -184,6 +187,29 @@ export function PageKnowledge() {
     }
   };
 
+  // News-feed connector — pulls recent, dated news relevant to the project's focal
+  // question/STEEP categories in as `web_feed` sources, then runs the same insight
+  // extraction every other source type goes through (see ai-news-feed.ts).
+  const onPullNews = async () => {
+    if (!projectId) return;
+    setPullingNews(true);
+    setNewsResult(null);
+    try {
+      const result = await pullNewsFeed(projectId);
+      if (!result.sufficientEvidence) {
+        setNewsResult(result.gap || "No relevant recent news found.");
+      } else {
+        setNewsResult(`Pulled ${result.sourcesCreated} news item(s), extracted ${result.insightsCreated} insight(s).`);
+      }
+      await refresh();
+    } catch (err) {
+      console.error("[knowledge] news feed pull failed", err);
+      setNewsResult("Couldn't pull recent news right now — try again in a moment.");
+    } finally {
+      setPullingNews(false);
+    }
+  };
+
   const onSubmitInvite = async () => {
     if (!inviteForm.participantName.trim()) {
       setInviteError("Participant name is required.");
@@ -237,6 +263,9 @@ export function PageKnowledge() {
           <div className="flex gap-2">
             <Button variant="ghost" size="sm" onClick={() => setInviteOpen(true)}>
               Invite participant
+            </Button>
+            <Button variant="ghost" size="sm" onClick={onPullNews} disabled={pullingNews || !projectId}>
+              <Icons.Radio size={12} /> {pullingNews ? "Pulling news…" : "Pull recent news"}
             </Button>
             <Button variant="soft" size="sm" onClick={onExtractInsights} disabled={extracting || !projectId}>
               <Icons.Sparkle size={12} /> {extracting ? "Extracting…" : "Extract insights"}
@@ -351,6 +380,12 @@ export function PageKnowledge() {
               </div>
             )}
 
+            {newsResult && (
+              <div className="mt-2.5 rounded-[10px] border border-brand-orange100 bg-brand-orangeLight px-3 py-2 text-xs text-brand-orange700">
+                {newsResult}
+              </div>
+            )}
+
             <div className="mt-3.5 flex flex-col gap-2">
               {sources.map((s) => {
                 const icon =
@@ -360,6 +395,8 @@ export function PageKnowledge() {
                     <Icons.Survey size={14} />
                   ) : s.type === "web" ? (
                     <Icons.Link size={14} />
+                  ) : s.type === "web_feed" ? (
+                    <Icons.Radio size={14} />
                   ) : (
                     <Icons.File size={14} />
                   );

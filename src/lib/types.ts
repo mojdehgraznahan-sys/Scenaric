@@ -86,6 +86,9 @@ export interface Scenario {
   narrative: string;
   archived?: boolean;
   reaxedAt?: number; // timestamp set when scenario axes were migrated (re-axis)
+  // True once a human has hand-edited narrative/summary since they were last AI-generated —
+  // "Expand with AI" must confirm before overwriting rather than silently clobbering it.
+  narrativeEditedByUser?: boolean;
   logic?: string;
   plausible?: boolean;
   implausibilityNote?: string;

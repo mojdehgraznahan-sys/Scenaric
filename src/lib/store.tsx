@@ -45,7 +45,6 @@ import type {
   Quadrant,
   MatrixDot,
   Scenario,
-  Indicator,
   Strategy,
 } from "./types";
 
@@ -165,6 +164,7 @@ function toScenario(row: ScenarioWithAxes): Scenario {
     narrative: row.narrative || "",
     archived: row.archived,
     reaxedAt: row.reaxedAt ? new Date(row.reaxedAt).getTime() : undefined,
+    narrativeEditedByUser: row.narrativeEditedByUser,
     logic: row.logic || undefined,
     plausible: row.plausible ?? undefined,
     implausibilityNote: row.implausibilityNote || undefined,
@@ -247,6 +247,11 @@ export interface Store {
   // instead of raw node ids.
   storylineAskAiContext: { scenarioId: string; nodeIds: string[]; nodeTitleById: Record<string, string> } | null;
   setStorylineAskAiContext: (v: { scenarioId: string; nodeIds: string[]; nodeTitleById: Record<string, string> } | null) => void;
+  // Narrative's own Ask AI scoping — simpler than Storyline's (no node-highlight concept on
+  // this page), kept as its own context rather than overloading storylineAskAiContext's
+  // nodeIds/nodeTitleById shape, which is specifically about chain-path highlighting.
+  narrativeAskAiContext: { scenarioId: string } | null;
+  setNarrativeAskAiContext: (v: { scenarioId: string } | null) => void;
   scenarios: Scenario[];
   scenariosLoading: boolean;
   setScenarios: (v: Scenario[]) => void;
@@ -260,8 +265,6 @@ export interface Store {
     independenceRationale?: string[];
     requestedNames?: Partial<Record<Quadrant, string>>;
   }) => Promise<void>;
-  indicators: Indicator[];
-  setIndicators: (v: Indicator[]) => void;
   strategies: Strategy[];
   setStrategies: (v: Strategy[]) => void;
   criticalUncertainties: string[];
@@ -670,7 +673,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     nodeIds: string[];
     nodeTitleById: Record<string, string>;
   } | null>(null);
-  const [indicators, setIndicators] = usePersistentState("fm.indicators", seed.indicators);
+  const [narrativeAskAiContext, setNarrativeAskAiContext] = useState<{ scenarioId: string } | null>(null);
   const [strategies, setStrategies] = usePersistentState("fm.strategies", seed.strategies);
   const [criticalUncertainties, setCriticalUncertainties] = usePersistentState<string[]>(
     "fm.cu",
@@ -743,14 +746,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setSelectedDot,
     storylineAskAiContext,
     setStorylineAskAiContext,
+    narrativeAskAiContext,
+    setNarrativeAskAiContext,
     scenarios,
     scenariosLoading,
     setScenarios,
     refreshScenarios,
     archiveScenario,
     buildScenarios,
-    indicators,
-    setIndicators,
     strategies,
     setStrategies,
     criticalUncertainties,
@@ -758,7 +761,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     navCollapsed,
     setNavCollapsed,
     reset: () => {
-      ["fm.accountType", "fm.onb", "fm.scenarios", "fm.indicators", "fm.strategies", "fm.cu"].forEach((k) =>
+      ["fm.accountType", "fm.onb", "fm.scenarios", "fm.strategies", "fm.cu"].forEach((k) =>
         window.localStorage.removeItem(k)
       );
       supabase.auth.signOut().finally(() => {

@@ -2,6 +2,7 @@
 
 // Strategic Options — robustness grid. Faithful Tailwind/shadcn port of page-strategy.jsx.
 import * as React from "react";
+import { useSearchParams } from "next/navigation";
 import { Icons } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -23,6 +24,18 @@ export function PageStrategy() {
   const strategies = store.strategies;
   const scenarios = store.scenarios;
   const [selected, setSelected] = React.useState<Strategy | null>(null);
+
+  // Arrives as /strategy?scenarioId={id} from Narrative's "See strategic options" — no
+  // wind-tunnel scoring endpoint exists yet (Build Plan §12: strategies/generate,
+  // strategies/wind-tunnel — this whole page is still mock/local `store.strategies`, same
+  // as Monitoring was before Step 8 got built). Read now so the param isn't lost, but not
+  // yet used to filter/score anything.
+  // TODO(strategy build): once strategies/generate + wind-tunnel exist, use scenarioId here
+  // to pre-filter this grid to strategies robust in that scenario and/or pre-score against
+  // its implications (listImplications(scenarioId), from src/lib/actions/implications.ts).
+  const searchParams = useSearchParams();
+  const scenarioId = searchParams.get("scenarioId");
+  void scenarioId;
 
   return (
     <div className="scroll-y flex-1 overflow-y-auto p-5">
