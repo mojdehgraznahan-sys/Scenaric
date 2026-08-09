@@ -470,9 +470,12 @@ export interface Database {
           scenario_id: string | null;
           name: string;
           status: "On track" | "Watch" | "Alert";
-          trend: string | null;
+          trend: "up" | "flat" | "down" | null;
           note: string | null;
           grounded_in: string | null;
+          trigger_condition: string | null;
+          source_type: "project" | "news_feed";
+          created_via: "ai" | "manual";
           last_checked: string | null;
           created_at: string;
         };
@@ -482,9 +485,12 @@ export interface Database {
           scenario_id?: string | null;
           name: string;
           status?: "On track" | "Watch" | "Alert";
-          trend?: string | null;
+          trend?: "up" | "flat" | "down" | null;
           note?: string | null;
           grounded_in?: string | null;
+          trigger_condition?: string | null;
+          source_type?: "project" | "news_feed";
+          created_via?: "ai" | "manual";
           last_checked?: string | null;
           created_at?: string;
         };
@@ -494,10 +500,49 @@ export interface Database {
           scenario_id?: string | null;
           name?: string;
           status?: "On track" | "Watch" | "Alert";
-          trend?: string | null;
+          trend?: "up" | "flat" | "down" | null;
           note?: string | null;
           grounded_in?: string | null;
+          trigger_condition?: string | null;
+          source_type?: "project" | "news_feed";
+          created_via?: "ai" | "manual";
           last_checked?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      indicator_readings: {
+        Row: {
+          id: string;
+          project_id: string;
+          indicator_id: string;
+          date: string;
+          value: number;
+          status_at_time: "On track" | "Watch" | "Alert";
+          grounded_in: string | null;
+          rationale: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          indicator_id: string;
+          date: string;
+          value: number;
+          status_at_time: "On track" | "Watch" | "Alert";
+          grounded_in?: string | null;
+          rationale?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          indicator_id?: string;
+          date?: string;
+          value?: number;
+          status_at_time?: "On track" | "Watch" | "Alert";
+          grounded_in?: string | null;
+          rationale?: string | null;
           created_at?: string;
         };
         Relationships: [];
@@ -764,6 +809,7 @@ export interface Database {
           output_json: unknown | null;
           model: string | null;
           confidence: string | null;
+          batch_id: string | null;
           created_at: string;
         };
         Insert: {
@@ -775,6 +821,7 @@ export interface Database {
           output_json?: unknown | null;
           model?: string | null;
           confidence?: string | null;
+          batch_id?: string | null;
           created_at?: string;
         };
         Update: {
@@ -786,6 +833,7 @@ export interface Database {
           output_json?: unknown | null;
           model?: string | null;
           confidence?: string | null;
+          batch_id?: string | null;
           created_at?: string;
         };
         Relationships: [];

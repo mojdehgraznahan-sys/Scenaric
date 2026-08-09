@@ -13,6 +13,7 @@ import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
 import { StorylineScenarioNotFoundError } from "@/lib/ai/errors";
 import { getStoryline } from "./storyline";
+import { listImplications } from "./implications";
 import { PHASE_ORDER, type Phase } from "../storyline-mapping";
 
 const IndicatorsSchema = z.object({
@@ -31,16 +32,26 @@ const IndicatorsSchema = z.object({
         // 0021_indicators_grounded_in.sql's comment on why grounded_in alone got a real
         // column and this didn't).
         discriminates_from: z.array(z.string()),
+        // One sentence naming the concrete On track/Watch/Alert thresholds for this
+        // indicator — consumed later by the daily monitoring job
+        // (ai-indicators-evaluation.ts) with no further model involvement in defining what
+        // the thresholds themselves are.
+        trigger_condition: z.string(),
       })
     )
-    .max(6),
+    .min(2)
+    .max(4),
 });
 
 const INDICATORS_TASK_PROMPT = `Task: Generate leading indicators (Step 8) for ONE scenario —
 concrete, externally observable events that would tell an analyst this scenario is the one
 unfolding, distinguishable from the OTHER scenarios sharing this project's axes.
 
-Input: { scenario: {name: string, storyline_nodes: [{id: string, phase: string, title: string}]},
+Input: { scenario: {name: string, storyline_nodes: [{id: string, phase: string, title: string}],
+         implications: [{text: string, category: string | null}] /* Step 7's "what this
+         scenario means for the decision" — use only to make trigger_condition and name more
+         decision-relevant; grounded_in must still always be a real storyline_node id, never
+         an implication */},
          sibling_scenarios: [{name: string, tagline: string | null}] /* the other scenarios
          sharing this axes set, for discriminating power */ }
 
@@ -52,13 +63,20 @@ Rules:
 - Reject (do not output) any candidate indicator that would equally well signal one of
   sibling_scenarios — indicators must discriminate. List the sibling scenario names you
   confirmed it does NOT equally apply to in discriminates_from.
-- 4-6 indicators. If the storyline doesn't have enough distinct mechanisms to derive
-  genuinely discriminating indicators, return sufficient_evidence:false and a gap instead of
-  padding with generic ones.
+- For each indicator, also write trigger_condition: ONE sentence naming the concrete threshold
+  or event that separates On track / Watch / Alert for THIS indicator specifically (e.g. "On
+  track while no filing has been made; Watch once a rulemaking is proposed; Alert if the rule
+  is finalized or a comparable jurisdiction adopts one within the horizon."). A later, separate
+  daily monitoring process will judge incoming news against this sentence alone — it must be
+  concrete enough to apply with no further input from you.
+- 2-4 indicators. If the storyline and implications don't support enough distinct,
+  discriminating mechanisms, return sufficient_evidence:false and a gap instead of padding
+  with generic ones.
 
 Output schema:
 { sufficient_evidence: boolean, gap: string | null,
-  indicators: [{ name: string, grounded_in: string, discriminates_from: string[] }] }`;
+  indicators: [{ name: string, grounded_in: string, discriminates_from: string[],
+                 trigger_condition: string }] }`;
 
 export interface GenerateIndicatorsResult {
   sufficientEvidence: boolean;
@@ -102,12 +120,20 @@ export async function generateIndicatorsForScenario(scenarioId: string): Promise
   const orderedNodes = [...nodes].sort((a, b) => PHASE_ORDER[a.phase as Phase] - PHASE_ORDER[b.phase as Phase]);
   const nodeIds = new Set(orderedNodes.map((n) => n.id));
 
+  // Step 7 enrichment only — makes trigger_condition/name more decision-relevant. Never a
+  // grounding source itself; grounded_in must still always be a real storyline_node id.
+  const implications = await listImplications(scenarioId);
+
   const output = await runStructured({
     step: "indicators.generate",
     projectId: scenario.project_id,
     taskPrompt: INDICATORS_TASK_PROMPT,
     input: {
-      scenario: { name: scenario.name, storyline_nodes: orderedNodes.map((n) => ({ id: n.id, phase: n.phase, title: n.title })) },
+      scenario: {
+        name: scenario.name,
+        storyline_nodes: orderedNodes.map((n) => ({ id: n.id, phase: n.phase, title: n.title })),
+        implications: implications.map((i) => ({ text: i.text, category: i.category })),
+      },
       sibling_scenarios: siblingScenarios,
     },
     schema: IndicatorsSchema,
@@ -136,6 +162,9 @@ export async function generateIndicatorsForScenario(scenarioId: string): Promise
       name: ind.name,
       status: "Watch" as const,
       grounded_in: ind.grounded_in,
+      trigger_condition: ind.trigger_condition,
+      source_type: "project" as const,
+      created_via: "ai" as const,
       note: ind.discriminates_from.length > 0 ? `Discriminates from: ${ind.discriminates_from.join(", ")}` : null,
     }))
   );

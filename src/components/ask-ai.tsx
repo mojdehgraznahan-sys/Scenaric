@@ -30,6 +30,9 @@ import type { GenerateIndicatorsResult } from "@/lib/actions/ai-indicators";
 import type { StressTestOptionResult, SuggestHedgeResult } from "@/lib/actions/ai-strategy-tasks";
 import type { StrategyChatResult } from "@/lib/actions/ai-strategy-chat";
 import { createManualStrategicOption } from "@/lib/actions/strategy";
+import type { RankScenariosResult, ExplainIndicatorResult, RecentChangesResult, SuggestIndicatorForScenarioResult } from "@/lib/actions/ai-monitoring-tasks";
+import type { MonitoringChatResult } from "@/lib/actions/ai-monitoring-chat";
+import { createManualIndicator } from "@/lib/actions/indicators";
 
 interface ChatMsg {
   role: "ai" | "user";
@@ -39,6 +42,9 @@ interface ChatMsg {
   // labeled + confirm-before-save contract as suggestedSignal above, just a different shape
   // of thing to add. Reuses `added`/`suggestedForProjectId` below rather than duplicating them.
   suggestedOption?: StrategyChatResult["suggestedOption"];
+  // Monitoring chat's own "propose a new indicator" suggestion (ai-monitoring-chat.ts) — same
+  // labeled + confirm-before-save contract as the two above.
+  suggestedIndicator?: MonitoringChatResult["suggestedIndicator"];
   cites?: string[];
   // Set once "Add to Signals"/"Add as option" succeeds, so the button can't fire twice.
   added?: boolean;
@@ -138,6 +144,26 @@ interface StrategyResultEntry {
   hedge?: SuggestHedgeResult;
 }
 
+type MonitoringTaskId = "most_likely_scenario" | "explain_indicator" | "recent_changes" | "suggest_indicator";
+
+const MONITORING_TASKS: { id: MonitoringTaskId; label: string; needsIndicator: boolean }[] = [
+  { id: "most_likely_scenario", label: "Which scenario is most likely emerging right now?", needsIndicator: false },
+  { id: "explain_indicator", label: "Explain this indicator's status", needsIndicator: true },
+  { id: "recent_changes", label: "What changed in the last 7 days?", needsIndicator: false },
+  { id: "suggest_indicator", label: "Suggest a new indicator for an under-monitored scenario", needsIndicator: false },
+];
+
+interface MonitoringResultEntry {
+  task: MonitoringTaskId;
+  ts: number;
+  ok: boolean;
+  error?: string;
+  ranking?: RankScenariosResult;
+  explanation?: ExplainIndicatorResult;
+  changes?: RecentChangesResult;
+  suggestion?: SuggestIndicatorForScenarioResult;
+}
+
 function Dot({ delay = 0 }: { delay?: number }) {
   return <span className="h-1.5 w-1.5 rounded-full bg-text-3" style={{ animation: "blink 1.2s infinite ease-in-out", animationDelay: delay + "ms" }} />;
 }
@@ -156,6 +182,7 @@ function ScenarioChatPanel({
   thinking,
   onSend,
   onAddOption,
+  onAddIndicator,
   activeProjectId,
 }: {
   messages: ChatMsg[];
@@ -164,6 +191,7 @@ function ScenarioChatPanel({
   thinking: boolean;
   onSend: (text?: string) => void;
   onAddOption?: (index: number) => void;
+  onAddIndicator?: (index: number) => void;
   activeProjectId?: string | null;
 }) {
   const scrollRef = React.useRef<HTMLDivElement>(null);
@@ -213,6 +241,34 @@ function ScenarioChatPanel({
                   </Button>
                 </div>
               )}
+              {m.suggestedIndicator && onAddIndicator && (
+                <div className="mt-2.5 rounded-[10px] border border-border bg-white p-3 text-brand-dark">
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <span className="text-[12.5px] font-semibold">{m.suggestedIndicator.name}</span>
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded px-[7px] py-0.5 text-[10px] font-semibold uppercase tracking-[0.04em]",
+                        m.suggestedIndicator.origin === "grounded" ? "bg-[#ECFDF5] text-[#065F46]" : "bg-brand-orangeLight text-brand-orange700"
+                      )}
+                    >
+                      {m.suggestedIndicator.origin === "grounded" ? "Grounded" : "External pattern — review before adding"}
+                    </span>
+                  </div>
+                  <div className="mb-2.5 text-[12.5px] leading-[1.5] text-muted-foreground">
+                    {m.suggestedIndicator.notes}
+                    <div className="mt-1 italic">{m.suggestedIndicator.rationale}</div>
+                  </div>
+                  <Button
+                    variant={m.added ? "ghost" : "soft"}
+                    size="sm"
+                    className="w-full"
+                    disabled={m.added || m.suggestedForProjectId !== activeProjectId}
+                    onClick={() => onAddIndicator(i)}
+                  >
+                    {m.added ? "Added indicator ✓" : m.suggestedForProjectId !== activeProjectId ? "Switched projects — can't add" : "+ Add indicator"}
+                  </Button>
+                </div>
+              )}
             </div>
           ))}
           {thinking && (
@@ -242,7 +298,7 @@ function ScenarioChatPanel({
   );
 }
 
-export function AskAI({ context }: { context?: "signals" | "storyline" | "narrative" | "strategy" }) {
+export function AskAI({ context }: { context?: "signals" | "storyline" | "narrative" | "strategy" | "monitoring" }) {
   const store = useStore();
   const [open, setOpen] = React.useState(false);
   const [messages, setMessages] = React.useState<ChatMsg[]>(context === "signals" ? SIGNALS_INITIAL : INITIAL);
@@ -513,6 +569,102 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
     }
   };
 
+  // Monitoring mode — fixed task menu, never freeform (freeform is monitoringChatMessages
+  // below), same convention as Strategy above. Results are ephemeral diagnostics tied to the
+  // current live indicators/readings, not a conversation worth keeping.
+  const [monitoringResults, setMonitoringResults] = React.useState<MonitoringResultEntry[]>([]);
+  const [runningMonitoringTask, setRunningMonitoringTask] = React.useState<MonitoringTaskId | null>(null);
+
+  const runMonitoringTask = async (taskId: MonitoringTaskId) => {
+    const projectId = store.activeProjectId;
+    const ctx = store.monitoringAskAiContext;
+    if (!projectId) return;
+    if (taskId === "explain_indicator" && !ctx?.selectedIndicator) return;
+    setRunningMonitoringTask(taskId);
+    try {
+      const body: { task: MonitoringTaskId; indicatorId?: string } = { task: taskId };
+      if (taskId === "explain_indicator") body.indicatorId = ctx!.selectedIndicator!.id;
+      const res = await fetch(`/api/projects/${projectId}/monitoring/ask-ai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      const data = await res.json();
+      const entry: MonitoringResultEntry = { task: taskId, ts: Date.now(), ok: true };
+      if (taskId === "most_likely_scenario") entry.ranking = data as RankScenariosResult;
+      else if (taskId === "explain_indicator") entry.explanation = data as ExplainIndicatorResult;
+      else if (taskId === "recent_changes") entry.changes = data as RecentChangesResult;
+      else entry.suggestion = data as SuggestIndicatorForScenarioResult;
+      setMonitoringResults((r) => [entry, ...r]);
+    } catch (err) {
+      console.error("[ask-ai] monitoring task failed", err);
+      setMonitoringResults((r) => [{ task: taskId, ts: Date.now(), ok: false, error: "Something went wrong running that task." }, ...r]);
+    } finally {
+      setRunningMonitoringTask(null);
+    }
+  };
+
+  // Monitoring's own "Ask anything…" — project-scoped, backed by askMonitoringChat
+  // (ai-monitoring-chat.ts). Resets whenever the active project changes, same convention as
+  // strategyChatMessages.
+  const [monitoringChatMessages, setMonitoringChatMessages] = React.useState<ChatMsg[]>([]);
+  const [monitoringChatInput, setMonitoringChatInput] = React.useState("");
+  const [monitoringChatThinking, setMonitoringChatThinking] = React.useState(false);
+
+  React.useEffect(() => {
+    setMonitoringChatMessages([]);
+  }, [store.activeProjectId]);
+
+  const sendMonitoringChat = async (text?: string) => {
+    const t = (text || monitoringChatInput).trim();
+    const projectId = store.activeProjectId;
+    if (!t || !projectId) return;
+    setMonitoringChatMessages((m) => [...m, { role: "user", text: t }]);
+    setMonitoringChatInput("");
+    setMonitoringChatThinking(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/monitoring/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: t }),
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      const data: MonitoringChatResult = await res.json();
+      setMonitoringChatMessages((m) => [...m, { role: "ai", text: data.answer, cites: data.cites, suggestedIndicator: data.suggestedIndicator, suggestedForProjectId: projectId }]);
+    } catch (err) {
+      console.error("[ask-ai] monitoring chat failed", err);
+      setMonitoringChatMessages((m) => [...m, { role: "ai", text: "Something went wrong answering that — try again." }]);
+    } finally {
+      setMonitoringChatThinking(false);
+    }
+  };
+
+  // Backing action for the "+ Add indicator" button above — the one place a freeform
+  // Monitoring chat answer's external/inferred content can actually be written into the
+  // project, and only ever after this explicit click, never automatically from
+  // sendMonitoringChat itself.
+  const onAddMonitoringIndicator = async (index: number) => {
+    const msg = monitoringChatMessages[index];
+    const suggestion = msg.suggestedIndicator;
+    const projectId = store.activeProjectId;
+    if (!suggestion || msg.added || msg.suggestedForProjectId !== projectId || !projectId) return;
+    try {
+      await createManualIndicator({
+        projectId,
+        scenarioId: suggestion.scenarioId,
+        name: suggestion.name,
+        note: `${suggestion.notes}\n\nRationale: ${suggestion.rationale}${
+          suggestion.origin === "external_pattern" ? " (external pattern — not grounded in this project's own data; review before relying on it)" : ""
+        }`,
+        triggerCondition: suggestion.triggerCondition,
+      });
+      setMonitoringChatMessages((m) => m.map((msg, i) => (i === index ? { ...msg, added: true } : msg)));
+    } catch (err) {
+      console.error("[ask-ai] failed to add suggested indicator", err);
+    }
+  };
+
   // "Ask anything…" alongside the fixed task menus above — shared between storyline and
   // narrative context since both are scoped to the same scenario and hit the same grounded
   // chat endpoint. Ephemeral like storylineResults/narrativeResults (not persisted to
@@ -593,7 +745,9 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
                         ? "NARRATIVE MODE · SCOPED TASKS ONLY"
                         : context === "strategy"
                           ? "STRATEGY MODE · SCOPED TASKS + GROUNDED CHAT"
-                          : "ANALYST · READING APAC EXPANSION 2030"}
+                          : context === "monitoring"
+                            ? "MONITORING MODE · SCOPED TASKS + GROUNDED CHAT"
+                            : "ANALYST · READING APAC EXPANSION 2030"}
                 </div>
               </div>
               <button
@@ -603,9 +757,14 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
                   else if (context === "strategy") {
                     setStrategyResults([]);
                     setStrategyChatMessages([]);
+                  } else if (context === "monitoring") {
+                    setMonitoringResults([]);
+                    setMonitoringChatMessages([]);
                   } else setMessages([{ role: "ai", text: "Cleared. What would you like to explore?" }]);
                 }}
-                title={context === "storyline" || context === "narrative" || context === "strategy" ? "Clear results" : "New conversation"}
+                title={
+                  context === "storyline" || context === "narrative" || context === "strategy" || context === "monitoring" ? "Clear results" : "New conversation"
+                }
                 className="rounded-md border-0 bg-transparent p-1.5 text-text-3"
               >
                 <Icons.Refresh size={14} />
@@ -945,6 +1104,112 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
                   thinking={strategyChatThinking}
                   onSend={sendStrategyChat}
                   onAddOption={onAddStrategyOption}
+                  activeProjectId={store.activeProjectId}
+                />
+              </div>
+            ) : context === "monitoring" ? (
+              // Fixed task menu, never freeform, PLUS the real "Ask anything…" freeform panel
+              // below it — same structure as the strategy branch above.
+              <div className="scroll-y flex flex-1 flex-col gap-2.5 p-4">
+                <div className="flex flex-col gap-1.5">
+                  <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">TASKS</div>
+                  {MONITORING_TASKS.map((t) => {
+                    const ctx = store.monitoringAskAiContext;
+                    const needsIndicatorUnmet = t.needsIndicator && !ctx?.selectedIndicator;
+                    const disabled = !!runningMonitoringTask || !store.activeProjectId || needsIndicatorUnmet;
+                    const title = needsIndicatorUnmet ? "Click an indicator row on the Monitoring page first" : undefined;
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => runMonitoringTask(t.id)}
+                        disabled={disabled}
+                        title={title}
+                        className="rounded-[10px] border border-border bg-white px-3 py-2.5 text-left text-[12.5px] text-[#374151] transition-[border,background] duration-[120ms] hover:border-brand-orange100 hover:bg-brand-orangeLight disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {runningMonitoringTask === t.id ? "Running…" : t.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {monitoringResults.length > 0 && (
+                  <div className="mt-1 flex flex-col gap-2.5">
+                    <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">RESULTS</div>
+                    {monitoringResults.map((r, i) => {
+                      const label = MONITORING_TASKS.find((t) => t.id === r.task)?.label ?? r.task;
+                      return (
+                        <div key={i} className="rounded-[10px] border border-border bg-bg p-3 text-brand-dark">
+                          <div className="mb-1.5 flex items-center justify-between gap-2">
+                            <span className="text-[12.5px] font-semibold">{label}</span>
+                            <span className="font-mono text-[10px] text-text-3">{new Date(r.ts).toLocaleTimeString()}</span>
+                          </div>
+                          {!r.ok && <div className="text-[12.5px] text-[#EF4444]">{r.error}</div>}
+
+                          {r.ok && r.ranking && (
+                            <div className="text-[12.5px] leading-[1.5]">
+                              {!r.ranking.sufficientEvidence || !r.ranking.topScenarioName ? (
+                                <p className="m-0 text-muted-foreground">{r.ranking.gap || "Not enough data to rank scenarios yet."}</p>
+                              ) : (
+                                <>
+                                  <div className="mb-1 font-mono text-[10.5px] uppercase tracking-[0.04em] text-brand-orange">
+                                    Most likely: {r.ranking.topScenarioName}
+                                  </div>
+                                  <p className="m-0 text-muted-foreground">{r.ranking.rationale}</p>
+                                </>
+                              )}
+                            </div>
+                          )}
+
+                          {r.ok && r.explanation && (
+                            <p className="m-0 text-[12.5px] leading-[1.5] text-muted-foreground [text-wrap:pretty]">{r.explanation.explanation}</p>
+                          )}
+
+                          {r.ok && r.changes && (
+                            <div className="text-[12.5px] leading-[1.5]">
+                              <p className="m-0 text-muted-foreground">{r.changes.summary}</p>
+                              {r.changes.changes.length > 0 && (
+                                <ul className="m-0 mt-1.5 flex list-none flex-col gap-1 p-0">
+                                  {r.changes.changes.map((c, j) => (
+                                    <li key={j} className="text-[11.5px] text-text-3">
+                                      {c.indicatorName}: {c.fromStatus} → {c.toStatus} ({c.date})
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          )}
+
+                          {r.ok && r.suggestion && (
+                            <div className="text-[12.5px] leading-[1.5]">
+                              {!r.suggestion.sufficientEvidence || !r.suggestion.generateResult ? (
+                                <p className="m-0 text-muted-foreground">{r.suggestion.gap || "Nothing to suggest right now."}</p>
+                              ) : (
+                                <>
+                                  <div className="mb-1 font-mono text-[10.5px] uppercase tracking-[0.04em] text-brand-orange">
+                                    Target: {r.suggestion.targetScenarioName}
+                                  </div>
+                                  <p className="m-0 text-muted-foreground">
+                                    {r.suggestion.generateResult.sufficientEvidence
+                                      ? `Generated ${r.suggestion.generateResult.count} indicator(s).`
+                                      : r.suggestion.generateResult.gap || "The model found insufficient evidence."}
+                                  </p>
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <ScenarioChatPanel
+                  messages={monitoringChatMessages}
+                  input={monitoringChatInput}
+                  setInput={setMonitoringChatInput}
+                  thinking={monitoringChatThinking}
+                  onSend={sendMonitoringChat}
+                  onAddIndicator={onAddMonitoringIndicator}
                   activeProjectId={store.activeProjectId}
                 />
               </div>

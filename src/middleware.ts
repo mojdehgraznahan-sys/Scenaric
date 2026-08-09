@@ -2,7 +2,10 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 const PUBLIC_PATHS = ["/", "/login", "/signup"];
-const PUBLIC_PREFIXES = ["/auth/"];
+// /api/cron/ has no user session to check (Vercel Cron, not a browser) — its own routes check
+// a CRON_SECRET bearer token instead (see src/app/api/cron/indicators-monitor/route.ts).
+// Without this carve-out the session redirect below fires first and Vercel just sees a 302.
+const PUBLIC_PREFIXES = ["/auth/", "/api/cron/"];
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });

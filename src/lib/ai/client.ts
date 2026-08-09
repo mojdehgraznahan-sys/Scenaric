@@ -67,6 +67,10 @@ interface RunStructuredOptions<T extends z.ZodTypeAny> {
    *  found directly inside its own JSON output (e.g. a `citations` field) rather than relying
    *  on the caller to parse intermediate web_search_tool_result content blocks. */
   webSearch?: { maxUses?: number };
+  /** Tags this call's ai_runs row so every call made during one batch (e.g. one cron
+   *  invocation, across every project it touched) can be queried as a single unit later.
+   *  Omitted by default — every existing caller is unaffected, the column just stays null. */
+  batchId?: string;
 }
 
 function inputHashFor(input: unknown): string {
@@ -88,6 +92,7 @@ async function logRun(args: {
   inputHash: string;
   outputJson: unknown | null;
   confidence: string | null;
+  batchId: string | null;
 }) {
   // Service-role client: audit-log writes shouldn't depend on the acting user's own row
   // permissions, and this is the only way to log a pre-project call (project_id: null),
@@ -101,6 +106,7 @@ async function logRun(args: {
     output_json: args.outputJson,
     model: MODEL,
     confidence: args.confidence,
+    batch_id: args.batchId,
   });
   if (error) console.error("[ai/client] failed to log ai_runs", error);
 }
@@ -112,7 +118,7 @@ async function logRun(args: {
  * (success or final failure) is logged to ai_runs.
  */
 export async function runStructured<T extends z.ZodTypeAny>(opts: RunStructuredOptions<T>): Promise<z.infer<T>> {
-  const { step, projectId, taskPrompt, input, schema, effort = "medium", thinking = false, maxTokens = 4096, webSearch } = opts;
+  const { step, projectId, taskPrompt, input, schema, effort = "medium", thinking = false, maxTokens = 4096, webSearch, batchId = null } = opts;
   const promptVersion = opts.promptVersion || "v1";
   const inputHash = inputHashFor(input);
 
@@ -178,10 +184,11 @@ export async function runStructured<T extends z.ZodTypeAny>(opts: RunStructuredO
       inputHash,
       outputJson: response.parsed_output,
       confidence: confidenceFrom(response.parsed_output),
+      batchId,
     });
     return response.parsed_output;
   }
 
-  await logRun({ projectId, step, promptVersion, inputHash, outputJson: null, confidence: null });
+  await logRun({ projectId, step, promptVersion, inputHash, outputJson: null, confidence: null, batchId });
   throw new AIGenerationFailedError(step, lastReason, 2);
 }

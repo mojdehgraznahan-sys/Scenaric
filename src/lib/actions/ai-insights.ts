@@ -8,8 +8,10 @@
 // other source), so no separate audio-specific pipeline is needed.
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { runStructured, AIGenerationFailedError } from "@/lib/ai/client";
 import { createClient } from "@/lib/supabase/server";
+import type { Database } from "@/lib/supabase/types";
 
 const SOURCE_TYPE_LABEL: Record<string, "Docs" | "Audio" | "Survey" | "Web"> = {
   doc: "Docs",
@@ -81,8 +83,19 @@ export interface ExtractInsightsResult {
   failures: { sourceId: string; sourceName: string }[];
 }
 
-export async function extractInsightsForProject(projectId: string): Promise<ExtractInsightsResult> {
-  const supabase = createClient();
+export interface ExtractInsightsOptions {
+  /** Defaults to createClient() (cookie/session) when omitted — every existing caller (the
+   *  Knowledge Base "Extract insights" button, and pullNewsFeed's own follow-on call) is
+   *  unaffected. Pass createAdminClient() for a session-less caller (e.g. the indicator
+   *  monitoring cron job via pullNewsFeed) — a cron invocation has no session cookie, so the
+   *  default createClient() here would silently match zero rows under RLS (current_org_id()
+   *  resolves against a null auth.uid()), not throw. */
+  supabaseClient?: SupabaseClient<Database>;
+  batchId?: string;
+}
+
+export async function extractInsightsForProject(projectId: string, options: ExtractInsightsOptions = {}): Promise<ExtractInsightsResult> {
+  const supabase = options.supabaseClient ?? createClient();
 
   const { data: project, error: projectError } = await supabase
     .from("projects")
@@ -139,6 +152,7 @@ export async function extractInsightsForProject(projectId: string): Promise<Extr
         },
         schema: ExtractInsightsSchema,
         effort: "medium",
+        batchId: options.batchId,
       });
 
       if (!output.sufficient_evidence || output.insights.length === 0) continue;

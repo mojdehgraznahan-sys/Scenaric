@@ -268,6 +268,12 @@ export interface Store {
       selectedCell: { optionId: string; optionName: string; scenarioId: string; scenarioName: string } | null;
     } | null
   ) => void;
+  // Monitoring's own Ask AI scoping — "Explain this indicator's status" needs
+  // selectedIndicator, set by clicking one indicator row on the Monitoring page (toggle:
+  // clicking the same row again deselects). The other three tasks need nothing but
+  // store.activeProjectId, same convention as Strategy's "Suggest a hedge".
+  monitoringAskAiContext: { selectedIndicator: { id: string; name: string } | null } | null;
+  setMonitoringAskAiContext: (v: { selectedIndicator: { id: string; name: string } | null } | null) => void;
   scenarios: Scenario[];
   scenariosLoading: boolean;
   setScenarios: (v: Scenario[]) => void;
@@ -694,6 +700,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     selectedOption: { id: string; name: string } | null;
     selectedCell: { optionId: string; optionName: string; scenarioId: string; scenarioName: string } | null;
   } | null>(null);
+  const [monitoringAskAiContext, setMonitoringAskAiContext] = useState<{ selectedIndicator: { id: string; name: string } | null } | null>(null);
   const [strategies, setStrategies] = usePersistentState("fm.strategies", seed.strategies);
   const [criticalUncertainties, setCriticalUncertainties] = usePersistentState<string[]>(
     "fm.cu",
@@ -770,6 +777,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setNarrativeAskAiContext,
     strategyAskAiContext,
     setStrategyAskAiContext,
+    monitoringAskAiContext,
+    setMonitoringAskAiContext,
     scenarios,
     scenariosLoading,
     setScenarios,

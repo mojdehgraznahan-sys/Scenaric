@@ -21,10 +21,12 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import Anthropic from "@anthropic-ai/sdk";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
 import { AIWebSearchError } from "@/lib/ai/errors";
 import { extractInsightsForProject } from "./ai-insights";
+import type { Database } from "@/lib/supabase/types";
 
 const NewsFeedSchema = z.object({
   sufficient_evidence: z.boolean(),
@@ -49,7 +51,13 @@ Political) — current-events grounding for a scenario-planning knowledge base, 
 or speculation about what the news means.
 
 Input: { focal_question: string, industry: string, horizon: string,
-         existing_signal_titles: string[] /* avoid resurfacing what's already covered */ }
+         existing_signal_titles: string[] /* avoid resurfacing what's already covered */,
+         focus_topics: [{ name: string, trigger_condition: string | null }]
+         /* optional — when non-empty, this project is actively monitoring these specific
+         Step 8 leading indicators; actively look for real, dated developments relevant to
+         each named topic and its trigger_condition, IN ADDITION TO the general focal-question/
+         STEEP search below — never restrict results to ONLY focus_topics, and never skip a
+         genuinely relevant general item just because it isn't topic-specific */ }
 
 Rules:
 - Every item must be a real, dated news item you actually found via web_search — never a
@@ -60,6 +68,8 @@ Rules:
   not this one).
 - Each item needs exactly one steep_category.
 - Skip anything that's substantially the same story as an existing_signal_title.
+- If focus_topics is non-empty, prioritize surfacing items relevant to each named topic's
+  trigger_condition, without abandoning the general focal-question/STEEP search.
 - If web_search turns up nothing genuinely relevant and recent, return
   sufficient_evidence:false and a gap explaining why — do not pad with old or tangential
   results to look complete.
@@ -70,16 +80,45 @@ Output schema:
   items: [{ title: string, url: string, published_date: string | null, summary: string,
             steep_category: "Social"|"Technology"|"Economic"|"Ecological"|"Political" }] }`;
 
+export interface PullNewsFeedOptions {
+  /** Defaults to createClient() (cookie/session) when omitted — the existing "Pull recent
+   *  news" button on the Knowledge Base page is unaffected. Pass createAdminClient() for a
+   *  session-less caller (the indicator monitoring cron job) — a cron invocation has no
+   *  session cookie, so the default createClient() here would silently match zero rows under
+   *  RLS, not throw. */
+  supabaseClient?: SupabaseClient<Database>;
+  /** Only consulted when supabaseClient is provided — an admin client has no session to look
+   *  a user up from, so auth.getUser() isn't called on that path at all. Defaults to null. */
+  uploadedBy?: string | null;
+  /** Guides (does not restrict) the web search toward what's actively being monitored — see
+   *  the prompt's own focus_topics rule. */
+  focusTopics?: { name: string; triggerCondition: string | null }[];
+  batchId?: string;
+}
+
 export interface PullNewsFeedResult {
   sufficientEvidence: boolean;
   gap?: string | null;
   sourcesCreated: number;
   insightsCreated: number;
+  // Built directly from this call's own already-parsed model output, zipped with the insert's
+  // returned ids — no re-query, no re-parsing the concatenated extracted_text blob. Lets a
+  // caller (indicator-monitoring.ts) cite a real, specific news item without a second lookup.
+  sources: {
+    id: string;
+    title: string;
+    url: string;
+    summary: string;
+    publishedDate: string | null;
+    steepCategory: "Social" | "Technology" | "Economic" | "Ecological" | "Political";
+  }[];
 }
 
-// "Pull recent news" on the Knowledge Base page.
-export async function pullNewsFeed(projectId: string): Promise<PullNewsFeedResult> {
-  const supabase = createClient();
+// "Pull recent news" on the Knowledge Base page (default args); also the ingestion half of the
+// daily indicator monitoring job (indicator-monitoring.ts), which passes supabaseClient/
+// uploadedBy/focusTopics/batchId.
+export async function pullNewsFeed(projectId: string, options: PullNewsFeedOptions = {}): Promise<PullNewsFeedResult> {
+  const supabase = options.supabaseClient ?? createClient();
 
   const { data: project, error: projectError } = await supabase
     .from("projects")
@@ -102,6 +141,7 @@ export async function pullNewsFeed(projectId: string): Promise<PullNewsFeedResul
         industry: project.industry,
         horizon: project.horizon,
         existing_signal_titles: signals.map((s) => s.title),
+        focus_topics: (options.focusTopics ?? []).map((t) => ({ name: t.name, trigger_condition: t.triggerCondition })),
       },
       schema: NewsFeedSchema,
       effort: "medium",
@@ -109,6 +149,7 @@ export async function pullNewsFeed(projectId: string): Promise<PullNewsFeedResul
       // Same headroom bump ai-grounding.ts's web-search call needed — web_search tool turns
       // plus a multi-item structured response can run long.
       maxTokens: 6000,
+      batchId: options.batchId,
     });
   } catch (err) {
     if (err instanceof Anthropic.APIError) throw new AIWebSearchError(err);
@@ -116,12 +157,12 @@ export async function pullNewsFeed(projectId: string): Promise<PullNewsFeedResul
   }
 
   if (!output.sufficient_evidence || output.items.length === 0) {
-    return { sufficientEvidence: false, gap: output.gap ?? "No relevant recent news found.", sourcesCreated: 0, insightsCreated: 0 };
+    return { sufficientEvidence: false, gap: output.gap ?? "No relevant recent news found.", sourcesCreated: 0, insightsCreated: 0, sources: [] };
   }
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Only resolve a session user on the default (cookie) path — an admin client has no session,
+  // and auth.getUser() against it isn't meaningful to call at all.
+  const uploadedBy = options.supabaseClient ? (options.uploadedBy ?? null) : ((await supabase.auth.getUser()).data.user?.id ?? null);
 
   const rows = output.items.map((item) => ({
     project_id: projectId,
@@ -130,7 +171,7 @@ export async function pullNewsFeed(projectId: string): Promise<PullNewsFeedResul
     status: "complete" as const,
     storage_url: item.url,
     extracted_text: `[${item.steep_category}] ${item.title}${item.published_date ? ` (${item.published_date})` : ""}\n\n${item.summary}`,
-    uploaded_by: user?.id,
+    uploaded_by: uploadedBy,
   }));
 
   const { data: inserted, error: insertError } = await supabase.from("sources").insert(rows).select("id");
@@ -142,7 +183,16 @@ export async function pullNewsFeed(projectId: string): Promise<PullNewsFeedResul
   // sources are picked up exactly like any Doc/Audio/Survey/Web source would be. The
   // narrative/implications prompts never see this news directly, only the grounded
   // insights (and, eventually, signals) it produces.
-  const extractResult = await extractInsightsForProject(projectId);
+  const extractResult = await extractInsightsForProject(projectId, { supabaseClient: options.supabaseClient, batchId: options.batchId });
 
-  return { sufficientEvidence: true, sourcesCreated: inserted.length, insightsCreated: extractResult.insightsCreated };
+  const sourcesOut = inserted.map((row, idx) => ({
+    id: row.id,
+    title: output.items[idx].title,
+    url: output.items[idx].url,
+    summary: output.items[idx].summary,
+    publishedDate: output.items[idx].published_date,
+    steepCategory: output.items[idx].steep_category,
+  }));
+
+  return { sufficientEvidence: true, sourcesCreated: inserted.length, insightsCreated: extractResult.insightsCreated, sources: sourcesOut };
 }
