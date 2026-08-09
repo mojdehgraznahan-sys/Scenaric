@@ -31,7 +31,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div style={{ flex: 1, overflow: "hidden", display: "flex" }}>{children}</div>
       </div>
       <AskAI
-        context={page === "signals" ? "signals" : page === "storyline" ? "storyline" : page === "narrative" ? "narrative" : undefined}
+        context={
+          page === "signals"
+            ? "signals"
+            : page === "storyline"
+              ? "storyline"
+              : page === "narrative"
+                ? "narrative"
+                : page === "strategy"
+                  ? "strategy"
+                  : undefined
+        }
       />
       <GlobalToast navigate={navigate} />
     </div>

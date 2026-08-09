@@ -29,6 +29,18 @@ export class StorylineScenarioNotFoundError extends Error {
   }
 }
 
+// A plain "no such row" lookup failure that isn't scenario-shaped (unlike
+// StorylineScenarioNotFoundError above) — e.g. a strategic option id that doesn't exist or
+// doesn't belong to the given project. Kept generic rather than named after one caller since
+// several plain-CRUD routes (not just AI-generation ones) need a real 404 instead of
+// errorResponse's unknown-error 500 fallback.
+export class NotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NotFoundError";
+  }
+}
+
 // Thrown by a web-search-enabled call when the failure happened at the API/transport level
 // (rate limit, auth, the org's plan lacking web search access, etc.) rather than the model
 // producing a bad response — distinct from AIGenerationFailedError (schema/refusal). Wraps

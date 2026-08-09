@@ -27,16 +27,23 @@ import type {
 } from "@/lib/actions/ai-narrative-tasks";
 import type { GenerateImplicationsResult } from "@/lib/actions/ai-implications";
 import type { GenerateIndicatorsResult } from "@/lib/actions/ai-indicators";
+import type { StressTestOptionResult, SuggestHedgeResult } from "@/lib/actions/ai-strategy-tasks";
+import type { StrategyChatResult } from "@/lib/actions/ai-strategy-chat";
+import { createManualStrategicOption } from "@/lib/actions/strategy";
 
 interface ChatMsg {
   role: "ai" | "user";
   text: string;
   suggestedSignal?: SignalsChatResult["suggestedSignal"];
+  // Strategy chat's own "propose a new option" suggestion (ai-strategy-chat.ts) — same
+  // labeled + confirm-before-save contract as suggestedSignal above, just a different shape
+  // of thing to add. Reuses `added`/`suggestedForProjectId` below rather than duplicating them.
+  suggestedOption?: StrategyChatResult["suggestedOption"];
   cites?: string[];
-  // Set once "Add to Signals" succeeds, so the button can't fire twice.
+  // Set once "Add to Signals"/"Add as option" succeeds, so the button can't fire twice.
   added?: boolean;
-  // The project this suggestion was generated against — "Add to Signals" disables itself
-  // if the active project has since changed, rather than silently writing to the wrong one.
+  // The project this suggestion was generated against — the add button disables itself if
+  // the active project has since changed, rather than silently writing to the wrong one.
   suggestedForProjectId?: string;
 }
 
@@ -113,26 +120,51 @@ interface NarrativeResultEntry {
   indicators?: GenerateIndicatorsResult;
 }
 
+type StrategyTaskId = "stress_test_option" | "explain_non_robust" | "suggest_hedge";
+
+const STRATEGY_TASKS: { id: StrategyTaskId; label: string; needsOption: boolean; needsCell: boolean }[] = [
+  { id: "stress_test_option", label: "Stress-test this option", needsOption: true, needsCell: false },
+  { id: "explain_non_robust", label: "Why is this not robust here?", needsOption: false, needsCell: true },
+  { id: "suggest_hedge", label: "Suggest a hedge", needsOption: false, needsCell: false },
+];
+
+interface StrategyResultEntry {
+  task: StrategyTaskId;
+  ts: number;
+  ok: boolean;
+  error?: string;
+  stressTest?: StressTestOptionResult;
+  explanation?: string;
+  hedge?: SuggestHedgeResult;
+}
+
 function Dot({ delay = 0 }: { delay?: number }) {
   return <span className="h-1.5 w-1.5 rounded-full bg-text-3" style={{ animation: "blink 1.2s infinite ease-in-out", animationDelay: delay + "ms" }} />;
 }
 
-// "Ask anything…" freeform input, sitting alongside (below) Storyline's and Narrative's
-// fixed task menus — never replacing them. Backed by askScenarioChat (ai-scenario-chat.ts),
-// a real grounded chat scoped to the current scenario's own storyline/narrative/implications/
-// indicators, same discipline as Signals' askSignalsChat — not the canned-reply demo.
+// "Ask anything…" freeform input, sitting alongside (below) Storyline's, Narrative's, and
+// Strategy's fixed task menus — never replacing them. Backed by askScenarioChat
+// (ai-scenario-chat.ts) for Storyline/Narrative or askStrategyChat (ai-strategy-chat.ts) for
+// Strategy — real grounded chats, same discipline as Signals' askSignalsChat, not the
+// canned-reply demo. onAddOption (Strategy only) renders a suggested-option card + confirm
+// button when a message carries one, mirroring the main canned-chat branch's suggestedSignal
+// card below — never auto-saved, only on this explicit click.
 function ScenarioChatPanel({
   messages,
   input,
   setInput,
   thinking,
   onSend,
+  onAddOption,
+  activeProjectId,
 }: {
   messages: ChatMsg[];
   input: string;
   setInput: (v: string) => void;
   thinking: boolean;
   onSend: (text?: string) => void;
+  onAddOption?: (index: number) => void;
+  activeProjectId?: string | null;
 }) {
   const scrollRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
@@ -153,6 +185,34 @@ function ScenarioChatPanel({
               )}
             >
               {m.text}
+              {m.suggestedOption && onAddOption && (
+                <div className="mt-2.5 rounded-[10px] border border-border bg-white p-3 text-brand-dark">
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <span className="text-[12.5px] font-semibold">{m.suggestedOption.name}</span>
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded px-[7px] py-0.5 text-[10px] font-semibold uppercase tracking-[0.04em]",
+                        m.suggestedOption.origin === "grounded" ? "bg-[#ECFDF5] text-[#065F46]" : "bg-brand-orangeLight text-brand-orange700"
+                      )}
+                    >
+                      {m.suggestedOption.origin === "grounded" ? "Grounded" : "External pattern — review before adding"}
+                    </span>
+                  </div>
+                  <div className="mb-2.5 text-[12.5px] leading-[1.5] text-muted-foreground">
+                    {m.suggestedOption.notes}
+                    <div className="mt-1 italic">{m.suggestedOption.rationale}</div>
+                  </div>
+                  <Button
+                    variant={m.added ? "ghost" : "soft"}
+                    size="sm"
+                    className="w-full"
+                    disabled={m.added || m.suggestedForProjectId !== activeProjectId}
+                    onClick={() => onAddOption(i)}
+                  >
+                    {m.added ? "Added as option ✓" : m.suggestedForProjectId !== activeProjectId ? "Switched projects — can't add" : "+ Add as option"}
+                  </Button>
+                </div>
+              )}
             </div>
           ))}
           {thinking && (
@@ -182,7 +242,7 @@ function ScenarioChatPanel({
   );
 }
 
-export function AskAI({ context }: { context?: "signals" | "storyline" | "narrative" }) {
+export function AskAI({ context }: { context?: "signals" | "storyline" | "narrative" | "strategy" }) {
   const store = useStore();
   const [open, setOpen] = React.useState(false);
   const [messages, setMessages] = React.useState<ChatMsg[]>(context === "signals" ? SIGNALS_INITIAL : INITIAL);
@@ -350,6 +410,109 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
     }
   };
 
+  // Strategy mode — fixed task menu, never freeform (freeform is strategyChatMessages below),
+  // same convention as storyline/narrative modes above. Results are ephemeral for the same
+  // reason (structured diagnostics tied to the current live options/scores, not a conversation
+  // worth keeping) — except stress_test_option, which can have a real, persisted side effect
+  // (ai-strategy-tasks.ts flips a score's robust flag when it finds a genuine failure mode);
+  // the result card here is just the report of that, not the only record of it.
+  const [strategyResults, setStrategyResults] = React.useState<StrategyResultEntry[]>([]);
+  const [runningStrategyTask, setRunningStrategyTask] = React.useState<StrategyTaskId | null>(null);
+
+  const runStrategyTask = async (taskId: StrategyTaskId) => {
+    const projectId = store.activeProjectId;
+    const ctx = store.strategyAskAiContext;
+    if (!projectId) return;
+    if (taskId === "stress_test_option" && !ctx?.selectedOption) return;
+    if (taskId === "explain_non_robust" && !ctx?.selectedCell) return;
+    setRunningStrategyTask(taskId);
+    try {
+      const body: { task: StrategyTaskId; optionId?: string; scenarioId?: string } = { task: taskId };
+      if (taskId === "stress_test_option") body.optionId = ctx!.selectedOption!.id;
+      if (taskId === "explain_non_robust") {
+        body.optionId = ctx!.selectedCell!.optionId;
+        body.scenarioId = ctx!.selectedCell!.scenarioId;
+      }
+      const res = await fetch(`/api/projects/${projectId}/strategy/ask-ai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      const data = await res.json();
+      const entry: StrategyResultEntry = { task: taskId, ts: Date.now(), ok: true };
+      if (taskId === "stress_test_option") entry.stressTest = data as StressTestOptionResult;
+      else if (taskId === "explain_non_robust") entry.explanation = (data as { explanation: string }).explanation;
+      else entry.hedge = data as SuggestHedgeResult;
+      setStrategyResults((r) => [entry, ...r]);
+    } catch (err) {
+      console.error("[ask-ai] strategy task failed", err);
+      setStrategyResults((r) => [{ task: taskId, ts: Date.now(), ok: false, error: "Something went wrong running that task." }, ...r]);
+    } finally {
+      setRunningStrategyTask(null);
+    }
+  };
+
+  // Strategy's own "Ask anything…" — project-scoped (not scenario-scoped like Storyline/
+  // Narrative's ScenarioChatPanel usage below), backed by askStrategyChat (ai-strategy-chat.ts).
+  // Kept as its own message list/input rather than reusing scenarioChatMessages, since it can
+  // carry a suggestedOption a signals-style "+ Add as option" button acts on, which
+  // scenarioChatMessages' consumers never need. Resets whenever the active project changes, so
+  // a grounded answer from one project never bleeds into another's conversation.
+  const [strategyChatMessages, setStrategyChatMessages] = React.useState<ChatMsg[]>([]);
+  const [strategyChatInput, setStrategyChatInput] = React.useState("");
+  const [strategyChatThinking, setStrategyChatThinking] = React.useState(false);
+
+  React.useEffect(() => {
+    setStrategyChatMessages([]);
+  }, [store.activeProjectId]);
+
+  const sendStrategyChat = async (text?: string) => {
+    const t = (text || strategyChatInput).trim();
+    const projectId = store.activeProjectId;
+    if (!t || !projectId) return;
+    setStrategyChatMessages((m) => [...m, { role: "user", text: t }]);
+    setStrategyChatInput("");
+    setStrategyChatThinking(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/strategy/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: t }),
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      const data: StrategyChatResult = await res.json();
+      setStrategyChatMessages((m) => [...m, { role: "ai", text: data.answer, cites: data.cites, suggestedOption: data.suggestedOption, suggestedForProjectId: projectId }]);
+    } catch (err) {
+      console.error("[ask-ai] strategy chat failed", err);
+      setStrategyChatMessages((m) => [...m, { role: "ai", text: "Something went wrong answering that — try again." }]);
+    } finally {
+      setStrategyChatThinking(false);
+    }
+  };
+
+  // Backing action for the "+ Add as option" button above — the one place a freeform Strategy
+  // chat answer's external/inferred content can actually be written into the project, and only
+  // ever after this explicit click, never automatically from sendStrategyChat itself.
+  const onAddStrategyOption = async (index: number) => {
+    const msg = strategyChatMessages[index];
+    const suggestion = msg.suggestedOption;
+    const projectId = store.activeProjectId;
+    if (!suggestion || msg.added || msg.suggestedForProjectId !== projectId || !projectId) return;
+    try {
+      await createManualStrategicOption({
+        projectId,
+        name: suggestion.name,
+        notes: `${suggestion.notes}\n\nRationale: ${suggestion.rationale}${
+          suggestion.origin === "external_pattern" ? " (external pattern — not grounded in this project's own data; review before relying on it)" : ""
+        }`,
+      });
+      setStrategyChatMessages((m) => m.map((msg, i) => (i === index ? { ...msg, added: true } : msg)));
+    } catch (err) {
+      console.error("[ask-ai] failed to add suggested strategic option", err);
+    }
+  };
+
   // "Ask anything…" alongside the fixed task menus above — shared between storyline and
   // narrative context since both are scoped to the same scenario and hit the same grounded
   // chat endpoint. Ephemeral like storylineResults/narrativeResults (not persisted to
@@ -428,18 +591,21 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
                       ? "STORYLINE MODE · SCOPED TASKS ONLY"
                       : context === "narrative"
                         ? "NARRATIVE MODE · SCOPED TASKS ONLY"
-                        : "ANALYST · READING APAC EXPANSION 2030"}
+                        : context === "strategy"
+                          ? "STRATEGY MODE · SCOPED TASKS + GROUNDED CHAT"
+                          : "ANALYST · READING APAC EXPANSION 2030"}
                 </div>
               </div>
               <button
-                onClick={() =>
-                  context === "storyline"
-                    ? setStorylineResults([])
-                    : context === "narrative"
-                      ? setNarrativeResults([])
-                      : setMessages([{ role: "ai", text: "Cleared. What would you like to explore?" }])
-                }
-                title={context === "storyline" || context === "narrative" ? "Clear results" : "New conversation"}
+                onClick={() => {
+                  if (context === "storyline") setStorylineResults([]);
+                  else if (context === "narrative") setNarrativeResults([]);
+                  else if (context === "strategy") {
+                    setStrategyResults([]);
+                    setStrategyChatMessages([]);
+                  } else setMessages([{ role: "ai", text: "Cleared. What would you like to explore?" }]);
+                }}
+                title={context === "storyline" || context === "narrative" || context === "strategy" ? "Clear results" : "New conversation"}
                 className="rounded-md border-0 bg-transparent p-1.5 text-text-3"
               >
                 <Icons.Refresh size={14} />
@@ -680,6 +846,106 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
                   setInput={setScenarioChatInput}
                   thinking={scenarioChatThinking}
                   onSend={sendScenarioChat}
+                />
+              </div>
+            ) : context === "strategy" ? (
+              // Fixed task menu, never freeform, PLUS the real "Ask anything…" freeform panel
+              // below it (per this mode's own spec) — same structure as storyline/narrative's
+              // menu-only branches above, extended with ScenarioChatPanel like both of those
+              // already use for their own freeform half.
+              <div className="scroll-y flex flex-1 flex-col gap-2.5 p-4">
+                <div className="flex flex-col gap-1.5">
+                  <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">TASKS</div>
+                  {STRATEGY_TASKS.map((t) => {
+                    const ctx = store.strategyAskAiContext;
+                    const needsOptionUnmet = t.needsOption && !ctx?.selectedOption;
+                    const needsCellUnmet = t.needsCell && !ctx?.selectedCell;
+                    const disabled = !!runningStrategyTask || !store.activeProjectId || needsOptionUnmet || needsCellUnmet;
+                    const title = needsOptionUnmet
+                      ? "Open an option's detail view first"
+                      : needsCellUnmet
+                        ? "Click a non-robust (·) cell in the grid first"
+                        : undefined;
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => runStrategyTask(t.id)}
+                        disabled={disabled}
+                        title={title}
+                        className="rounded-[10px] border border-border bg-white px-3 py-2.5 text-left text-[12.5px] text-[#374151] transition-[border,background] duration-[120ms] hover:border-brand-orange100 hover:bg-brand-orangeLight disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {runningStrategyTask === t.id ? "Running…" : t.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {strategyResults.length > 0 && (
+                  <div className="mt-1 flex flex-col gap-2.5">
+                    <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">RESULTS</div>
+                    {strategyResults.map((r, i) => {
+                      const label = STRATEGY_TASKS.find((t) => t.id === r.task)?.label ?? r.task;
+                      return (
+                        <div key={i} className="rounded-[10px] border border-border bg-bg p-3 text-brand-dark">
+                          <div className="mb-1.5 flex items-center justify-between gap-2">
+                            <span className="text-[12.5px] font-semibold">{label}</span>
+                            <span className="font-mono text-[10px] text-text-3">{new Date(r.ts).toLocaleTimeString()}</span>
+                          </div>
+                          {!r.ok && <div className="text-[12.5px] text-[#EF4444]">{r.error}</div>}
+
+                          {r.ok && r.stressTest && (
+                            <div className="text-[12.5px] leading-[1.5]">
+                              {r.stressTest.findings.length === 0 ? (
+                                <p className="m-0 text-muted-foreground">This option isn&apos;t marked robust in any scenario yet — nothing to stress-test.</p>
+                              ) : (
+                                <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+                                  {r.stressTest.findings.map((f, j) => (
+                                    <li key={j} className={f.revised ? "text-[#92400E]" : "text-[#065F46]"}>
+                                      {f.revised ? "⚠ now flagged not robust —" : "✓ confirmed robust —"} {f.scenarioName}
+                                      <div className="text-[11.5px] text-muted-foreground">{f.rationale}</div>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          )}
+
+                          {r.ok && r.explanation !== undefined && (
+                            <p className="m-0 text-[12.5px] leading-[1.5] text-muted-foreground [text-wrap:pretty]">{r.explanation}</p>
+                          )}
+
+                          {r.ok && r.hedge && (
+                            <div className="text-[12.5px] leading-[1.5]">
+                              {!r.hedge.sufficientEvidence || !r.hedge.suggestion ? (
+                                <p className="m-0 text-muted-foreground">{r.hedge.gap || "No grounded hedge suggestion available."}</p>
+                              ) : (
+                                <>
+                                  {r.hedge.targetScenarioName && (
+                                    <div className="mb-1 font-mono text-[10.5px] uppercase tracking-[0.04em] text-brand-orange">
+                                      Weakest coverage: {r.hedge.targetScenarioName}
+                                    </div>
+                                  )}
+                                  <div className="mb-1 text-[13px] font-semibold">{r.hedge.suggestion.name}</div>
+                                  <p className="m-0 mb-1 text-muted-foreground">{r.hedge.suggestion.notes}</p>
+                                  <p className="m-0 italic text-muted-foreground">{r.hedge.suggestion.rationale}</p>
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <ScenarioChatPanel
+                  messages={strategyChatMessages}
+                  input={strategyChatInput}
+                  setInput={setStrategyChatInput}
+                  thinking={strategyChatThinking}
+                  onSend={sendStrategyChat}
+                  onAddOption={onAddStrategyOption}
+                  activeProjectId={store.activeProjectId}
                 />
               </div>
             ) : (

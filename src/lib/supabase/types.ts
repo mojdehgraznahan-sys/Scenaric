@@ -652,6 +652,108 @@ export interface Database {
         Update: { project_id?: string; signal_id?: string; insight_id?: string };
         Relationships: [];
       };
+      strategic_options: {
+        Row: {
+          id: string;
+          project_id: string;
+          name: string;
+          notes: string | null;
+          risk: "Low" | "Medium" | "High" | null;
+          cost: "Low" | "Medium" | "High" | null;
+          created_via: "ai" | "manual";
+          is_primary: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          name: string;
+          notes?: string | null;
+          risk?: "Low" | "Medium" | "High" | null;
+          cost?: "Low" | "Medium" | "High" | null;
+          created_via?: "ai" | "manual";
+          is_primary?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          name?: string;
+          notes?: string | null;
+          risk?: "Low" | "Medium" | "High" | null;
+          cost?: "Low" | "Medium" | "High" | null;
+          created_via?: "ai" | "manual";
+          is_primary?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      strategy_scenario_scores: {
+        Row: {
+          id: string;
+          project_id: string;
+          strategy_id: string;
+          scenario_id: string;
+          robust: boolean;
+          rationale: string;
+          grounded_in: string[];
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          strategy_id: string;
+          scenario_id: string;
+          robust: boolean;
+          rationale: string;
+          grounded_in?: string[];
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          strategy_id?: string;
+          scenario_id?: string;
+          robust?: boolean;
+          rationale?: string;
+          grounded_in?: string[];
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      strategy_recommendations: {
+        Row: {
+          id: string;
+          project_id: string;
+          primary_option_id: string;
+          pairing_option_id: string | null;
+          rationale: string;
+          generated_at: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          primary_option_id: string;
+          pairing_option_id?: string | null;
+          rationale: string;
+          generated_at?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          primary_option_id?: string;
+          pairing_option_id?: string | null;
+          rationale?: string;
+          generated_at?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       ai_runs: {
         Row: {
           id: string;
@@ -694,6 +796,10 @@ export interface Database {
       list_projects_with_progress: {
         Args: Record<PropertyKey, never>;
         Returns: ProjectRowShape[];
+      };
+      set_primary_strategic_option: {
+        Args: { p_project_id: string; p_option_id: string; p_is_primary: boolean };
+        Returns: Database["public"]["Tables"]["strategic_options"]["Row"];
       };
     };
     Enums: Record<string, never>;

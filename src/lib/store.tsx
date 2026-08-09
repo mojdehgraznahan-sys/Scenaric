@@ -252,6 +252,22 @@ export interface Store {
   // nodeIds/nodeTitleById shape, which is specifically about chain-path highlighting.
   narrativeAskAiContext: { scenarioId: string } | null;
   setNarrativeAskAiContext: (v: { scenarioId: string } | null) => void;
+  // Strategy's own Ask AI scoping — "Stress-test this option" needs selectedOption (set while
+  // the detail modal is open), "Why is this not robust here?" needs selectedCell (set by
+  // clicking one option x scenario robustness dot in the grid); "Suggest a hedge" needs
+  // neither, just store.activeProjectId. Both null (or the whole context null, off the
+  // Strategy page) simply disables the tasks that need them, same convention as Storyline's
+  // needsPath/pathEmpty gating.
+  strategyAskAiContext: {
+    selectedOption: { id: string; name: string } | null;
+    selectedCell: { optionId: string; optionName: string; scenarioId: string; scenarioName: string } | null;
+  } | null;
+  setStrategyAskAiContext: (
+    v: {
+      selectedOption: { id: string; name: string } | null;
+      selectedCell: { optionId: string; optionName: string; scenarioId: string; scenarioName: string } | null;
+    } | null
+  ) => void;
   scenarios: Scenario[];
   scenariosLoading: boolean;
   setScenarios: (v: Scenario[]) => void;
@@ -674,6 +690,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     nodeTitleById: Record<string, string>;
   } | null>(null);
   const [narrativeAskAiContext, setNarrativeAskAiContext] = useState<{ scenarioId: string } | null>(null);
+  const [strategyAskAiContext, setStrategyAskAiContext] = useState<{
+    selectedOption: { id: string; name: string } | null;
+    selectedCell: { optionId: string; optionName: string; scenarioId: string; scenarioName: string } | null;
+  } | null>(null);
   const [strategies, setStrategies] = usePersistentState("fm.strategies", seed.strategies);
   const [criticalUncertainties, setCriticalUncertainties] = usePersistentState<string[]>(
     "fm.cu",
@@ -748,6 +768,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setStorylineAskAiContext,
     narrativeAskAiContext,
     setNarrativeAskAiContext,
+    strategyAskAiContext,
+    setStrategyAskAiContext,
     scenarios,
     scenariosLoading,
     setScenarios,
