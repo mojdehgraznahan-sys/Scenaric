@@ -42,7 +42,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   ? "strategy"
                   : page === "monitoring"
                     ? "monitoring"
-                    : undefined
+                    : page === "home"
+                      ? "home"
+                      : undefined
         }
       />
       <GlobalToast navigate={navigate} />

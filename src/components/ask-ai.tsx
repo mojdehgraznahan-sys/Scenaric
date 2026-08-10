@@ -33,6 +33,8 @@ import { createManualStrategicOption } from "@/lib/actions/strategy";
 import type { RankScenariosResult, ExplainIndicatorResult, RecentChangesResult, SuggestIndicatorForScenarioResult } from "@/lib/actions/ai-monitoring-tasks";
 import type { MonitoringChatResult } from "@/lib/actions/ai-monitoring-chat";
 import { createManualIndicator } from "@/lib/actions/indicators";
+import type { NextStepsResult, SummarizeWeekSignalsResult, WhatsChangedResult, ExplainProgressResult } from "@/lib/actions/ai-home-tasks";
+import type { HomeChatResult } from "@/lib/actions/ai-home-chat";
 
 interface ChatMsg {
   role: "ai" | "user";
@@ -45,6 +47,12 @@ interface ChatMsg {
   // Monitoring chat's own "propose a new indicator" suggestion (ai-monitoring-chat.ts) — same
   // labeled + confirm-before-save contract as the two above.
   suggestedIndicator?: MonitoringChatResult["suggestedIndicator"];
+  // Home chat's own (ai-home-chat.ts) labeled-inference note — non-null only when the answer
+  // relied on something beyond the project's own stored data. Unlike suggestedSignal/Option/
+  // Indicator above, Home chat has no single "+ Add ___" target to confirm-save into, so this
+  // is display-only for now (the label itself IS the "requires confirmation before being
+  // saved" contract's UI half — there's just no save action yet to gate).
+  inference?: string | null;
   cites?: string[];
   // Set once "Add to Signals"/"Add as option" succeeds, so the button can't fire twice.
   added?: boolean;
@@ -164,6 +172,26 @@ interface MonitoringResultEntry {
   suggestion?: SuggestIndicatorForScenarioResult;
 }
 
+type HomeTaskId = "next_steps" | "summarize_week_signals" | "whats_changed" | "explain_progress";
+
+const HOME_TASKS: { id: HomeTaskId; label: string }[] = [
+  { id: "next_steps", label: "What should I do next?" },
+  { id: "summarize_week_signals", label: "Summarize this week's signals" },
+  { id: "whats_changed", label: "What's changed since I was last here?" },
+  { id: "explain_progress", label: "Explain my progress" },
+];
+
+interface HomeResultEntry {
+  task: HomeTaskId;
+  ts: number;
+  ok: boolean;
+  error?: string;
+  nextSteps?: NextStepsResult;
+  weekSignals?: SummarizeWeekSignalsResult;
+  whatsChanged?: WhatsChangedResult;
+  progress?: ExplainProgressResult;
+}
+
 function Dot({ delay = 0 }: { delay?: number }) {
   return <span className="h-1.5 w-1.5 rounded-full bg-text-3" style={{ animation: "blink 1.2s infinite ease-in-out", animationDelay: delay + "ms" }} />;
 }
@@ -269,6 +297,12 @@ function ScenarioChatPanel({
                   </Button>
                 </div>
               )}
+              {m.inference && (
+                <div className="mt-2 rounded-[8px] border border-brand-orange100 bg-brand-orangeLight px-2.5 py-1.5 text-[11.5px] leading-[1.5] text-brand-orange700">
+                  <span className="font-semibold uppercase tracking-[0.04em]">Inferred — </span>
+                  {m.inference}
+                </div>
+              )}
             </div>
           ))}
           {thinking && (
@@ -298,7 +332,7 @@ function ScenarioChatPanel({
   );
 }
 
-export function AskAI({ context }: { context?: "signals" | "storyline" | "narrative" | "strategy" | "monitoring" }) {
+export function AskAI({ context }: { context?: "signals" | "storyline" | "narrative" | "strategy" | "monitoring" | "home" }) {
   const store = useStore();
   const [open, setOpen] = React.useState(false);
   const [messages, setMessages] = React.useState<ChatMsg[]>(context === "signals" ? SIGNALS_INITIAL : INITIAL);
@@ -665,6 +699,73 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
     }
   };
 
+  // Home mode — fixed task menu, never freeform (freeform is homeChatMessages below), same
+  // convention as Strategy/Monitoring above. Results are ephemeral for the same reason
+  // (data tied to the current live project state, not a conversation worth keeping).
+  const [homeResults, setHomeResults] = React.useState<HomeResultEntry[]>([]);
+  const [runningHomeTask, setRunningHomeTask] = React.useState<HomeTaskId | null>(null);
+
+  const runHomeTask = async (taskId: HomeTaskId) => {
+    const projectId = store.activeProjectId;
+    if (!projectId) return;
+    setRunningHomeTask(taskId);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/home/ask-ai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task: taskId }),
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      const data = await res.json();
+      const entry: HomeResultEntry = { task: taskId, ts: Date.now(), ok: true };
+      if (taskId === "next_steps") entry.nextSteps = data as NextStepsResult;
+      else if (taskId === "summarize_week_signals") entry.weekSignals = data as SummarizeWeekSignalsResult;
+      else if (taskId === "whats_changed") entry.whatsChanged = data as WhatsChangedResult;
+      else entry.progress = data as ExplainProgressResult;
+      setHomeResults((r) => [entry, ...r]);
+    } catch (err) {
+      console.error("[ask-ai] home task failed", err);
+      setHomeResults((r) => [{ task: taskId, ts: Date.now(), ok: false, error: "Something went wrong running that task." }, ...r]);
+    } finally {
+      setRunningHomeTask(null);
+    }
+  };
+
+  // Home's own "Ask anything…" — project-scoped, backed by askHomeChat (ai-home-chat.ts).
+  // Resets whenever the active project changes, same convention as strategyChatMessages/
+  // monitoringChatMessages.
+  const [homeChatMessages, setHomeChatMessages] = React.useState<ChatMsg[]>([]);
+  const [homeChatInput, setHomeChatInput] = React.useState("");
+  const [homeChatThinking, setHomeChatThinking] = React.useState(false);
+
+  React.useEffect(() => {
+    setHomeChatMessages([]);
+  }, [store.activeProjectId]);
+
+  const sendHomeChat = async (text?: string) => {
+    const t = (text || homeChatInput).trim();
+    const projectId = store.activeProjectId;
+    if (!t || !projectId) return;
+    setHomeChatMessages((m) => [...m, { role: "user", text: t }]);
+    setHomeChatInput("");
+    setHomeChatThinking(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/home/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: t }),
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      const data: HomeChatResult = await res.json();
+      setHomeChatMessages((m) => [...m, { role: "ai", text: data.answer, cites: data.cites, inference: data.inference }]);
+    } catch (err) {
+      console.error("[ask-ai] home chat failed", err);
+      setHomeChatMessages((m) => [...m, { role: "ai", text: "Something went wrong answering that — try again." }]);
+    } finally {
+      setHomeChatThinking(false);
+    }
+  };
+
   // "Ask anything…" alongside the fixed task menus above — shared between storyline and
   // narrative context since both are scoped to the same scenario and hit the same grounded
   // chat endpoint. Ephemeral like storylineResults/narrativeResults (not persisted to
@@ -747,7 +848,9 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
                           ? "STRATEGY MODE · SCOPED TASKS + GROUNDED CHAT"
                           : context === "monitoring"
                             ? "MONITORING MODE · SCOPED TASKS + GROUNDED CHAT"
-                            : "ANALYST · READING APAC EXPANSION 2030"}
+                            : context === "home"
+                              ? "HOME MODE · SCOPED TASKS + GROUNDED CHAT"
+                              : "ANALYST · READING APAC EXPANSION 2030"}
                 </div>
               </div>
               <button
@@ -760,10 +863,15 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
                   } else if (context === "monitoring") {
                     setMonitoringResults([]);
                     setMonitoringChatMessages([]);
+                  } else if (context === "home") {
+                    setHomeResults([]);
+                    setHomeChatMessages([]);
                   } else setMessages([{ role: "ai", text: "Cleared. What would you like to explore?" }]);
                 }}
                 title={
-                  context === "storyline" || context === "narrative" || context === "strategy" || context === "monitoring" ? "Clear results" : "New conversation"
+                  context === "storyline" || context === "narrative" || context === "strategy" || context === "monitoring" || context === "home"
+                    ? "Clear results"
+                    : "New conversation"
                 }
                 className="rounded-md border-0 bg-transparent p-1.5 text-text-3"
               >
@@ -1210,6 +1318,104 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
                   thinking={monitoringChatThinking}
                   onSend={sendMonitoringChat}
                   onAddIndicator={onAddMonitoringIndicator}
+                  activeProjectId={store.activeProjectId}
+                />
+              </div>
+            ) : context === "home" ? (
+              // Fixed task menu, never freeform, PLUS the real "Ask anything…" freeform panel
+              // below it — same structure as the monitoring branch above. No store.*AskAiContext
+              // selection state needed: none of these 4 tasks need a page-selected target, only
+              // an active project.
+              <div className="scroll-y flex flex-1 flex-col gap-2.5 p-4">
+                <div className="flex flex-col gap-1.5">
+                  <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">TASKS</div>
+                  {HOME_TASKS.map((t) => {
+                    const disabled = !!runningHomeTask || !store.activeProjectId;
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => runHomeTask(t.id)}
+                        disabled={disabled}
+                        className="rounded-[10px] border border-border bg-white px-3 py-2.5 text-left text-[12.5px] text-[#374151] transition-[border,background] duration-[120ms] hover:border-brand-orange100 hover:bg-brand-orangeLight disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {runningHomeTask === t.id ? "Running…" : t.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {homeResults.length > 0 && (
+                  <div className="mt-1 flex flex-col gap-2.5">
+                    <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">RESULTS</div>
+                    {homeResults.map((r, i) => {
+                      const label = HOME_TASKS.find((t) => t.id === r.task)?.label ?? r.task;
+                      return (
+                        <div key={i} className="rounded-[10px] border border-border bg-bg p-3 text-brand-dark">
+                          <div className="mb-1.5 flex items-center justify-between gap-2">
+                            <span className="text-[12.5px] font-semibold">{label}</span>
+                            <span className="font-mono text-[10px] text-text-3">{new Date(r.ts).toLocaleTimeString()}</span>
+                          </div>
+                          {!r.ok && <div className="text-[12.5px] text-[#EF4444]">{r.error}</div>}
+
+                          {r.ok && r.nextSteps && (
+                            <p className="m-0 text-[12.5px] leading-[1.5] text-muted-foreground [text-wrap:pretty]">{r.nextSteps.answer}</p>
+                          )}
+
+                          {r.ok && r.weekSignals && (
+                            <div className="text-[12.5px] leading-[1.5]">
+                              {r.weekSignals.totalSignals === 0 ? (
+                                <p className="m-0 text-muted-foreground">No signals added this week.</p>
+                              ) : (
+                                <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+                                  {r.weekSignals.categories.map((c, j) => (
+                                    <li key={j}>
+                                      <div className="font-mono text-[10.5px] uppercase tracking-[0.04em] text-brand-orange">
+                                        {c.category} · {c.count}
+                                      </div>
+                                      <p className="m-0 text-muted-foreground">{c.summary}</p>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          )}
+
+                          {r.ok && r.whatsChanged && (
+                            <p className="m-0 text-[12.5px] leading-[1.5] text-muted-foreground [text-wrap:pretty]">
+                              {r.whatsChanged.firstVisit ? "This is your first visit — nothing to compare yet." : r.whatsChanged.answer}
+                            </p>
+                          )}
+
+                          {r.ok && r.progress && (
+                            <div className="text-[12.5px] leading-[1.5]">
+                              <div className="mb-1.5 flex flex-wrap gap-1">
+                                {r.progress.tiles.map((tile, j) => (
+                                  <span
+                                    key={j}
+                                    className={cn(
+                                      "rounded px-[6px] py-0.5 text-[10.5px] font-medium",
+                                      tile.done ? "bg-[#ECFDF5] text-[#065F46]" : "bg-[#F3F4F6] text-text-3"
+                                    )}
+                                  >
+                                    {tile.done ? "✓" : "○"} {tile.label}
+                                  </span>
+                                ))}
+                              </div>
+                              <p className="m-0 text-muted-foreground">{r.progress.answer}</p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <ScenarioChatPanel
+                  messages={homeChatMessages}
+                  input={homeChatInput}
+                  setInput={setHomeChatInput}
+                  thinking={homeChatThinking}
+                  onSend={sendHomeChat}
                   activeProjectId={store.activeProjectId}
                 />
               </div>

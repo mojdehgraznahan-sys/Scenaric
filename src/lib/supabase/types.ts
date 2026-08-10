@@ -17,6 +17,7 @@ type ProjectRowShape = {
   summary: string;
   steps_complete: number;
   archived: boolean;
+  dashboard_last_viewed_at: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -64,6 +65,7 @@ export interface Database {
           summary?: string;
           steps_complete?: number;
           archived?: boolean;
+          dashboard_last_viewed_at?: string | null;
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -79,6 +81,7 @@ export interface Database {
           summary?: string;
           steps_complete?: number;
           archived?: boolean;
+          dashboard_last_viewed_at?: string | null;
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -838,12 +841,67 @@ export interface Database {
         };
         Relationships: [];
       };
+      news_items: {
+        Row: {
+          id: string;
+          project_id: string;
+          title: string;
+          source: string;
+          url: string;
+          published_at: string | null;
+          impact: "HIGH" | "MED" | "LOW" | null;
+          impact_cited_phrase: string | null;
+          steep_category: "Social" | "Technology" | "Economic" | "Ecological" | "Political";
+          summary: string;
+          added_to_signals: boolean;
+          source_id: string | null;
+          signal_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          title: string;
+          source: string;
+          url: string;
+          published_at?: string | null;
+          impact?: "HIGH" | "MED" | "LOW" | null;
+          impact_cited_phrase?: string | null;
+          steep_category: "Social" | "Technology" | "Economic" | "Ecological" | "Political";
+          summary: string;
+          added_to_signals?: boolean;
+          source_id?: string | null;
+          signal_id?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          title?: string;
+          source?: string;
+          url?: string;
+          published_at?: string | null;
+          impact?: "HIGH" | "MED" | "LOW" | null;
+          impact_cited_phrase?: string | null;
+          steep_category?: "Social" | "Technology" | "Economic" | "Ecological" | "Political";
+          summary?: string;
+          added_to_signals?: boolean;
+          source_id?: string | null;
+          signal_id?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
       list_projects_with_progress: {
         Args: Record<PropertyKey, never>;
         Returns: ProjectRowShape[];
+      };
+      compute_steps_complete: {
+        Args: { p_project_id: string };
+        Returns: number;
       };
       set_primary_strategic_option: {
         Args: { p_project_id: string; p_option_id: string; p_is_primary: boolean };

@@ -1,37 +1,102 @@
 "use client";
 
 // Home / Dashboard — faithful Tailwind/shadcn port of the handoff page-dashboard.jsx.
-// Store-driven: reflects the active project's own progress (stepsComplete/lastEdited),
-// not static demo numbers, so the All Projects → Home handoff is accurate per project.
+// Store-driven for project identity (name/horizon/industry/lastEdited); KPIs, the 9-tile
+// stepsComplete tracker, and the News Feed are all fetched from GET /projects/:id/dashboard
+// and GET /projects/:id/news — real per-project data, not the seed.stats/seed.news demo
+// data this page used to read.
+import * as React from "react";
 import { Icons } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 import { useNavigate } from "@/lib/use-navigate";
+import type { ProjectDashboard } from "@/lib/actions/dashboard";
+import type { NewsItemRow } from "@/lib/actions/news";
+import type { RecommendationAction } from "@/lib/actions/dashboard-recommendations";
+import { STEP_LABELS, STEP_ROUTES, STEP_GATE } from "@/lib/step-tracker";
 
-const STEP_LABELS = [
-  "Focal question",
-  "Key forces",
-  "Driving forces",
-  "Rank forces",
-  "Scenario logics",
-  "Narratives",
-  "Implications",
-  "Indicators",
-  "Strategy",
-];
-const STEP_ROUTES = ["/settings", "/knowledge", "/signals", "/matrix", "/canvas", "/narrative", "/narrative", "/monitoring", "/strategy"];
-// Maps each of the 9 tracker tiles to the canonical 8-step count used by the Projects
-// dashboard (Key forces + Driving forces both complete once step 2 is reached).
-const STEP_GATE = [1, 2, 2, 3, 4, 5, 6, 7, 8];
+const EMPTY_KPI = { value: 0, sub: "" };
 
 export function PageDashboard() {
   const store = useStore();
-  const { seed } = store;
   const navigate = useNavigate();
   const project = store.project;
-  const activeProject = (store.projects || []).find((p) => p.id === store.activeProjectId);
-  const stepsComplete = Math.max(0, Math.min(8, (activeProject && activeProject.stepsComplete) || 0));
+  const projectId = store.activeProjectId;
+  const activeProject = (store.projects || []).find((p) => p.id === projectId);
+
+  // Initialized from the store's own already-server-derived copy (list_projects_with_progress,
+  // same RPC the dashboard endpoint below calls) so the tile tracker doesn't flash "Not started"
+  // before the fetch resolves — then the fetch's own value (same source of truth) takes over.
+  const [dashboard, setDashboard] = React.useState<ProjectDashboard | null>(null);
+  const stepsComplete = Math.max(0, Math.min(8, dashboard?.stepsComplete ?? (activeProject && activeProject.stepsComplete) ?? 0));
+
+  const [news, setNews] = React.useState<NewsItemRow[]>([]);
+  const [unreadCount, setUnreadCount] = React.useState(0);
+  const [addingIds, setAddingIds] = React.useState<Set<string>>(new Set());
+  // null = not loaded yet / fetch failed → each card falls back to its own static copy below,
+  // never a blank card. An empty array (successful fetch, model judged nothing worth
+  // surfacing) also falls back per-slot the same way.
+  const [recommendedActions, setRecommendedActions] = React.useState<RecommendationAction[] | null>(null);
+
+  React.useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const [dashboardRes, newsRes, recommendationsRes] = await Promise.all([
+          fetch(`/api/projects/${projectId}/dashboard`),
+          fetch(`/api/projects/${projectId}/news?unread=true`),
+          fetch(`/api/projects/${projectId}/dashboard/recommendations`, { method: "POST" }),
+        ]);
+        if (!cancelled && dashboardRes.ok) setDashboard(await dashboardRes.json());
+        if (!cancelled && newsRes.ok) {
+          const data = await newsRes.json();
+          setNews(data.items);
+          setUnreadCount(data.unreadCount);
+        }
+        if (!cancelled && recommendationsRes.ok) {
+          const data = await recommendationsRes.json();
+          setRecommendedActions(data.actions);
+        }
+      } catch (err) {
+        console.error("[dashboard] failed to load dashboard data", err);
+      } finally {
+        // Fired only after the unread fetch above resolves — stamping the view first would
+        // erase this same visit's own "unread" badge before it's ever shown.
+        if (!cancelled) fetch(`/api/projects/${projectId}/dashboard/view`, { method: "POST" }).catch(() => {});
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  const nextStepAction = recommendedActions?.find((a) => a.slot === "next_step") ?? null;
+  const monitorAction = recommendedActions?.find((a) => a.slot === "monitor") ?? null;
+
+  const addToSignals = React.useCallback(
+    async (newsItemId: string) => {
+      if (!projectId) return;
+      setAddingIds((prev) => new Set(prev).add(newsItemId));
+      try {
+        const res = await fetch(`/api/projects/${projectId}/news/${newsItemId}/add-to-signals`, { method: "POST" });
+        if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+        setNews((prev) => prev.map((n) => (n.id === newsItemId ? { ...n, added_to_signals: true } : n)));
+      } catch (err) {
+        console.error("[dashboard] failed to add news item to signals", err);
+      } finally {
+        setAddingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(newsItemId);
+          return next;
+        });
+      }
+    },
+    [projectId]
+  );
 
   const tiles = STEP_LABELS.map((label, i) => ({
     label,
@@ -49,34 +114,28 @@ export function PageDashboard() {
     return Math.round(diffH / 24) + "d ago";
   })();
 
-  // KPI values gate to zero for a project that hasn't reached that step yet — avoids
-  // showing another project's stale counts on a brand-new project.
   const kpis = [
     {
       label: "Signals tracked",
-      value: stepsComplete >= 2 ? seed.stats.signals : 0,
-      sub: stepsComplete >= 2 ? "+3 this week" : "Add your first signal",
+      ...(dashboard?.kpis.signals ?? EMPTY_KPI),
       tone: "text-brand-orange",
       route: "/signals",
     },
     {
       label: "Scenarios drafted",
-      value: stepsComplete >= 4 ? seed.stats.scenarios : 0,
-      sub: stepsComplete >= 4 ? "Ready for narratives" : "Build your matrix first",
+      ...(dashboard?.kpis.scenarios ?? EMPTY_KPI),
       tone: "text-[#3B82F6]",
       route: "/canvas",
     },
     {
       label: "Indicators live",
-      value: stepsComplete >= 7 ? seed.stats.indicators : 0,
-      sub: stepsComplete >= 7 ? "2 in alert" : "Not set up yet",
+      ...(dashboard?.kpis.indicators ?? EMPTY_KPI),
       tone: "text-[#EF4444]",
       route: "/monitoring",
     },
     {
       label: "Strategic options",
-      value: stepsComplete >= 8 ? (store.strategies || []).length : 0,
-      sub: stepsComplete >= 8 ? "1 robust across futures" : "Not started",
+      ...(dashboard?.kpis.strategicOptions ?? EMPTY_KPI),
       tone: "text-[#10B981]",
       route: "/strategy",
     },
@@ -161,7 +220,9 @@ export function PageDashboard() {
           ))}
         </div>
 
-        {/* AI Recommended Actions */}
+        {/* AI Recommended Actions — real, grounded copy from POST /dashboard/recommendations
+            when available; each card falls back to its own original static copy independently
+            (never blank) if the fetch failed or the model judged that slot not worth surfacing. */}
         <div className="mb-4 grid grid-cols-2 gap-3">
           <div className="rounded-xl border border-border bg-card p-[18px] shadow-card">
             <div className="mb-2.5 flex items-center gap-2">
@@ -170,14 +231,16 @@ export function PageDashboard() {
                 Recommended next
               </span>
             </div>
-            <div className="mb-1 text-[15px] font-semibold">Build the impact × uncertainty matrix</div>
+            <div className="mb-1 text-[15px] font-semibold">{nextStepAction ? nextStepAction.title : "Build the impact × uncertainty matrix"}</div>
             <div className="mb-3.5 text-[13px] leading-[1.55] text-muted-foreground">
-              {kpis[0].value > 0
-                ? `You have ${kpis[0].value} signals ranked. Plot the top by impact and uncertainty to find your scenario axes.`
-                : "Add and rank a few signals first, then plot them here to find your scenario axes."}
+              {nextStepAction
+                ? nextStepAction.rationale
+                : kpis[0].value > 0
+                  ? `You have ${kpis[0].value} signals ranked. Plot the top by impact and uncertainty to find your scenario axes.`
+                  : "Add and rank a few signals first, then plot them here to find your scenario axes."}
             </div>
-            <Button variant="primary" size="sm" onClick={() => navigate("/matrix")}>
-              Open matrix <Icons.ArrowRight size={12} />
+            <Button variant="primary" size="sm" onClick={() => navigate(nextStepAction?.route ?? "/matrix")}>
+              {nextStepAction ? nextStepAction.ctaLabel : "Open matrix"} <Icons.ArrowRight size={12} />
             </Button>
           </div>
           <div className="rounded-xl border border-border bg-card p-[18px] shadow-card">
@@ -186,15 +249,17 @@ export function PageDashboard() {
               <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[#065F46]">Monitor</span>
             </div>
             <div className="mb-1 text-[15px] font-semibold">
-              {kpis[2].value > 0 ? `Track ${kpis[2].value} leading indicators` : "Set up leading indicators"}
+              {monitorAction ? monitorAction.title : kpis[2].value > 0 ? `Track ${kpis[2].value} leading indicators` : "Set up leading indicators"}
             </div>
             <div className="mb-3.5 text-[13px] leading-[1.55] text-muted-foreground">
-              {kpis[2].value > 0
-                ? "Regulatory rulings and AI capex thresholds will tell you which scenario is unfolding."
-                : "Once your scenarios are built, define the signposts that tell you which future is unfolding."}
+              {monitorAction
+                ? monitorAction.rationale
+                : kpis[2].value > 0
+                  ? "Regulatory rulings and AI capex thresholds will tell you which scenario is unfolding."
+                  : "Once your scenarios are built, define the signposts that tell you which future is unfolding."}
             </div>
-            <Button variant="ghost" size="sm" onClick={() => navigate("/monitoring")}>
-              Open monitoring <Icons.ArrowRight size={12} />
+            <Button variant="ghost" size="sm" onClick={() => navigate(monitorAction?.route ?? "/monitoring")}>
+              {monitorAction ? monitorAction.ctaLabel : "Open monitoring"} <Icons.ArrowRight size={12} />
             </Button>
           </div>
         </div>
@@ -205,49 +270,61 @@ export function PageDashboard() {
             <div className="flex items-center gap-2">
               <Icons.Radio size={14} stroke="#1E1B2E" />
               <span className="text-sm font-semibold">News Feed</span>
-              <span className="font-mono text-[11px] text-text-3">· 5 unread</span>
+              <span className="font-mono text-[11px] text-text-3">· {unreadCount} unread</span>
             </div>
             <div className="flex gap-1.5">
               <Button variant="ghost" size="sm">
                 <Icons.Filter size={12} /> Filter
               </Button>
-              <Button variant="ghost" size="sm">
+              <Button variant="ghost" size="sm" onClick={() => navigate("/knowledge")}>
                 View all
               </Button>
             </div>
           </div>
-          {seed.news.map((n, i) => (
-            <div
-              key={n.id}
-              className={cn(
-                "flex cursor-pointer items-center gap-3 px-[18px] py-3",
-                i < seed.news.length - 1 && "border-b border-[#F3F4F6]"
-              )}
-            >
-              <div className="flex-1">
-                <div className="mb-0.5 text-[13.5px] font-medium text-brand-dark">{n.title}</div>
-                <div className="font-mono text-[11px] text-text-3">
-                  {n.source.toUpperCase()} · {n.time}
-                </div>
-              </div>
-              <span
-                className={cn(
-                  "inline-flex items-center rounded px-[7px] py-0.5 text-[10px] font-semibold uppercase tracking-[0.04em]",
-                  n.impact === "HIGH" ? "bg-brand-orangeLight text-brand-orange700" : "bg-[#FFFBEB] text-[#B45309]"
-                )}
-              >
-                {n.impact}
-              </span>
-              <button
-                className="rounded-md px-2 py-1 text-[13px] font-medium text-brand-orange"
-                onClick={() => navigate("/signals")}
-              >
-                + Add to Signals
-              </button>
+          {news.length === 0 ? (
+            <div className="px-[18px] py-6 text-center text-[13px] text-muted-foreground">
+              No news pulled yet — check back after the next daily update.
             </div>
-          ))}
+          ) : (
+            news.map((n, i) => (
+              <div
+                key={n.id}
+                className={cn("flex items-center gap-3 px-[18px] py-3", i < news.length - 1 && "border-b border-[#F3F4F6]")}
+              >
+                <div className="flex-1">
+                  <div className="mb-0.5 text-[13.5px] font-medium text-brand-dark">{n.title}</div>
+                  <div className="font-mono text-[11px] text-text-3">
+                    {n.source.toUpperCase()} · {timeAgoLabel(n.published_at)}
+                  </div>
+                </div>
+                <span
+                  className={cn(
+                    "inline-flex items-center rounded px-[7px] py-0.5 text-[10px] font-semibold uppercase tracking-[0.04em]",
+                    n.impact === "HIGH" ? "bg-brand-orangeLight text-brand-orange700" : "bg-[#FFFBEB] text-[#B45309]"
+                  )}
+                >
+                  {n.impact}
+                </span>
+                <button
+                  className="rounded-md px-2 py-1 text-[13px] font-medium text-brand-orange disabled:cursor-default disabled:text-text-3"
+                  disabled={n.added_to_signals || addingIds.has(n.id)}
+                  onClick={() => addToSignals(n.id)}
+                >
+                  {n.added_to_signals ? "Added" : addingIds.has(n.id) ? "Adding…" : "+ Add to Signals"}
+                </button>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>
   );
+}
+
+function timeAgoLabel(iso: string | null): string {
+  if (!iso) return "recently";
+  const diffH = Math.round((Date.now() - new Date(iso).getTime()) / 3600000);
+  if (diffH < 1) return "just now";
+  if (diffH < 24) return diffH + "h ago";
+  return Math.round(diffH / 24) + "d ago";
 }
