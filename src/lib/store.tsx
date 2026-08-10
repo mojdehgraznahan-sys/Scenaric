@@ -8,6 +8,7 @@
 import * as React from "react";
 import { FM_DATA } from "./data";
 import { createClient } from "./supabase/client";
+import type { CurrentUser } from "./actions/me";
 import {
   listProjects,
   createProject as createProjectAction,
@@ -89,9 +90,12 @@ export function usePersistentState<T>(key: string, initial: T) {
 }
 
 interface User {
+  id: string;
   name: string;
   email: string;
+  role: string;
   initials: string;
+  avatarColor: string;
 }
 interface OnboardingState {
   step: number;
@@ -102,14 +106,6 @@ interface OnboardingState {
   summary: string;
   industry: string;
   complete: boolean;
-}
-
-export function initialsFor(name: string | null | undefined, email: string): string {
-  const source = (name || email || "").trim();
-  if (!source) return "?";
-  const parts = source.split(/\s+/);
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
 function toProjectSummary(row: ProjectRow): ProjectSummary {
@@ -311,34 +307,46 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   // ---- Auth (real, Supabase) ----
   const [authed, setAuthed] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
-  const [user, setUserState] = useState<User>({ name: "", email: "", initials: "?" });
+  const [user, setUserState] = useState<User>({ id: "", name: "", email: "", role: "", initials: "?", avatarColor: "" });
 
   useEffect(() => {
     let cancelled = false;
 
-    const hydrateFromSession = async (sessionUserId: string | null, sessionEmail: string | null) => {
+    // GET /me (src/app/api/me/route.ts) is the single place that turns a session into a
+    // display-ready user (id/name/email/role/initials/avatar_color) — this hydration just
+    // consumes it, rather than deriving those fields itself, so there's one source of truth.
+    const hydrateFromSession = async (sessionUserId: string | null) => {
       if (!sessionUserId) {
         if (!cancelled) {
           setAuthed(false);
-          setUserState({ name: "", email: "", initials: "?" });
+          setUserState({ id: "", name: "", email: "", role: "", initials: "?", avatarColor: "" });
         }
         return;
       }
-      const { data: profile } = await supabase.from("profiles").select("name, email").eq("id", sessionUserId).single();
-      if (cancelled) return;
-      const email = profile?.email || sessionEmail || "";
-      setAuthed(true);
-      setUserState({ name: profile?.name || "", email, initials: initialsFor(profile?.name, email) });
+      try {
+        const res = await fetch("/api/me");
+        if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+        const me: CurrentUser = await res.json();
+        if (cancelled) return;
+        setAuthed(true);
+        setUserState({ id: me.id, name: me.name, email: me.email, role: me.role, initials: me.initials, avatarColor: me.avatar_color });
+      } catch (err) {
+        if (cancelled) return;
+        console.error("[store] failed to load current user", err);
+        // The session itself is real (sessionUserId is set) even though the profile fetch
+        // failed — stay authed rather than bouncing the user out over a transient error.
+        setAuthed(true);
+      }
     };
 
     supabase.auth.getUser().then(({ data }) => {
-      hydrateFromSession(data.user?.id ?? null, data.user?.email ?? null).finally(() => {
+      hydrateFromSession(data.user?.id ?? null).finally(() => {
         if (!cancelled) setAuthLoading(false);
       });
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      hydrateFromSession(session?.user.id ?? null, session?.user.email ?? null);
+      hydrateFromSession(session?.user.id ?? null);
     });
 
     return () => {

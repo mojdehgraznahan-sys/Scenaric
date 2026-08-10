@@ -10,6 +10,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { pullNewsFeed } from "./ai-news-feed";
 import { evaluateIndicatorsAgainstNews, type IndicatorStatusUpdate } from "./ai-indicators-evaluation";
+import { getConnectedSlackWebhookUrl, sendSlackAlert } from "./project-integrations";
 
 export type IndicatorStatus = "On track" | "Watch" | "Alert";
 
@@ -96,6 +97,11 @@ export async function runIndicatorMonitoringForProject(projectId: string, batchI
   // current status forward either way, collapsing "no news today" and "news came in but didn't
   // concern this indicator" into the same code path.
 
+  // Integrations tab's Slack connection ("Push signposts and alerts to channels") — fetched
+  // once per project, not per indicator. Null when not connected; the alert below is simply
+  // skipped in that case.
+  const slackWebhookUrl = await getConnectedSlackWebhookUrl(projectId, supabase);
+
   let statusChanges = 0;
   for (const indicator of active) {
     const update = updates.find((u) => u.indicatorId === indicator.id);
@@ -123,6 +129,16 @@ export async function runIndicatorMonitoringForProject(projectId: string, batchI
     }
     const { error: updateError } = await supabase.from("indicators").update(patch).eq("id", indicator.id);
     if (updateError) throw updateError;
+
+    // Real alert firing — only for a genuine status change (`update` truthy), never the
+    // "carried forward unchanged" branch. Fire-and-forget is acceptable here specifically
+    // (unlike interactive request paths elsewhere) since this already runs inside the
+    // long-lived cron invocation; still try/caught so a Slack failure never fails the
+    // monitoring run itself.
+    if (update && slackWebhookUrl) {
+      const text = `${newStatus === "Alert" ? "🚨" : "ℹ️"} *${indicator.name}* moved to *${newStatus}* — ${update.rationale}`;
+      sendSlackAlert(slackWebhookUrl, text).catch((err) => console.error("[indicators-monitoring] Slack alert failed", err));
+    }
   }
 
   // Deterministic trend recompute — no AI call. "Last 7 rows" (not "last 7 calendar days") so

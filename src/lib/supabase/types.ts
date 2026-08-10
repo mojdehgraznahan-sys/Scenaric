@@ -892,6 +892,60 @@ export interface Database {
         };
         Relationships: [];
       };
+      project_ai_settings: {
+        Row: {
+          project_id: string;
+          auto_extract_insights: boolean;
+          suggest_from_news_feeds: boolean;
+          weekly_digest: boolean;
+          strict_schwartz_mode: boolean;
+          updated_at: string;
+        };
+        Insert: {
+          project_id: string;
+          auto_extract_insights?: boolean;
+          suggest_from_news_feeds?: boolean;
+          weekly_digest?: boolean;
+          strict_schwartz_mode?: boolean;
+          updated_at?: string;
+        };
+        Update: {
+          project_id?: string;
+          auto_extract_insights?: boolean;
+          suggest_from_news_feeds?: boolean;
+          weekly_digest?: boolean;
+          strict_schwartz_mode?: boolean;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      project_integrations: {
+        Row: {
+          project_id: string;
+          slack_webhook_url: string | null;
+          slack_connected_at: string | null;
+          rss_feed_url: string | null;
+          rss_connected_at: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          project_id: string;
+          slack_webhook_url?: string | null;
+          slack_connected_at?: string | null;
+          rss_feed_url?: string | null;
+          rss_connected_at?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          project_id?: string;
+          slack_webhook_url?: string | null;
+          slack_connected_at?: string | null;
+          rss_feed_url?: string | null;
+          rss_connected_at?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {

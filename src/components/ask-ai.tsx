@@ -35,6 +35,8 @@ import type { MonitoringChatResult } from "@/lib/actions/ai-monitoring-chat";
 import { createManualIndicator } from "@/lib/actions/indicators";
 import type { NextStepsResult, SummarizeWeekSignalsResult, WhatsChangedResult, ExplainProgressResult } from "@/lib/actions/ai-home-tasks";
 import type { HomeChatResult } from "@/lib/actions/ai-home-chat";
+import type { DraftFocalQuestionResult, SharpenFocalQuestionResult, CritiqueFocalQuestionResult } from "@/lib/actions/ai-settings-tasks";
+import type { SettingsChatResult } from "@/lib/actions/ai-settings-chat";
 
 interface ChatMsg {
   role: "ai" | "user";
@@ -192,6 +194,30 @@ interface HomeResultEntry {
   progress?: ExplainProgressResult;
 }
 
+type SettingsTaskId = "draft_focal_question" | "sharpen_focal_question" | "critique_focal_question";
+
+const SETTINGS_TASKS: { id: SettingsTaskId; label: string }[] = [
+  { id: "draft_focal_question", label: "Draft a focal question from my project description" },
+  { id: "sharpen_focal_question", label: "Sharpen my focal question" },
+  { id: "critique_focal_question", label: "Is this focal question too broad/narrow?" },
+];
+
+interface SettingsResultEntry {
+  task: SettingsTaskId;
+  ts: number;
+  ok: boolean;
+  error?: string;
+  draft?: DraftFocalQuestionResult;
+  sharpen?: SharpenFocalQuestionResult;
+  critique?: CritiqueFocalQuestionResult;
+  // Set once "Accept"/"Use this" succeeds, so the button can't fire twice — same convention
+  // as ChatMsg's `added` flag on the other suggestion cards.
+  applied?: boolean;
+  // For sharpen_focal_question specifically: which of the 2-3 alternatives was applied,
+  // since only one button among several should disable/relabel.
+  appliedIndex?: number;
+}
+
 function Dot({ delay = 0 }: { delay?: number }) {
   return <span className="h-1.5 w-1.5 rounded-full bg-text-3" style={{ animation: "blink 1.2s infinite ease-in-out", animationDelay: delay + "ms" }} />;
 }
@@ -332,7 +358,7 @@ function ScenarioChatPanel({
   );
 }
 
-export function AskAI({ context }: { context?: "signals" | "storyline" | "narrative" | "strategy" | "monitoring" | "home" }) {
+export function AskAI({ context }: { context?: "signals" | "storyline" | "narrative" | "strategy" | "monitoring" | "home" | "settings" }) {
   const store = useStore();
   const [open, setOpen] = React.useState(false);
   const [messages, setMessages] = React.useState<ChatMsg[]>(context === "signals" ? SIGNALS_INITIAL : INITIAL);
@@ -766,6 +792,98 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
     }
   };
 
+  // Settings mode — fixed task menu, never freeform (freeform is settingsChatMessages below),
+  // same convention as Home/Strategy/Monitoring above. Results are ephemeral for the same
+  // reason (diagnostics/drafts tied to the current live project fields, not a conversation
+  // worth keeping) — except draft_focal_question/sharpen_focal_question, which can have a
+  // real, persisted side effect once "Accept"/"Use this" is explicitly clicked (PATCHes
+  // /settings, same confirm-before-write contract as suggestedSignal/suggestedOption/
+  // suggestedIndicator elsewhere in this file); the result card here is just the offer, not
+  // the only record of what happened.
+  const [settingsResults, setSettingsResults] = React.useState<SettingsResultEntry[]>([]);
+  const [runningSettingsTask, setRunningSettingsTask] = React.useState<SettingsTaskId | null>(null);
+
+  const runSettingsTask = async (taskId: SettingsTaskId) => {
+    const projectId = store.activeProjectId;
+    if (!projectId) return;
+    setRunningSettingsTask(taskId);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/settings/ask-ai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task: taskId }),
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      const data = await res.json();
+      const entry: SettingsResultEntry = { task: taskId, ts: Date.now(), ok: true };
+      if (taskId === "draft_focal_question") entry.draft = data as DraftFocalQuestionResult;
+      else if (taskId === "sharpen_focal_question") entry.sharpen = data as SharpenFocalQuestionResult;
+      else entry.critique = data as CritiqueFocalQuestionResult;
+      setSettingsResults((r) => [entry, ...r]);
+    } catch (err) {
+      console.error("[ask-ai] settings task failed", err);
+      setSettingsResults((r) => [{ task: taskId, ts: Date.now(), ok: false, error: "Something went wrong running that task." }, ...r]);
+    } finally {
+      setRunningSettingsTask(null);
+    }
+  };
+
+  // Fires the actual write (PATCH /settings) behind "Accept"/"Use this" on a
+  // draft_focal_question or sharpen_focal_question result card, then tells page-settings.tsx
+  // (if open) to refetch — same fm:project-settings-updated cross-component resync
+  // project-settings.ts's own consumers already use.
+  const applySettingsSuggestion = async (index: number, patch: { focal_question?: string; horizon?: string; refined_focal_question?: string }, appliedIndex?: number) => {
+    const projectId = store.activeProjectId;
+    if (!projectId) return;
+    try {
+      const res = await fetch(`/api/projects/${projectId}/settings`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      setSettingsResults((r) => r.map((entry, i) => (i === index ? { ...entry, applied: true, appliedIndex } : entry)));
+      window.dispatchEvent(new CustomEvent("fm:project-settings-updated", { detail: { projectId } }));
+    } catch (err) {
+      console.error("[ask-ai] failed to apply settings suggestion", err);
+    }
+  };
+
+  // Settings' own "Ask anything…" — project-scoped, backed by askSettingsChat
+  // (ai-settings-chat.ts). Resets whenever the active project changes, same convention as
+  // homeChatMessages/monitoringChatMessages.
+  const [settingsChatMessages, setSettingsChatMessages] = React.useState<ChatMsg[]>([]);
+  const [settingsChatInput, setSettingsChatInput] = React.useState("");
+  const [settingsChatThinking, setSettingsChatThinking] = React.useState(false);
+
+  React.useEffect(() => {
+    setSettingsChatMessages([]);
+  }, [store.activeProjectId]);
+
+  const sendSettingsChat = async (text?: string) => {
+    const t = (text || settingsChatInput).trim();
+    const projectId = store.activeProjectId;
+    if (!t || !projectId) return;
+    setSettingsChatMessages((m) => [...m, { role: "user", text: t }]);
+    setSettingsChatInput("");
+    setSettingsChatThinking(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/settings/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: t }),
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      const data: SettingsChatResult = await res.json();
+      setSettingsChatMessages((m) => [...m, { role: "ai", text: data.answer, cites: data.cites, inference: data.inference }]);
+    } catch (err) {
+      console.error("[ask-ai] settings chat failed", err);
+      setSettingsChatMessages((m) => [...m, { role: "ai", text: "Something went wrong answering that — try again." }]);
+    } finally {
+      setSettingsChatThinking(false);
+    }
+  };
+
   // "Ask anything…" alongside the fixed task menus above — shared between storyline and
   // narrative context since both are scoped to the same scenario and hit the same grounded
   // chat endpoint. Ephemeral like storylineResults/narrativeResults (not persisted to
@@ -850,7 +968,9 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
                             ? "MONITORING MODE · SCOPED TASKS + GROUNDED CHAT"
                             : context === "home"
                               ? "HOME MODE · SCOPED TASKS + GROUNDED CHAT"
-                              : "ANALYST · READING APAC EXPANSION 2030"}
+                              : context === "settings"
+                                ? "SETTINGS MODE · SCOPED TASKS + GROUNDED CHAT"
+                                : "ANALYST · READING APAC EXPANSION 2030"}
                 </div>
               </div>
               <button
@@ -866,10 +986,18 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
                   } else if (context === "home") {
                     setHomeResults([]);
                     setHomeChatMessages([]);
+                  } else if (context === "settings") {
+                    setSettingsResults([]);
+                    setSettingsChatMessages([]);
                   } else setMessages([{ role: "ai", text: "Cleared. What would you like to explore?" }]);
                 }}
                 title={
-                  context === "storyline" || context === "narrative" || context === "strategy" || context === "monitoring" || context === "home"
+                  context === "storyline" ||
+                  context === "narrative" ||
+                  context === "strategy" ||
+                  context === "monitoring" ||
+                  context === "home" ||
+                  context === "settings"
                     ? "Clear results"
                     : "New conversation"
                 }
@@ -1416,6 +1544,111 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
                   setInput={setHomeChatInput}
                   thinking={homeChatThinking}
                   onSend={sendHomeChat}
+                  activeProjectId={store.activeProjectId}
+                />
+              </div>
+            ) : context === "settings" ? (
+              // Fixed task menu, never freeform, PLUS the real "Ask anything…" freeform panel
+              // below it — same structure as the Home branch above. draft_focal_question/
+              // sharpen_focal_question results carry an explicit "Accept"/"Use this" button
+              // (confirm-before-write, same contract as suggestedSignal/suggestedOption/
+              // suggestedIndicator cards) — critique_focal_question never writes anything.
+              <div className="scroll-y flex flex-1 flex-col gap-2.5 p-4">
+                <div className="flex flex-col gap-1.5">
+                  <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">TASKS</div>
+                  {SETTINGS_TASKS.map((t) => {
+                    const disabled = !!runningSettingsTask || !store.activeProjectId;
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => runSettingsTask(t.id)}
+                        disabled={disabled}
+                        className="rounded-[10px] border border-border bg-white px-3 py-2.5 text-left text-[12.5px] text-[#374151] transition-[border,background] duration-[120ms] hover:border-brand-orange100 hover:bg-brand-orangeLight disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {runningSettingsTask === t.id ? "Running…" : t.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {settingsResults.length > 0 && (
+                  <div className="mt-1 flex flex-col gap-2.5">
+                    <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">RESULTS</div>
+                    {settingsResults.map((r, i) => {
+                      const label = SETTINGS_TASKS.find((t) => t.id === r.task)?.label ?? r.task;
+                      return (
+                        <div key={i} className="rounded-[10px] border border-border bg-bg p-3 text-brand-dark">
+                          <div className="mb-1.5 flex items-center justify-between gap-2">
+                            <span className="text-[12.5px] font-semibold">{label}</span>
+                            <span className="font-mono text-[10px] text-text-3">{new Date(r.ts).toLocaleTimeString()}</span>
+                          </div>
+                          {!r.ok && <div className="text-[12.5px] text-[#EF4444]">{r.error}</div>}
+
+                          {r.ok && r.draft && (
+                            <div className="text-[12.5px] leading-[1.5]">
+                              {!r.draft.sufficientEvidence ? (
+                                <p className="m-0 text-muted-foreground">{r.draft.gap || "Not enough project detail to draft one yet."}</p>
+                              ) : (
+                                <>
+                                  <div className="mb-1 text-[13px] font-semibold">{r.draft.focalQuestion}</div>
+                                  <div className="mb-1 font-mono text-[10.5px] uppercase tracking-[0.04em] text-brand-orange">
+                                    Horizon: {r.draft.horizon}
+                                  </div>
+                                  <p className="m-0 mb-2 text-muted-foreground">{r.draft.rationale}</p>
+                                  <Button
+                                    variant={r.applied ? "ghost" : "soft"}
+                                    size="sm"
+                                    className="w-full"
+                                    disabled={r.applied}
+                                    onClick={() => applySettingsSuggestion(i, { focal_question: r.draft!.focalQuestion, horizon: r.draft!.horizon })}
+                                  >
+                                    {r.applied ? "Applied ✓" : "Accept"}
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          )}
+
+                          {r.ok && r.sharpen && (
+                            <ul className="m-0 flex list-none flex-col gap-2 p-0 text-[12.5px] leading-[1.5]">
+                              {r.sharpen.alternatives.map((alt, j) => (
+                                <li key={j} className="rounded-[8px] border border-border bg-white p-2.5">
+                                  <div className="mb-1 font-medium">{alt.refinedQuestion}</div>
+                                  <p className="m-0 mb-2 text-muted-foreground">{alt.rationale}</p>
+                                  <Button
+                                    variant={r.applied && r.appliedIndex === j ? "ghost" : "soft"}
+                                    size="sm"
+                                    className="w-full"
+                                    disabled={r.applied}
+                                    onClick={() => applySettingsSuggestion(i, { refined_focal_question: alt.refinedQuestion }, j)}
+                                  >
+                                    {r.applied && r.appliedIndex === j ? "Applied ✓" : "Use this"}
+                                  </Button>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+
+                          {r.ok && r.critique && (
+                            <div className="text-[12.5px] leading-[1.5]">
+                              <div className="mb-1 font-mono text-[10.5px] uppercase tracking-[0.04em] text-brand-orange">
+                                {r.critique.verdict.replace("_", " ")}
+                              </div>
+                              <p className="m-0 text-muted-foreground">{r.critique.rationale}</p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <ScenarioChatPanel
+                  messages={settingsChatMessages}
+                  input={settingsChatInput}
+                  setInput={setSettingsChatInput}
+                  thinking={settingsChatThinking}
+                  onSend={sendSettingsChat}
                   activeProjectId={store.activeProjectId}
                 />
               </div>

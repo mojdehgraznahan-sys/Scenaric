@@ -7,6 +7,7 @@ import { useStore } from "@/lib/store";
 import { Icons } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 import type { Navigate } from "@/lib/use-navigate";
+import { avatarFgFor } from "@/lib/user-display";
 
 const { useState, useEffect } = React;
 
@@ -103,7 +104,9 @@ export function SideNav({ navigate, page }: { navigate: Navigate; page: string }
           {page !== "projects" && (
             <div className="mt-[7px] px-[9px] py-1.5">
               <div className="text-[13px] font-semibold tracking-[-0.01em] text-brand-dark">{store.project.name}</div>
-              <div className="mt-0.5 font-mono text-[10.5px] text-text-3">OWNED BY JOHN DOE</div>
+              <div className="mt-0.5 font-mono text-[10.5px] text-text-3">
+                OWNED BY {(store.user.name || store.user.email).toUpperCase()}
+              </div>
             </div>
           )}
         </div>
@@ -143,13 +146,16 @@ export function SideNav({ navigate, page }: { navigate: Navigate; page: string }
 
       {/* User row */}
       <div className={cn("flex min-h-[52px] items-center gap-2 border-t border-border px-[11px]", collapsed && "justify-center")}>
-        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-border text-[11px] font-semibold text-muted-foreground">
-          JD
+        <div
+          className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-semibold"
+          style={{ background: store.user.avatarColor || "#E5E7EB", color: store.user.avatarColor ? avatarFgFor(store.user.avatarColor) : "#6B7280" }}
+        >
+          {store.user.initials}
         </div>
         {!collapsed && (
           <div className="min-w-0 flex-1">
-            <div className="text-[12.5px] font-semibold text-brand-dark">John Doe</div>
-            <div className="font-mono text-[10.5px] text-text-3">OWNER</div>
+            <div className="text-[12.5px] font-semibold text-brand-dark">{store.user.name || store.user.email}</div>
+            <div className="font-mono text-[10.5px] text-text-3">{store.user.role.toUpperCase()}</div>
           </div>
         )}
       </div>

@@ -12,7 +12,8 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
-import { NotFoundError } from "@/lib/ai/errors";
+import { NotFoundError, ValidationError } from "@/lib/ai/errors";
+import { getProjectAiSettings } from "./project-ai-settings";
 
 // Risk is a byproduct of real robust-count data, never a raw model guess (§0 Principle 5) —
 // shared with ai-strategy-tasks.ts's stressTestOption, which must re-derive an option's risk
@@ -109,6 +110,26 @@ export interface GenerateStrategicOptionsResult {
 // POST .../projects/:id/strategy/generate
 export async function generateStrategicOptions(projectId: string): Promise<GenerateStrategicOptionsResult> {
   const supabase = createClient();
+
+  // AI Analyst tab's "Use Schwartz framework strictly" toggle (project_ai_settings.
+  // strict_schwartz_mode, default true) — when on, requires the same real prerequisite data
+  // compute_steps_complete's own terms 6/7/8 check (narrative on all 4 scenarios, ≥12
+  // implications, ≥12 indicators) before this product extension can run at all. When off,
+  // only this readiness check is skipped — compute_steps_complete itself, and every other
+  // core-step data rule, is untouched either way.
+  const aiSettings = await getProjectAiSettings(projectId, supabase);
+  if (aiSettings.strict_schwartz_mode) {
+    const [{ count: narrativeCount }, { count: implicationsCount }, { count: indicatorsCount }] = await Promise.all([
+      supabase.from("scenarios").select("id", { count: "exact", head: true }).eq("project_id", projectId).not("narrative", "is", null),
+      supabase.from("implications").select("id", { count: "exact", head: true }).eq("project_id", projectId),
+      supabase.from("indicators").select("id", { count: "exact", head: true }).eq("project_id", projectId),
+    ]);
+    if ((narrativeCount ?? 0) < 4 || (implicationsCount ?? 0) < 12 || (indicatorsCount ?? 0) < 12) {
+      throw new ValidationError(
+        "Strict Schwartz Mode is on — complete narratives (all 4 scenarios), implications (≥12), and indicators (≥12) before generating strategic options, or turn off strict mode in Settings → AI Analyst to generate early."
+      );
+    }
+  }
 
   const { data: project, error: projectError } = await supabase
     .from("projects")

@@ -7,13 +7,15 @@
 // the "sources" bucket (supabase/migrations/0007_sources_storage.sql) — this file only ever touches
 // the sources table row + deleting the resulting Storage object.
 import { revalidatePath } from "next/cache";
-import { lookup } from "node:dns/promises";
+import { assertSafeExternalUrl } from "@/lib/url-safety";
 // pdf-parse's index.js has a `!module.parent` "debug mode" check that misfires under
 // webpack bundling and tries to read a test fixture off disk — import the inner module
 // directly to skip it (a known pdf-parse + Next.js/webpack gotcha).
 import pdf from "pdf-parse/lib/pdf-parse.js";
 import { createClient } from "@/lib/supabase/server";
 import { transcribeMedia } from "@/lib/gemini/client";
+import { getProjectAiSettings } from "./project-ai-settings";
+import { extractInsightsForProject } from "./ai-insights";
 import type { Database } from "@/lib/supabase/types";
 
 // Matches the "sources" Storage bucket's allowlist exactly (supabase/migrations/0007_sources_storage.sql
@@ -203,43 +205,11 @@ function formatSurveyCsv(csvText: string): string {
     .join("\n");
 }
 
-// Basic SSRF guard for a server-side fetch of a user-supplied URL: reject non-http(s)
-// schemes and resolve-then-check the hostname against private/loopback/link-local
-// ranges before fetching. Known residual gap: this checks the resolved address once
-// up front, not the address actually connected to — a DNS-rebinding attacker could
-// still swap the record between the check and the fetch. Redirects are refused
-// outright (not re-checked) to close the simpler bypass of that same class of hole.
-function isPrivateAddress(address: string): boolean {
-  const a = address.toLowerCase();
-  if (a === "::1" || a === "0.0.0.0") return true;
-  const v4 = a.match(/(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-  if (v4) {
-    const o1 = Number(v4[1]);
-    const o2 = Number(v4[2]);
-    if (o1 === 10 || o1 === 127 || o1 === 0) return true;
-    if (o1 === 172 && o2 >= 16 && o2 <= 31) return true;
-    if (o1 === 192 && o2 === 168) return true;
-    if (o1 === 169 && o2 === 254) return true;
-  }
-  if (a.startsWith("fc") || a.startsWith("fd")) return true; // fc00::/7 (unique local)
-  if (/^fe[89ab]/.test(a)) return true; // fe80::/10 (link-local)
-  return false;
-}
-
 async function processWebSource(id: string, url: string | null): Promise<SourceRow> {
   if (!url) return updateSourceStatus(id, "failed");
 
   try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      return updateSourceStatus(id, "failed");
-    }
-
-    const { address } = await lookup(parsed.hostname);
-    if (isPrivateAddress(address)) {
-      console.error("[sources] refused to fetch private/internal address for", url);
-      return updateSourceStatus(id, "failed");
-    }
+    const parsed = await assertSafeExternalUrl(url);
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15_000);
@@ -281,6 +251,13 @@ function extractTextFromHtml(html: string): string {
     .trim();
 }
 
+// The single terminal point every upload path (audio/survey/doc/web) already funnels through
+// on success — the natural, single place to hook "auto-extract insights from new sources"
+// (AI Analyst tab, project_ai_settings.auto_extract_insights). Awaited, not fire-and-forget:
+// Vercel serverless functions aren't guaranteed to keep running un-awaited work after this
+// Server Action returns, so correctness requires running extraction inline when the setting
+// is on — the honest tradeoff of "auto-run" vs. "queue for the manual Extract insights
+// button" (unchanged, still the only path when the setting is off).
 async function updateSourceStatus(id: string, status: SourceRow["status"], extractedText?: string): Promise<SourceRow> {
   const supabase = createClient();
   const { data, error } = await supabase
@@ -291,6 +268,20 @@ async function updateSourceStatus(id: string, status: SourceRow["status"], extra
     .single();
   if (error) throw error;
   revalidatePath("/knowledge");
+
+  if (status === "complete") {
+    try {
+      const settings = await getProjectAiSettings(data.project_id, supabase);
+      if (settings.auto_extract_insights) {
+        await extractInsightsForProject(data.project_id, { supabaseClient: supabase });
+      }
+    } catch (err) {
+      // Auto-extraction failing shouldn't fail the upload itself — the source is already
+      // "complete" and still available for the manual "Extract insights" button either way.
+      console.error("[sources] auto-extract failed", err);
+    }
+  }
+
   return data;
 }
 

@@ -33,6 +33,8 @@
     "react": "^18",
     "react-dom": "^18",
     "reactflow": "^11.11.4",
+    "resend": "^6.18.1",
+    "rss-parser": "^3.13.0",
     "server-only": "^0.0.1",
     "tailwind-merge": "^3.6.0",
     "tailwindcss-animate": "^1.0.7",

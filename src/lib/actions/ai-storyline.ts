@@ -15,7 +15,8 @@
 // already-grounded name/logic/summary rather than any single driving-force signal.
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
-import { StorylineScenarioNotFoundError } from "@/lib/ai/errors";
+import { StorylineScenarioNotFoundError, ValidationError } from "@/lib/ai/errors";
+import { getProjectAiSettings } from "./project-ai-settings";
 import { z } from "zod";
 import type { Database } from "@/lib/supabase/types";
 import { PHASES, isPhaseOrderValid, type Phase } from "../storyline-mapping";
@@ -164,6 +165,19 @@ export async function autoSuggestStoryline(scenarioId: string): Promise<AutoSugg
   if (projectError) throw new StorylineScenarioNotFoundError(scenarioId, projectError);
 
   const projectId = scenario.project_id;
+
+  // AI Analyst tab's "Use Schwartz framework strictly" toggle (project_ai_settings.
+  // strict_schwartz_mode, default true) — when on, requires the scenario's own logic (step 5)
+  // to already be set before this product extension can auto-suggest a chain at all. When
+  // off, only this readiness check is skipped — the storyline's own causal-ordering rules
+  // (one-directional phases, real signal_id grounding) are untouched either way.
+  const aiSettings = await getProjectAiSettings(projectId, supabase);
+  if (aiSettings.strict_schwartz_mode && !scenario.logic) {
+    throw new ValidationError(
+      "Strict Schwartz Mode is on — this scenario needs its logic (step 5) written before auto-suggesting a storyline, or turn off strict mode in Settings → AI Analyst to generate early."
+    );
+  }
+
   await markStorylineStatus(supabase, projectId, scenarioId, { status: "generating", error_message: null });
 
   try {

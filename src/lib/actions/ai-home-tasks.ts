@@ -6,12 +6,14 @@
 // tasks below). Same "code computes the real numbers, AI only narrates them" discipline used
 // throughout this codebase (ai-strategy-recommendation.ts, ai-monitoring-tasks.ts) — the model
 // never invents a count, a tile's done/not-done state, or a route.
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
 import { z } from "zod";
 import { getProjectDashboard } from "./dashboard";
 import { getNextGate, getMonitorCandidate } from "./dashboard-recommendations";
 import { STEP_LABELS, STEP_GATE } from "@/lib/step-tracker";
+import type { Database } from "@/lib/supabase/types";
 
 // ─────────────────────── Task 1: What should I do next? ───────────────────────
 
@@ -116,9 +118,13 @@ export interface SummarizeWeekSignalsResult {
   categories: WeekSignalCategory[];
 }
 
-// POST .../projects/:id/home/ask-ai { task: "summarize_week_signals" }
-export async function summarizeWeekSignals(projectId: string): Promise<SummarizeWeekSignalsResult> {
-  const supabase = createClient();
+// POST .../projects/:id/home/ask-ai { task: "summarize_week_signals" } (default createClient(),
+// cookie/session). Also reused by weekly-digest.ts's session-less cron, which passes
+// createAdminClient() explicitly — the default here would silently match zero rows under RLS
+// with no session to resolve current_org_id() from, not throw, same reasoning as every other
+// supabaseClient-injectable action this session (pullNewsFeed, extractInsightsForProject, etc.).
+export async function summarizeWeekSignals(projectId: string, supabaseClient?: SupabaseClient<Database>): Promise<SummarizeWeekSignalsResult> {
+  const supabase = supabaseClient ?? createClient();
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
   const { data: signals, error } = await supabase

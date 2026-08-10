@@ -41,6 +41,18 @@ export class NotFoundError extends Error {
   }
 }
 
+// An app-authored input-validation failure (e.g. "focal question can't be emptied without a
+// refined replacement", or a strict-mode readiness check) — safe to surface verbatim, unlike
+// a raw SDK/DB error message, since the message is always written by this codebase, never by
+// a third party. Maps to a real 400 in errorResponse/describeError, distinct from
+// NotFoundError's 404.
+export class ValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ValidationError";
+  }
+}
+
 // Thrown by a web-search-enabled call when the failure happened at the API/transport level
 // (rate limit, auth, the org's plan lacking web search access, etc.) rather than the model
 // producing a bad response — distinct from AIGenerationFailedError (schema/refusal). Wraps
