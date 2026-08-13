@@ -43,15 +43,31 @@ interface FmWindow extends Window {
   __fmUndo?: { scenarios: Scenario[]; critical: string[] } | null;
 }
 
-export function ReAxisModal({ open, onClose, navigate }: { open: boolean; onClose: () => void; navigate: Navigate }) {
+export function ReAxisModal({
+  open,
+  onClose,
+  navigate,
+  builtAxes,
+}: {
+  open: boolean;
+  onClose: () => void;
+  navigate: Navigate;
+  // The axes the live (non-archived) scenarios were actually built with — ground truth from
+  // the scenarios themselves (page-matrix.tsx's builtAxisIds), distinct from
+  // store.criticalUncertainties below, which just mirrors the Matrix page's current pick and
+  // may already differ from what's built. Falls back to that live pick when scenarios were
+  // never built (defensive — ReAxisModal is normally only reachable once hasScenarios is true).
+  builtAxes?: string[] | null;
+}) {
   const store = useStore();
   const signals = store.signals || store.seed.signals;
   const dots = store.matrixDots || [];
   const scenarios = store.scenarios || [];
-  const currentAxes = store.criticalUncertainties || [];
+  const liveAxes = store.criticalUncertainties || [];
+  const currentAxes = builtAxes && builtAxes.length === 2 ? builtAxes : liveAxes;
 
   const [step, setStep] = React.useState(1);
-  const [newAxes, setNewAxes] = React.useState<string[]>(currentAxes);
+  const [newAxes, setNewAxes] = React.useState<string[]>(liveAxes);
   const [changingFor, setChangingFor] = React.useState<number | null>(null);
   const [narrativeChoices, setNarrativeChoices] = React.useState<Record<string, NarrativeChoice>>({});
   const [confirmDelete, setConfirmDelete] = React.useState<string | null>(null);
@@ -68,7 +84,9 @@ export function ReAxisModal({ open, onClose, navigate }: { open: boolean; onClos
   React.useEffect(() => {
     if (open) {
       setStep(1);
-      setNewAxes(currentAxes);
+      // Pre-fill with whatever the user already picked on the Matrix page, not the (possibly
+      // stale) built axes — opening Re-axis after choosing a new top-2 shouldn't discard it.
+      setNewAxes(liveAxes);
       setChangingFor(null);
       setNarrativeChoices(Object.fromEntries(scenarios.map((s) => [s.id, "migrate"])) as Record<string, NarrativeChoice>);
       setConfirmDelete(null);
@@ -192,7 +210,10 @@ export function ReAxisModal({ open, onClose, navigate }: { open: boolean; onClos
   };
 
   const applyReaxis = () => {
-    const snapshot = { scenarios: JSON.parse(JSON.stringify(scenarios)) as Scenario[], critical: [...currentAxes] };
+    // Undo restores store.criticalUncertainties to what it held right before this apply — that's
+    // liveAxes (the Matrix page's live pick, which store.criticalUncertainties always mirrors),
+    // not currentAxes (the built-scenario axes, which may already differ from it).
+    const snapshot = { scenarios: JSON.parse(JSON.stringify(scenarios)) as Scenario[], critical: [...liveAxes] };
     const now = Date.now();
     const nextScenarios = scenarios
       .filter((s) => narrativeChoices[s.id] !== "delete")

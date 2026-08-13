@@ -336,15 +336,17 @@ export function PageMatrix({ navigate }: { navigate: Navigate }) {
   // is what makes the checkbox for the top-2 always pre-checked, and the ring always move with
   // a drag that changes the ranking. A manual checkbox pick (onToggle/onReplace below, or a
   // plot click in handleDotSelect) sets `critical` directly and sticks until the next actual
-  // re-ranking event resyncs it back to the algorithmic default. Stops once axesLocked: a
-  // locked pair is a deliberate, independence-verified commitment (a different, orange state)
-  // — an unrelated drag elsewhere shouldn't silently reassign it.
+  // re-ranking event resyncs it back to the algorithmic default — including after the pair has
+  // been independence-verified (axesLocked): "locked" only governs the orange/verified styling
+  // and the Build Scenarios gate below, not whether the ring keeps tracking a real ranking
+  // change. topCandidateIds is derived from `candidates` (buckets.critical_uncertainty), so a
+  // dot that drops out of that bucket — dragged out of the quadrant, or reclassified — is
+  // already excluded from it, which naturally prunes it out of `critical` here too.
   React.useEffect(() => {
-    if (axesLocked) return;
     if (candidates.length === 0) return; // buckets not loaded yet — don't clobber a persisted pick with []
     setCritical(topCandidateIds);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [topCandidateIds.join(), axesLocked]);
+  }, [topCandidateIds.join()]);
 
   const selectedDot = dots.find((d) => d.id === selectedId);
   const selectedSignal = selectedDot ? store.signals.find((s) => s.id === selectedDot.sigId) : null;
@@ -358,6 +360,20 @@ export function PageMatrix({ navigate }: { navigate: Navigate }) {
     if (hasScenarios) navigate("/canvas");
     else setBuildOpen(true);
   };
+
+  // Ground truth for "what the live scenarios were actually built from" — distinct from
+  // store.criticalUncertainties, which just mirrors whatever `critical` currently is on this
+  // page (including an in-progress re-pick the user hasn't applied via Re-axis yet). Every
+  // scenario from one build shares the same axes row (see ai-scenarios.ts's buildScenarios),
+  // so any one non-archived scenario's axisA/axisB is representative of the whole set.
+  const builtAxisIds = React.useMemo(() => {
+    const built = (store.scenarios || []).find((s) => !s.archived && s.axisA?.signalId && s.axisB?.signalId);
+    return built ? [built.axisA!.signalId as string, built.axisB!.signalId as string] : null;
+  }, [store.scenarios]);
+  // True once the user's current top-2 pick has drifted from the axes their live scenarios
+  // were actually built with — the signal that Re-axis (not just "View Scenarios") is what
+  // they need next.
+  const axesStale = hasScenarios && !!builtAxisIds && axesLocked && !builtAxisIds.every((id) => critical.includes(id));
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 3 } }));
 
@@ -418,13 +434,16 @@ export function PageMatrix({ navigate }: { navigate: Navigate }) {
       <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-card p-[18px] shadow-card">
         <div className="mb-3.5 flex flex-shrink-0 items-start justify-between">
           <ScenarioContextHeader view="matrix" className="flex-shrink-0 p-0" />
-          <div className="flex flex-shrink-0 gap-2">
+          <div className="flex flex-shrink-0 items-center gap-2">
+            {axesStale && (
+              <span className="text-[11.5px] font-medium text-brand-orange">Top-2 changed — Re-axis to update scenarios</span>
+            )}
             {hasScenarios && (
-              <Button variant="ghost" size="sm" onClick={() => setReaxisOpen(true)}>
+              <Button variant={axesStale ? "primary" : "ghost"} size="sm" onClick={() => setReaxisOpen(true)}>
                 <Icons.Refresh size={12} /> Re-axis
               </Button>
             )}
-            <Button variant="primary" size="sm" onClick={onScenariosButtonClick}>
+            <Button variant={axesStale ? "ghost" : "primary"} size="sm" onClick={onScenariosButtonClick}>
               {hasScenarios ? "View Scenarios" : "Build Scenarios"} <Icons.ArrowRight size={12} />
             </Button>
           </div>
@@ -644,7 +663,7 @@ export function PageMatrix({ navigate }: { navigate: Navigate }) {
       </div>
 
       {/* Re-axis migration modal (when scenarios already exist) */}
-      <ReAxisModal open={reaxisOpen} onClose={() => setReaxisOpen(false)} navigate={navigate} />
+      <ReAxisModal open={reaxisOpen} onClose={() => setReaxisOpen(false)} navigate={navigate} builtAxes={builtAxisIds} />
       {/* Build scenarios modal (first-time creation) */}
       <BuildScenariosModal
         open={buildOpen}

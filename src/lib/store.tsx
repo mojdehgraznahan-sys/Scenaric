@@ -106,6 +106,15 @@ interface OnboardingState {
   summary: string;
   industry: string;
   complete: boolean;
+  // Step 1 AI wiring (ai-focal-question.ts) — durable request/response data, persisted here
+  // per its own "no project row exists yet" constraint rather than a project-scoped table.
+  // Transient in-flight UI status (loading/error flags) stays local useState in page.tsx,
+  // same split already used for refined/horizon above vs. that file's own refining/refineError.
+  criteria: { id: string; label: string; ok: boolean; reason: string }[] | null;
+  clarifyQuestions: { criterionId: string; question: string }[] | null;
+  clarifyAnswers: Record<string, string>;
+  alternatives: string[] | null;
+  suggestedHorizon: { horizon: string; rationale: string } | null;
 }
 
 function toProjectSummary(row: ProjectRow): ProjectSummary {
@@ -394,6 +403,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     summary: seed.project.summary,
     industry: "Technology",
     complete: false,
+    criteria: null,
+    clarifyQuestions: null,
+    clarifyAnswers: {},
+    alternatives: null,
+    suggestedHorizon: null,
   });
 
   // ---- Projects (real, Supabase) ----

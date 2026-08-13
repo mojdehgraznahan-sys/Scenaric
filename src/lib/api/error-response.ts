@@ -3,7 +3,14 @@
 // errors there are Next's own problem to serialize — but a Route Handler must turn a thrown
 // error into a real Response itself.
 import { NextResponse } from "next/server";
-import { StorylineScenarioNotFoundError, AIWebSearchError, AIGenerationFailedError, NotFoundError, ValidationError } from "@/lib/ai/errors";
+import {
+  StorylineScenarioNotFoundError,
+  AIWebSearchError,
+  AIGenerationFailedError,
+  NotFoundError,
+  ValidationError,
+  ResearchModeNotAllowedError,
+} from "@/lib/ai/errors";
 
 export interface ApiErrorBody {
   error: string;
@@ -18,6 +25,9 @@ export function errorResponse(err: unknown): NextResponse<ApiErrorBody> {
   }
   if (err instanceof ValidationError) {
     return NextResponse.json({ error: err.message }, { status: 400 });
+  }
+  if (err instanceof ResearchModeNotAllowedError) {
+    return NextResponse.json({ error: err.message }, { status: 403 });
   }
   if (err instanceof AIWebSearchError) {
     return NextResponse.json({ error: err.message, cause: { status: err.cause.status, type: err.cause.type } }, { status: 502 });
@@ -35,6 +45,7 @@ export function errorResponse(err: unknown): NextResponse<ApiErrorBody> {
 export function describeError(err: unknown): string {
   if (err instanceof StorylineScenarioNotFoundError || err instanceof NotFoundError) return err.message;
   if (err instanceof ValidationError) return err.message;
+  if (err instanceof ResearchModeNotAllowedError) return err.message;
   if (err instanceof AIWebSearchError) return err.message;
   if (err instanceof AIGenerationFailedError) return err.message;
   if (err instanceof Error) return err.message;

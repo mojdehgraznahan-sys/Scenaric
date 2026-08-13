@@ -22,6 +22,10 @@ const SOURCE_TYPE_LABEL: Record<string, "Docs" | "Audio" | "Survey" | "Web"> = {
   // "Web" label/tab rather than introducing a 5th insights.source_type value (the DB
   // constraint only allows Docs/Audio/Survey/Web, 0009_insight_source_type_speaker.sql).
   web_feed: "Web",
+  // Same reasoning for step 2's local-force-scan suggestions (ai-research-suggestions.ts) —
+  // confirmed ones create a 'external_research'-typed sources row, still shown under the "Web"
+  // tab rather than a 5th value.
+  external_research: "Web",
 };
 
 const ExtractInsightsSchema = z.object({

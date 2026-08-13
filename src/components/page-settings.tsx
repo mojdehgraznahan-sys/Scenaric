@@ -138,18 +138,30 @@ export function PageSettings() {
     if (!projectId) return;
     setSavingProject(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/settings`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(draft),
-      });
+      // Bounded timeout (same guard as sources.ts's processWebSource) — without this, a
+      // stalled connection never rejects, the fetch never settles, and this button would stay
+      // disabled forever with no recovery path.
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15_000);
+      let res: Response;
+      try {
+        res = await fetch(`/api/projects/${projectId}/settings`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(draft),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Request failed (${res.status}).`);
       setProjectSettings(data);
       toast("Project settings saved.");
     } catch (err) {
       console.error("[settings] failed to save project settings", err);
-      toast(err instanceof Error ? err.message : "Couldn't save — try again.");
+      const timedOut = err instanceof Error && err.name === "AbortError";
+      toast(timedOut ? "Save timed out — check your connection and try again." : err instanceof Error ? err.message : "Couldn't save — try again.");
     } finally {
       setSavingProject(false);
     }
@@ -239,11 +251,22 @@ export function PageSettings() {
     if (!projectId || !routeName || !connectInput.trim()) return;
     setSavingIntegration(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/integrations/${routeName}/connect`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: connectInput.trim() }),
-      });
+      // Same bounded-timeout guard as saveProjectSettings above (and sources.ts's
+      // processWebSource) — a stalled connect request would otherwise never settle, leaving
+      // this button disabled forever.
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15_000);
+      let res: Response;
+      try {
+        res = await fetch(`/api/projects/${projectId}/integrations/${routeName}/connect`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: connectInput.trim() }),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Request failed (${res.status}).`);
       setConnectingName(null);
@@ -252,7 +275,8 @@ export function PageSettings() {
       toast(`${name} connected.`);
     } catch (err) {
       console.error("[settings] failed to connect integration", err);
-      toast(err instanceof Error ? err.message : "Couldn't connect — try again.");
+      const timedOut = err instanceof Error && err.name === "AbortError";
+      toast(timedOut ? "Connect timed out — check your connection and try again." : err instanceof Error ? err.message : "Couldn't connect — try again.");
     } finally {
       setSavingIntegration(false);
     }

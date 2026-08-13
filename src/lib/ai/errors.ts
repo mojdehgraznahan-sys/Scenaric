@@ -53,6 +53,20 @@ export class ValidationError extends Error {
   }
 }
 
+// A programmer/policy error, not a runtime user-input problem: some ai-*.ts action tried to
+// attach webSearch on a step outside RESEARCH_MODE_ALLOWED_STEPS (../ai/client.ts) — caught
+// before the Anthropic call is even made. See SCHWARTZ_METHODOLOGY_SKILL.md's "Where research
+// mode is allowed vs. forbidden" section for the policy this enforces.
+export class ResearchModeNotAllowedError extends Error {
+  constructor(public readonly step: string) {
+    super(
+      `Research mode (web_search) is not permitted for step "${step}" — see SCHWARTZ_METHODOLOGY_SKILL.md's ` +
+        `"Where research mode is allowed vs. forbidden" section for the allowed steps.`
+    );
+    this.name = "ResearchModeNotAllowedError";
+  }
+}
+
 // Thrown by a web-search-enabled call when the failure happened at the API/transport level
 // (rate limit, auth, the org's plan lacking web search access, etc.) rather than the model
 // producing a bad response — distinct from AIGenerationFailedError (schema/refusal). Wraps

@@ -26,6 +26,14 @@ import { listInsights, deleteInsight, type InsightRow } from "@/lib/actions/insi
 import { listInterviews, createInterview, type InterviewRow, type SteepTag } from "@/lib/actions/interviews";
 import { extractInsightsForProject } from "@/lib/actions/ai-insights";
 import { pullNewsFeed } from "@/lib/actions/ai-news-feed";
+import {
+  runLocalForceScan,
+  listResearchSuggestions,
+  confirmResearchSuggestion,
+  dismissResearchSuggestion,
+  type ResearchSuggestionRow,
+} from "@/lib/actions/ai-research-suggestions";
+import { researchIndustry } from "@/lib/actions/ai-research-industry";
 
 const TYPE_OPTIONS = [
   { id: "Docs", icon: <Icons.File size={16} />, label: "Docs" },
@@ -84,6 +92,21 @@ export function PageKnowledge() {
   const [extractResult, setExtractResult] = React.useState<string | null>(null);
   const [pullingNews, setPullingNews] = React.useState(false);
   const [newsResult, setNewsResult] = React.useState<string | null>(null);
+  // Step 2 exploratory research (SCHWARTZ_METHODOLOGY_SKILL.md's research-mode policy) — a
+  // live web scan for local actors, staged as unconfirmed research_suggestions, never
+  // auto-inserted as insights. suggestions holds only status:'suggested' rows; Confirm/Dismiss
+  // below is the required confirm-before-merge step.
+  const [scanning, setScanning] = React.useState(false);
+  const [scanResult, setScanResult] = React.useState<string | null>(null);
+  const [suggestions, setSuggestions] = React.useState<ResearchSuggestionRow[]>([]);
+  const [workingSuggestionId, setWorkingSuggestionId] = React.useState<string | null>(null);
+  // Cold-start convenience for a project with zero uploaded sources — runs the news pull and
+  // local-force scan above together (ai-research-industry.ts), so a user with nothing to
+  // upload isn't left guessing they need two separate, easy-to-miss buttons. Neither
+  // underlying action's data-writing/confirm semantics change — this is purely a combined
+  // trigger + combined status message.
+  const [researchingIndustry, setResearchingIndustry] = React.useState(false);
+  const [researchIndustryResult, setResearchIndustryResult] = React.useState<string | null>(null);
   const [activeType, setActiveType] = React.useState("Docs");
   const [dragOver, setDragOver] = React.useState(false);
   const [tab, setTab] = React.useState<(typeof RIGHT_TABS)[number]>("All");
@@ -97,14 +120,16 @@ export function PageKnowledge() {
 
   const refresh = React.useCallback(async () => {
     if (!projectId) return;
-    const [nextSources, nextInsights, nextInterviews] = await Promise.all([
+    const [nextSources, nextInsights, nextInterviews, nextSuggestions] = await Promise.all([
       listSources(projectId),
       listInsights(projectId),
       listInterviews(projectId),
+      listResearchSuggestions(projectId, "key_forces"),
     ]);
     setSources(nextSources);
     setInsights(nextInsights);
     setInterviews(nextInterviews);
+    setSuggestions(nextSuggestions);
   }, [projectId]);
 
   React.useEffect(() => {
@@ -210,6 +235,80 @@ export function PageKnowledge() {
     }
   };
 
+  const onScanLocalForces = async () => {
+    if (!projectId) return;
+    setScanning(true);
+    setScanResult(null);
+    try {
+      const result = await runLocalForceScan(projectId);
+      setScanResult(
+        result.sufficientEvidence
+          ? `Found ${result.suggestionsCreated} local actor(s) to review below.`
+          : result.gap || "No new local actors found."
+      );
+      await refresh();
+    } catch (err) {
+      console.error("[knowledge] local force scan failed", err);
+      setScanResult("Couldn't run that scan right now — try again in a moment.");
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const onResearchIndustry = async () => {
+    if (!projectId) return;
+    setResearchingIndustry(true);
+    setResearchIndustryResult(null);
+    try {
+      const result = await researchIndustry(projectId);
+      const newsMsg =
+        "failed" in result.news
+          ? `News search failed: ${result.news.error}`
+          : result.news.sufficientEvidence
+            ? `Pulled ${result.news.sourcesCreated} news item(s), extracted ${result.news.insightsCreated} insight(s).`
+            : result.news.gap || "No relevant recent news found.";
+      const forcesMsg =
+        "failed" in result.localForces
+          ? `Local actor search failed: ${result.localForces.error}`
+          : result.localForces.sufficientEvidence
+            ? `Found ${result.localForces.suggestionsCreated} local actor(s) to review below.`
+            : result.localForces.gap || "No new local actors found.";
+      setResearchIndustryResult(`${newsMsg} ${forcesMsg}`);
+      await refresh();
+    } catch (err) {
+      console.error("[knowledge] research industry failed", err);
+      setResearchIndustryResult("Couldn't research your industry right now — try again in a moment.");
+    } finally {
+      setResearchingIndustry(false);
+    }
+  };
+
+  const onConfirmSuggestion = async (id: string) => {
+    if (!projectId) return;
+    setWorkingSuggestionId(id);
+    try {
+      await confirmResearchSuggestion(projectId, id);
+      await refresh();
+    } catch (err) {
+      console.error("[knowledge] failed to confirm research suggestion", err);
+    } finally {
+      setWorkingSuggestionId(null);
+    }
+  };
+
+  const onDismissSuggestion = async (id: string) => {
+    if (!projectId) return;
+    setWorkingSuggestionId(id);
+    try {
+      await dismissResearchSuggestion(projectId, id);
+      await refresh();
+    } catch (err) {
+      console.error("[knowledge] failed to dismiss research suggestion", err);
+    } finally {
+      setWorkingSuggestionId(null);
+    }
+  };
+
   const onSubmitInvite = async () => {
     if (!inviteForm.participantName.trim()) {
       setInviteError("Participant name is required.");
@@ -267,6 +366,9 @@ export function PageKnowledge() {
             <Button variant="ghost" size="sm" onClick={onPullNews} disabled={pullingNews || !projectId}>
               <Icons.Radio size={12} /> {pullingNews ? "Pulling news…" : "Pull recent news"}
             </Button>
+            <Button variant="ghost" size="sm" onClick={onScanLocalForces} disabled={scanning || !projectId}>
+              <Icons.Sparkle size={12} /> {scanning ? "Scanning…" : "Scan for local actors (web)"}
+            </Button>
             <Button variant="soft" size="sm" onClick={onExtractInsights} disabled={extracting || !projectId}>
               <Icons.Sparkle size={12} /> {extracting ? "Extracting…" : "Extract insights"}
             </Button>
@@ -275,6 +377,21 @@ export function PageKnowledge() {
             </Button>
           </div>
         </div>
+
+        {sources.length === 0 && (
+          <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-dashed border-brand-orange100 bg-brand-orangeLight px-4 py-3.5">
+            <div>
+              <div className="text-[13.5px] font-semibold text-brand-orange700">Nothing uploaded yet?</div>
+              <div className="mt-0.5 text-xs text-brand-orange700">
+                Get a head start — pull recent STEEP news and scan for local actors relevant to this project, both via live web
+                research.
+              </div>
+            </div>
+            <Button variant="primary" size="sm" className="flex-shrink-0" onClick={onResearchIndustry} disabled={researchingIndustry || !projectId}>
+              <Icons.Sparkle size={12} /> {researchingIndustry ? "Researching…" : "Research my industry"}
+            </Button>
+          </div>
+        )}
 
         {/* Stats row */}
         <div className="mb-4 grid grid-cols-4 gap-3">
@@ -383,6 +500,52 @@ export function PageKnowledge() {
             {newsResult && (
               <div className="mt-2.5 rounded-[10px] border border-brand-orange100 bg-brand-orangeLight px-3 py-2 text-xs text-brand-orange700">
                 {newsResult}
+              </div>
+            )}
+
+            {scanResult && (
+              <div className="mt-2.5 rounded-[10px] border border-brand-orange100 bg-brand-orangeLight px-3 py-2 text-xs text-brand-orange700">
+                {scanResult}
+              </div>
+            )}
+
+            {researchIndustryResult && (
+              <div className="mt-2.5 rounded-[10px] border border-brand-orange100 bg-brand-orangeLight px-3 py-2 text-xs text-brand-orange700">
+                {researchIndustryResult}
+              </div>
+            )}
+
+            {suggestions.length > 0 && (
+              <div className="mt-3.5 rounded-[10px] border border-[#FDE68A] bg-[#FFFBEB] p-3">
+                <div className="mb-2 text-xs font-semibold text-[#92400E]">
+                  {suggestions.length} local actor{suggestions.length === 1 ? "" : "s"} found via web research — review before adding
+                </div>
+                <div className="flex flex-col gap-2">
+                  {suggestions.map((s) => (
+                    <div key={s.id} className="rounded-[9px] border border-[#FDE68A] bg-white px-3 py-2.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[13px] font-semibold text-brand-dark">{s.title}</div>
+                          <div className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.04em] text-text-3">{s.actor_type}</div>
+                          <div className="mt-1 text-xs text-muted-foreground">{s.body}</div>
+                          {s.citation_url && (
+                            <a href={s.citation_url} target="_blank" rel="noreferrer" className="mt-1 block truncate text-[11px] text-brand-orange">
+                              {s.citation_title || s.citation_url}
+                            </a>
+                          )}
+                        </div>
+                        <div className="flex flex-shrink-0 gap-1.5">
+                          <Button variant="ghost" size="sm" onClick={() => onDismissSuggestion(s.id)} disabled={workingSuggestionId === s.id}>
+                            Dismiss
+                          </Button>
+                          <Button variant="primary" size="sm" onClick={() => onConfirmSuggestion(s.id)} disabled={workingSuggestionId === s.id}>
+                            Confirm
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 

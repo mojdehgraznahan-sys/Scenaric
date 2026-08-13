@@ -17,6 +17,13 @@ import { useNavigate } from "@/lib/use-navigate";
 import { getInsight, type InsightRow } from "@/lib/actions/insights";
 import { getSource } from "@/lib/actions/sources";
 import { suggestSignalCategory } from "@/lib/actions/ai-signals";
+import {
+  runMacroTrendSweep,
+  listResearchSuggestions,
+  confirmResearchSuggestion,
+  dismissResearchSuggestion,
+  type ResearchSuggestionRow,
+} from "@/lib/actions/ai-research-suggestions";
 import { AIGenerationFailedError } from "@/lib/ai/errors";
 import type { Signal, SteepCategory } from "@/lib/types";
 
@@ -101,6 +108,14 @@ export function PageSignals() {
   const [submitting, setSubmitting] = React.useState(false);
   const [suggesting, setSuggesting] = React.useState(false);
   const [suggestResult, setSuggestResult] = React.useState<string | null>(null);
+  // Step 3 exploratory research (SCHWARTZ_METHODOLOGY_SKILL.md's research-mode policy) — a
+  // live web sweep for STEEP driving forces, staged as unconfirmed research_suggestions,
+  // never auto-inserted as signals. researchSuggestions holds only status:'suggested' rows;
+  // Confirm/Dismiss below is the required confirm-before-merge step.
+  const [sweeping, setSweeping] = React.useState(false);
+  const [sweepResult, setSweepResult] = React.useState<string | null>(null);
+  const [researchSuggestions, setResearchSuggestions] = React.useState<ResearchSuggestionRow[]>([]);
+  const [workingSuggestionId, setWorkingSuggestionId] = React.useState<string | null>(null);
   const [addingToMatrixId, setAddingToMatrixId] = React.useState<string | null>(null);
   const [addToMatrixError, setAddToMatrixError] = React.useState<{ id: string; message: string } | null>(null);
 
@@ -318,6 +333,61 @@ export function PageSignals() {
     setSelected(null);
   };
 
+  const refreshResearchSuggestions = React.useCallback(async () => {
+    if (!store.activeProjectId) return;
+    setResearchSuggestions(await listResearchSuggestions(store.activeProjectId, "driving_forces"));
+  }, [store.activeProjectId]);
+
+  React.useEffect(() => {
+    refreshResearchSuggestions();
+  }, [refreshResearchSuggestions]);
+
+  const onScanDrivingForces = async () => {
+    if (!store.activeProjectId) return;
+    setSweeping(true);
+    setSweepResult(null);
+    try {
+      const result = await runMacroTrendSweep(store.activeProjectId);
+      setSweepResult(
+        result.sufficientEvidence
+          ? `Found ${result.suggestionsCreated} driving force(s) to review below.`
+          : result.gap || "No new driving forces found."
+      );
+      await refreshResearchSuggestions();
+    } catch (err) {
+      console.error("[signals] macro trend sweep failed", err);
+      setSweepResult("Couldn't run that scan right now — try again in a moment.");
+    } finally {
+      setSweeping(false);
+    }
+  };
+
+  const onConfirmResearchSuggestion = async (id: string) => {
+    if (!store.activeProjectId) return;
+    setWorkingSuggestionId(id);
+    try {
+      await confirmResearchSuggestion(store.activeProjectId, id);
+      await refreshResearchSuggestions();
+    } catch (err) {
+      console.error("[signals] failed to confirm research suggestion", err);
+    } finally {
+      setWorkingSuggestionId(null);
+    }
+  };
+
+  const onDismissResearchSuggestion = async (id: string) => {
+    if (!store.activeProjectId) return;
+    setWorkingSuggestionId(id);
+    try {
+      await dismissResearchSuggestion(store.activeProjectId, id);
+      await refreshResearchSuggestions();
+    } catch (err) {
+      console.error("[signals] failed to dismiss research suggestion", err);
+    } finally {
+      setWorkingSuggestionId(null);
+    }
+  };
+
   const onSuggestSignals = async () => {
     if (!store.activeProjectId) return;
     setSuggesting(true);
@@ -411,6 +481,9 @@ export function PageSignals() {
             >
               <Icons.Sparkle size={12} /> {suggesting ? "Suggesting…" : "Suggest signals"}
             </Button>
+            <Button variant="ghost" size="sm" onClick={onScanDrivingForces} disabled={sweeping || !store.activeProjectId}>
+              <Icons.Sparkle size={12} /> {sweeping ? "Scanning…" : "Scan for driving forces (web)"}
+            </Button>
             <Button variant="primary" size="sm" onClick={() => setAddOpen(true)}>
               <Icons.Plus size={12} /> Add Signal
             </Button>
@@ -420,6 +493,47 @@ export function PageSignals() {
         {suggestResult && (
           <div className="mb-3.5 rounded-[10px] border border-border bg-[#F9FAFB] px-3 py-2 text-xs text-muted-foreground">
             {suggestResult}
+          </div>
+        )}
+
+        {sweepResult && (
+          <div className="mb-3.5 rounded-[10px] border border-border bg-[#F9FAFB] px-3 py-2 text-xs text-muted-foreground">
+            {sweepResult}
+          </div>
+        )}
+
+        {researchSuggestions.length > 0 && (
+          <div className="mb-3.5 rounded-[10px] border border-[#FDE68A] bg-[#FFFBEB] p-3">
+            <div className="mb-2 text-xs font-semibold text-[#92400E]">
+              {researchSuggestions.length} driving force{researchSuggestions.length === 1 ? "" : "s"} found via web research — review before
+              adding
+            </div>
+            <div className="flex flex-col gap-2">
+              {researchSuggestions.map((s) => (
+                <div key={s.id} className="rounded-[9px] border border-[#FDE68A] bg-white px-3 py-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13px] font-semibold text-brand-dark">{s.title}</div>
+                      <div className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.04em] text-text-3">{s.category}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">{s.body}</div>
+                      {s.citation_url && (
+                        <a href={s.citation_url} target="_blank" rel="noreferrer" className="mt-1 block truncate text-[11px] text-brand-orange">
+                          {s.citation_title || s.citation_url}
+                        </a>
+                      )}
+                    </div>
+                    <div className="flex flex-shrink-0 gap-1.5">
+                      <Button variant="ghost" size="sm" onClick={() => onDismissResearchSuggestion(s.id)} disabled={workingSuggestionId === s.id}>
+                        Dismiss
+                      </Button>
+                      <Button variant="primary" size="sm" onClick={() => onConfirmResearchSuggestion(s.id)} disabled={workingSuggestionId === s.id}>
+                        Confirm
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

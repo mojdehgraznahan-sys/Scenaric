@@ -24,109 +24,32 @@ from "The Art of the Long View," extended by Scenaric's one product addition
 
 The book never prescribes a concrete artifact for "flesh out the scenarios" beyond
 writing the narrative as remembered history. Storyline is Scenaric's own visual
-mechanism for that step: an AI-sequenced, ordered narrative of events for ONE
-scenario (one matrix quadrant), showing how today's world plausibly reaches that
-specific end state. Treat it as an implementation choice in service of step 6, not
-an independent step, and hold it to the same rigor:
+mechanism for that step: a causal chain/timeline of signals and events showing how
+today's world reaches one specific scenario. Treat it as an implementation choice
+in service of step 6, not an independent step, and hold it to the same rigor:
 
 - **It belongs to step 6, always.** Never number it as its own tile or imply Schwartz
   described a "storyline" step — the 8/9-tile count above does not change.
-- **"Signal," "driving force," and "rank force" are the same thing.** Any force that
-  was identified in step 3 and ranked in step 4 — whether or not it became one of
-  the project's 2 scenario axes. Use these terms interchangeably; don't invent a
-  fourth name for the same concept.
-- **Built from the signals OTHER than the axes.** The 2 signals selected as this
-  project's scenario axes define the quadrant itself (that's step 4/5's job, already
-  done by the time Storyline runs) — Storyline's job is explaining how you plausibly
-  get there using the *rest* of the signal library (plus predetermined elements).
-  A storyline auto-suggest/find-signal call must exclude the project's current axis
-  signals from its candidate pool; including them is a bug, not a richer chain.
-- **Strictly grounded, never freeform — for AI output.** Every AI-generated node must
-  trace to a real signal/insight via `signal_insight_links`, or to a predetermined
-  element. No AI-generated node may be invented prose with no underlying project
-  data — that risks contradicting the Narrative page and breaks the same
-  anti-hallucination discipline used everywhere else. A human manually editing their
-  own storyline node is not bound by this — they're accountable for what they type
-  the same way any other manual data entry is; this rule constrains the model, not
-  the user.
-- **The same signal can, and usually does, appear in multiple sibling scenarios'
-  storylines.** Nothing about being used in one scenario's chain excludes a signal
-  from another's — each of the 4 scenarios can legitimately draw on overlapping
-  parts of the same signal library, playing a different role/sequence position in
-  each, because each scenario is still a different end-state even when some of the
-  same forces are in play. Never treat "already used elsewhere" as a reason to
-  exclude a signal from a scenario's own storyline (only THIS scenario's own
-  already-used signals should be excluded from its own gap-filling suggestions).
+- **Strictly grounded, never freeform.** Every node must trace to a real signal/insight
+  via `signal_insight_links`, or to a predetermined element. No node may be invented
+  prose with no underlying project data — that risks contradicting the Narrative page
+  and breaks the same anti-hallucination discipline used everywhere else.
 - **One-directional causality, fixed phases.** A node in phase N may only justify
   nodes in phase N or later — never backward. The 5 phases (Precursors → Catalysts →
   First-order effects → Second-order effects → Scenario realized) are fixed, never
-  renamed or reordered per scenario. This is an endpoint-level invariant, not just an
-  AI-output-filtering step — manual edits that would create a backward edge must be
-  rejected too, not silently allowed because a human made the edit.
+  renamed or reordered per scenario.
 - **Consistency with Narrative.** Storyline and the Narrative page's prose must tell
   the same causal story for a given scenario — if they diverge, that's a bug, not
   acceptable creative variance between two views.
-- **Thin chains are a signal, not just a display issue.** Fewer than 4 total nodes on
-  a scenario's storyline is a sign the scenario isn't adequately grounded yet — surface
-  it (`thin_chain`/`thinChain` on the read path), don't let the UI render a sparse
-  chain silently as if it were a deliberate, complete result.
+- **Thin chains are a signal, not just a display issue.** If a scenario's storyline
+  skips from present-day signals straight to the realized end-state with no
+  intermediate nodes, treat that as a sign the scenario logic (step 5) isn't
+  adequately grounded yet — flag it rather than letting the UI render a sparse chain
+  silently.
 - **Doubles as future indicator groundwork.** The causal chain Storyline builds is
-  the same territory step 8 (indicators) draws from — keep the data model shared
-  (signals/insights linked to scenario + phase) so indicators can be derived from
-  real storyline nodes later, not re-invented from scratch.
-
-## Signpost — a non-canonical, live-news-grounded cousin of step 8, not step 8 itself
-
-Step 8 in the table above is Schwartz's own "selection of leading indicators" —
-static, generated once per scenario as part of the normal build order, gated into
-`steps_complete`. **Signpost is a different, product-level addition**: a
-scenario-specific early-warning indicator generated on demand from the Storyline
-page, using AI + a live web search, not the build-order indicator step. Do not
-conflate the two, store them in the same table, or let UI copy imply Signpost
-satisfies the step-8 gate.
-
-- **Scenario-specific and discriminating**, same rule as step 8's own indicators:
-  reject any candidate that would equally well signal a sibling scenario — a
-  signpost that fits every quadrant isn't one.
-- **Checkable, dated, or thresholded**, same phrasing discipline as step 8 — never a
-  vague directional claim.
-- **Grounded in real, live citations, not the project's own stored data.** This is
-  the one place in the product where "grounded" means real-time web search results
-  (URL + title) rather than the project's signals/insights — cite what was actually
-  found, never a fabricated source.
-- **Always labeled as the product's own extension**, same as Strategic Options —
-  never implied to be Schwartz's step 8 itself in UI copy or docs.
-
-## Confidence and Plausibility — two different questions about a storyline, not one
-
-Both are product-level additions layered on top of step 6's Storyline. They used
-to accidentally read the same number; they are deliberately different questions
-and must stay that way — never let one be derived from or default to the other.
-
-**Confidence** (Storyline page header stat) — evidentiary strength of the chain
-itself: is it actually backed by real signals, or mostly freeform text? A plain
-formula (`computeChainConfidence`, `story-adapter.ts`) over data already loaded —
-proportion of nodes with a real `signal_id`, the average impact rating of the
-signals they're grounded in, and edge density relative to node count. Not an AI
-call, not stored, not re-checked — recomputed on every read from whatever the
-chain currently is.
-
-**Plausibility** (Storyline page side panel, "Checked Xm ago" / "Refresh") — an
-AI-assessed, re-checkable judgment of whether the chain's own **causal logic**
-holds together: does each edge represent a believable cause-effect link, are
-there logical gaps or contradictions between nodes, does the chain actually
-arrive at the scenario's stated `logic`. Generated via a dedicated AI call
-(`generateScenarioGrounding`, `ai-grounding.ts`) that reasons over the storyline's
-own nodes/edges — not web search, not "how plausible does this look given
-current events" (an earlier version of this concept was defined that way; it
-no longer is). Always re-checkable, always shows when it was last checked.
-
-Separate from both: `scenarios.plausible` (step 5's own boolean +
-`implausibility_note`) is a **static** judgment made once, at scenario-build
-time, about whether a quadrant's axis-pole combination is internally coherent
-(see step 5's hard constraints below). It is never re-evaluated after the
-scenario is built, and neither Confidence nor Plausibility should be stored in
-or derived from it.
+  the same territory step 8 (indicators/signposts) draws from — keep the data model
+  shared (signals/insights linked to scenario + phase) so indicators can be derived
+  from real storyline nodes later, not re-invented from scratch.
 
 ## Hard constraints (never violate these when building any page/endpoint)
 
@@ -138,6 +61,7 @@ or derived from it.
 - **Indicators must discriminate.** An indicator that would equally signal two different scenarios fails the step-8 definition and should be rejected, not just deprioritized.
 - **Every AI output is grounded or explicitly flagged as inference/external.** No step's AI output may present unsourced content as if it were derived from the project's own data — see the anti-hallucination scaffold in `Scenaric Backend Build Plan.html` §3.
 - **Strategic Options is always labeled as the product's own extension**, never implied to be part of Schwartz's 8 named steps, in UI copy, onboarding, and docs.
+- **No desirability scoring on scenarios.** Schwartz's method treats all 4 quadrant logics as equally plausible futures to prepare for, not futures to rank by preference — scoring or labeling a scenario as "desirable"/"undesirable" reintroduces the motivated-reasoning bias the method exists to avoid. The only per-scenario judgment is `plausible`/`plausibility` (could this coherently occur). Desirability-adjacent judgment belongs only at the strategy level (Step 12/Strategic Options wind-tunnel scoring: how well a given strategy performs across all 4 scenarios) — never as a field, score, sort order, or badge on the scenario object itself.
 
 ## When reviewing or building a feature, check:
 
@@ -148,3 +72,27 @@ or derived from it.
 5. If uncertain whether a proposed feature fits the method at all, flag it and ask rather than building a plausible-sounding but non-canonical addition.
 
 Reference: `Scenaric Backend Build Plan.html` in this project has the full data model, endpoints, and per-step AI prompts already built to this spec — treat it as the executable version of this skill.
+
+## Where research mode (live web/news) is allowed vs. forbidden
+
+Deep research (live web/news lookups, external LLM knowledge) is powerful but must
+only touch the method at two points — everywhere else, AI reasons closed-book over
+the project's own already-grounded data.
+
+| Step | Research allowed? | What it does here |
+|---|---|---|
+| 1. Focal question | No | Closed-book drafting/sharpening from user-provided text only |
+| 2. Key forces (local) | **Yes — exploratory** | Scans for local-actor forces (customers/suppliers/competitors/regulators) the user hasn't uploaded anything about; lands as unconfirmed suggestions only |
+| 3. Driving forces (macro/STEEP) | **Yes — exploratory** | Broad macro-trend sweep across STEEP categories; same unconfirmed-suggestion path as step 2 |
+| 4. Rank forces | No | Deterministic scoring/bucketing over existing signals, temp=0 |
+| 5. Scenario logics | No | Structured synthesis over the project's own axes/signals |
+| 6. Narrative + Storyline | No (at generation time) | Reasons only over the project's grounded storyline/signal graph. News may enter earlier via the step-8 ingestion pipeline as a signal, never fetched live inside a narrative/storyline prompt |
+| 7. Implications | No | Closed-book, grounded in the narrative's own text |
+| 8. Indicators/signposts | **Yes — ongoing monitoring** | Daily ingestion job evaluates each indicator's status/trend against fresh news/geopolitical evidence; distinct from steps 2-3's one-shot exploratory research |
+| + Strategic options | No | Closed-book over the project's own scenarios/implications; relies on step 8 to keep the world-model current, never re-fetches live data itself |
+
+Rules that apply wherever research is allowed (steps 2, 3, 8):
+- Every external suggestion is visibly labeled as external/inferred, never merged into project data silently.
+- Steps 2/3 suggestions require explicit user confirmation before becoming a signal/insight.
+- Step 8's ingestion job may update indicator status automatically, but every status change must cite the specific news item that triggered it (grounded_in on the reading row) — never an ungrounded model judgment.
+- Research calls never happen inside steps 4-7 or Strategic Options, even opportunistically — if a feature request implies fetching live data inside one of those steps, flag it per the "when uncertain" checklist below rather than building it.

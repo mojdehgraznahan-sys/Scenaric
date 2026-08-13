@@ -93,7 +93,7 @@ export interface Database {
           id: string;
           project_id: string;
           name: string;
-          type: "doc" | "audio" | "survey" | "web" | "web_feed";
+          type: "doc" | "audio" | "survey" | "web" | "web_feed" | "external_research";
           status: "processing" | "complete" | "failed" | "unsupported";
           storage_url: string | null;
           extracted_text: string | null;
@@ -104,7 +104,7 @@ export interface Database {
           id?: string;
           project_id: string;
           name: string;
-          type: "doc" | "audio" | "survey" | "web" | "web_feed";
+          type: "doc" | "audio" | "survey" | "web" | "web_feed" | "external_research";
           status?: "processing" | "complete" | "failed" | "unsupported";
           storage_url?: string | null;
           extracted_text?: string | null;
@@ -115,7 +115,7 @@ export interface Database {
           id?: string;
           project_id?: string;
           name?: string;
-          type?: "doc" | "audio" | "survey" | "web" | "web_feed";
+          type?: "doc" | "audio" | "survey" | "web" | "web_feed" | "external_research";
           status?: "processing" | "complete" | "failed" | "unsupported";
           storage_url?: string | null;
           extracted_text?: string | null;
@@ -183,7 +183,7 @@ export interface Database {
           ai_uncertainty: "Low" | "Medium" | "High" | null;
           user_impact: number | null;
           user_uncertainty: "Low" | "Medium" | "High" | null;
-          origin: "ai" | "user" | "insight" | "external_pattern";
+          origin: "ai" | "user" | "insight" | "external_pattern" | "external_research";
           status: string;
           created_at: string;
         };
@@ -200,7 +200,7 @@ export interface Database {
           ai_uncertainty?: "Low" | "Medium" | "High" | null;
           user_impact?: number | null;
           user_uncertainty?: "Low" | "Medium" | "High" | null;
-          origin?: "ai" | "user" | "insight" | "external_pattern";
+          origin?: "ai" | "user" | "insight" | "external_pattern" | "external_research";
           status?: string;
           created_at?: string;
         };
@@ -217,7 +217,7 @@ export interface Database {
           ai_uncertainty?: "Low" | "Medium" | "High" | null;
           user_impact?: number | null;
           user_uncertainty?: "Low" | "Medium" | "High" | null;
-          origin?: "ai" | "user" | "insight" | "external_pattern";
+          origin?: "ai" | "user" | "insight" | "external_pattern" | "external_research";
           status?: string;
           created_at?: string;
         };
@@ -813,6 +813,8 @@ export interface Database {
           model: string | null;
           confidence: string | null;
           batch_id: string | null;
+          used_web_search: boolean;
+          page: string | null;
           created_at: string;
         };
         Insert: {
@@ -825,6 +827,8 @@ export interface Database {
           model?: string | null;
           confidence?: string | null;
           batch_id?: string | null;
+          used_web_search?: boolean;
+          page?: string | null;
           created_at?: string;
         };
         Update: {
@@ -837,6 +841,59 @@ export interface Database {
           model?: string | null;
           confidence?: string | null;
           batch_id?: string | null;
+          used_web_search?: boolean;
+          page?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      research_suggestions: {
+        Row: {
+          id: string;
+          project_id: string;
+          step: "key_forces" | "driving_forces";
+          status: "suggested" | "confirmed" | "dismissed";
+          source: string;
+          title: string;
+          body: string;
+          category: "Social" | "Technology" | "Economic" | "Ecological" | "Political" | null;
+          actor_type: "competitor" | "regulator" | "customer" | "supplier" | "partner" | "internal_capability" | null;
+          citation_title: string | null;
+          citation_url: string | null;
+          confirmed_signal_id: string | null;
+          confirmed_insight_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          step: "key_forces" | "driving_forces";
+          status?: "suggested" | "confirmed" | "dismissed";
+          source?: string;
+          title: string;
+          body?: string;
+          category?: "Social" | "Technology" | "Economic" | "Ecological" | "Political" | null;
+          actor_type?: "competitor" | "regulator" | "customer" | "supplier" | "partner" | "internal_capability" | null;
+          citation_title?: string | null;
+          citation_url?: string | null;
+          confirmed_signal_id?: string | null;
+          confirmed_insight_id?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          step?: "key_forces" | "driving_forces";
+          status?: "suggested" | "confirmed" | "dismissed";
+          source?: string;
+          title?: string;
+          body?: string;
+          category?: "Social" | "Technology" | "Economic" | "Ecological" | "Political" | null;
+          actor_type?: "competitor" | "regulator" | "customer" | "supplier" | "partner" | "internal_capability" | null;
+          citation_title?: string | null;
+          citation_url?: string | null;
+          confirmed_signal_id?: string | null;
+          confirmed_insight_id?: string | null;
           created_at?: string;
         };
         Relationships: [];

@@ -7,13 +7,31 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { AIGenerationFailedError } from "./errors";
+import { AIGenerationFailedError, ResearchModeNotAllowedError } from "./errors";
 
-export { AIGenerationFailedError };
+export { AIGenerationFailedError, ResearchModeNotAllowedError };
 
 const anthropic = new Anthropic(); // reads ANTHROPIC_API_KEY from the environment
 
 const MODEL = "claude-opus-4-8";
+
+// SCHWARTZ_METHODOLOGY_SKILL.md's "Where research mode (live web/news) is allowed vs.
+// forbidden" section is the source of truth this enforces — live web/news access may only
+// ever touch step 2 (Key forces), step 3 (Driving forces), and step 8 (Indicators/monitoring).
+// Every other step reasons closed-book. This is a binding constraint, not documentation: the
+// guard in runStructured below throws for any `step` outside this list that tries to attach
+// `webSearch`, so a future caller can't silently reintroduce research access to a step that
+// isn't allowed to have it.
+export const RESEARCH_MODE_ALLOWED_STEPS: readonly string[] = [
+  "signals.local_force_scan", // Step 2 — Key forces exploratory scan (ai-research-suggestions.ts)
+  "signals.macro_trend_sweep", // Step 3 — Driving forces exploratory scan (ai-research-suggestions.ts)
+  "news_feed.pull", // Step 8 — daily ingestion job (ai-news-feed.ts's searchNewsItems), also
+  // reused by Knowledge Base's manual "Pull recent news" button and the Dashboard's News Feed
+  // pull (both pre-existing, same underlying call)
+  "grounding.generate", // Signpost (ai-grounding.ts) — a deliberate carve-out: live-web-cited
+  // early-warning indicators, treated as step-8-adjacent rather than narrative/storyline
+  // generation proper, which stays closed-book everywhere else
+];
 
 // §3 — reused verbatim by every AI call in every step below. Sent as a cached system
 // block since it's byte-identical on every request.
@@ -71,6 +89,11 @@ interface RunStructuredOptions<T extends z.ZodTypeAny> {
    *  invocation, across every project it touched) can be queried as a single unit later.
    *  Omitted by default — every existing caller is unaffected, the column just stays null. */
   batchId?: string;
+  /** Tags this call's ai_runs row with the page/flow it came from (e.g. "onboarding") —
+   *  useful for calls like onboarding's, which happen before a project exists and so can't
+   *  be grouped by project_id the way every other step already can. Omitted by default —
+   *  every existing caller is unaffected, the column just stays null. */
+  page?: string;
 }
 
 function inputHashFor(input: unknown): string {
@@ -93,6 +116,8 @@ async function logRun(args: {
   outputJson: unknown | null;
   confidence: string | null;
   batchId: string | null;
+  usedWebSearch: boolean;
+  page: string | null;
 }) {
   // Service-role client: audit-log writes shouldn't depend on the acting user's own row
   // permissions, and this is the only way to log a pre-project call (project_id: null),
@@ -107,6 +132,8 @@ async function logRun(args: {
     model: MODEL,
     confidence: args.confidence,
     batch_id: args.batchId,
+    used_web_search: args.usedWebSearch,
+    page: args.page,
   });
   if (error) console.error("[ai/client] failed to log ai_runs", error);
 }
@@ -118,9 +145,16 @@ async function logRun(args: {
  * (success or final failure) is logged to ai_runs.
  */
 export async function runStructured<T extends z.ZodTypeAny>(opts: RunStructuredOptions<T>): Promise<z.infer<T>> {
-  const { step, projectId, taskPrompt, input, schema, effort = "medium", thinking = false, maxTokens = 4096, webSearch, batchId = null } = opts;
+  const { step, projectId, taskPrompt, input, schema, effort = "medium", thinking = false, maxTokens = 4096, webSearch, batchId = null, page = null } = opts;
   const promptVersion = opts.promptVersion || "v1";
   const inputHash = inputHashFor(input);
+
+  // Loud, request-time enforcement of SCHWARTZ_METHODOLOGY_SKILL.md's research-mode policy —
+  // fires before any Anthropic call is made, so a disallowed step can never silently get
+  // research access even opportunistically. See RESEARCH_MODE_ALLOWED_STEPS above.
+  if (webSearch && !RESEARCH_MODE_ALLOWED_STEPS.includes(step)) {
+    throw new ResearchModeNotAllowedError(step);
+  }
 
   const attempt = async (correction?: string) => {
     return anthropic.messages.parse({
@@ -185,10 +219,12 @@ export async function runStructured<T extends z.ZodTypeAny>(opts: RunStructuredO
       outputJson: response.parsed_output,
       confidence: confidenceFrom(response.parsed_output),
       batchId,
+      usedWebSearch: !!webSearch,
+      page,
     });
     return response.parsed_output;
   }
 
-  await logRun({ projectId, step, promptVersion, inputHash, outputJson: null, confidence: null, batchId });
+  await logRun({ projectId, step, promptVersion, inputHash, outputJson: null, confidence: null, batchId, usedWebSearch: !!webSearch, page });
   throw new AIGenerationFailedError(step, lastReason, 2);
 }

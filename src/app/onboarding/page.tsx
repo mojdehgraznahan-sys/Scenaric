@@ -1,6 +1,9 @@
 "use client";
 
-// Onboarding wizard — 3 steps. Faithful Tailwind/shadcn port of the handoff onboarding.jsx.
+// Onboarding wizard — 3 steps. Faithful Tailwind/shadcn port of the handoff onboarding.jsx,
+// finished out with Step 1's real AI wiring (SCHWARTZ_METHODOLOGY_SKILL.md's Step 1 row —
+// closed-book, no research — checkFocalCriteria/clarifyFocalQuestion/refineFocalQuestion/
+// suggestFocalHorizon, all in ai-focal-question.ts).
 import * as React from "react";
 import { Icons } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
@@ -11,7 +14,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 import { useNavigate } from "@/lib/use-navigate";
-import { refineFocalQuestion } from "@/lib/actions/ai-focal-question";
+import {
+  checkFocalCriteria,
+  clarifyFocalQuestion,
+  refineFocalQuestion,
+  suggestFocalHorizon,
+  type FocalCriterion,
+  type ClarifyQuestion,
+} from "@/lib/actions/ai-focal-question";
 
 const TOTAL_STEPS = 3;
 const EYEBROW = "mb-3.5 font-mono text-[11px] font-medium uppercase tracking-[0.08em] text-brand-orange";
@@ -32,6 +42,7 @@ export default function OnboardingPage() {
   const [step, setStep] = React.useState(store.onboarding.step || 1);
   const [focal, setFocal] = React.useState(store.onboarding.focal || "");
   const [refined, setRefined] = React.useState<string | null>(store.onboarding.refined);
+  const [alternatives, setAlternatives] = React.useState<string[] | null>(store.onboarding.alternatives);
   const [refining, setRefining] = React.useState(false);
   const [refineError, setRefineError] = React.useState<string | null>(null);
   const [horizon, setHorizon] = React.useState(store.onboarding.horizon || "5-10 years");
@@ -39,24 +50,147 @@ export default function OnboardingPage() {
   const [summary, setSummary] = React.useState(store.onboarding.summary || "");
   const [industry, setIndustry] = React.useState(store.onboarding.industry || "Technology");
 
+  // Endpoint 1 — live 4-criterion checklist, debounced ~500ms as the user types.
+  const [criteria, setCriteria] = React.useState<FocalCriterion[] | null>(store.onboarding.criteria);
+  const focalRef = React.useRef(focal);
+  focalRef.current = focal;
+
+  // Endpoint 2 — clarifying questions, shown when "Refine with AI" is clicked while any
+  // criterion is unmet.
+  const [clarifying, setClarifying] = React.useState(false);
+  const [clarifyLoading, setClarifyLoading] = React.useState(false);
+  const [clarifyQuestions, setClarifyQuestions] = React.useState<ClarifyQuestion[] | null>(store.onboarding.clarifyQuestions);
+  const [clarifyAnswers, setClarifyAnswers] = React.useState<Record<string, string>>(store.onboarding.clarifyAnswers || {});
+
+  // Endpoint 4 — horizon suggestion, fired on Step 1's "Continue".
+  const [suggestedHorizon, setSuggestedHorizon] = React.useState<{ horizon: string; rationale: string } | null>(store.onboarding.suggestedHorizon);
+  const [continuingStep1, setContinuingStep1] = React.useState(false);
+
   const persist = (patch: Partial<typeof store.onboarding>) => {
     store.setOnboarding({ ...store.onboarding, ...patch });
   };
 
   const focalReady = focal.trim().length >= 20;
 
-  const refine = async () => {
-    if (!focalReady) return;
+  // Debounced live checklist — cleared instantly for empty text, otherwise re-checked 500ms
+  // after the user stops typing. Guards against a stale (slower) response landing after a
+  // newer one by comparing against focalRef at resolution time, not just at request time.
+  React.useEffect(() => {
+    if (!focal.trim()) {
+      setCriteria(null);
+      persist({ criteria: null });
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      return;
+    }
+    const requestedFor = focal;
+    const timer = setTimeout(async () => {
+      try {
+        const result = await checkFocalCriteria({ draftText: requestedFor });
+        if (focalRef.current !== requestedFor) return; // superseded by a newer edit
+        setCriteria(result.criteria);
+        persist({ criteria: result.criteria });
+      } catch (err) {
+        console.error("[onboarding] focal criteria check failed", err);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focal]);
+
+  const runRefine = async (answers: { criterionId: string; question: string; answer: string }[]) => {
     setRefining(true);
     setRefineError(null);
     try {
-      const result = await refineFocalQuestion({ rawQuestion: focal, horizon, industry });
-      setRefined(result.refined_question);
+      const result = await refineFocalQuestion({ rawQuestion: focal, horizon, industry, clarifyAnswers: answers });
+      setRefined(result.primary);
+      setAlternatives(result.alternatives);
+      setClarifying(false);
+      setClarifyQuestions(null);
+      persist({ refined: result.primary, alternatives: result.alternatives, clarifyQuestions: null });
     } catch (err) {
       console.error("[onboarding] focal question refine failed", err);
       setRefineError("Couldn't refine your focal question right now — try again in a moment.");
     } finally {
       setRefining(false);
+    }
+  };
+
+  const startRefine = async () => {
+    if (!focalReady) return;
+    setRefineError(null);
+
+    // The debounce may not have resolved yet for very recent edits — get one fresh check
+    // before deciding whether clarifying questions are needed, rather than trusting a
+    // possibly-stale (or absent) criteria state.
+    let currentCriteria = criteria;
+    if (!currentCriteria) {
+      try {
+        const result = await checkFocalCriteria({ draftText: focal });
+        currentCriteria = result.criteria;
+        setCriteria(result.criteria);
+        persist({ criteria: result.criteria });
+      } catch (err) {
+        console.error("[onboarding] focal criteria check failed", err);
+      }
+    }
+
+    const missing = (currentCriteria ?? []).filter((c) => !c.ok).map((c) => c.id);
+    if (missing.length > 0) {
+      setClarifyLoading(true);
+      try {
+        const result = await clarifyFocalQuestion({ draftText: focal, missingCriteria: missing });
+        setClarifyQuestions(result.questions);
+        setClarifyAnswers({});
+        setClarifying(true);
+        persist({ clarifyQuestions: result.questions, clarifyAnswers: {} });
+      } catch (err) {
+        console.error("[onboarding] clarify failed", err);
+        setRefineError("Couldn't prepare clarifying questions right now — try again in a moment.");
+      } finally {
+        setClarifyLoading(false);
+      }
+      return;
+    }
+
+    await runRefine([]);
+  };
+
+  const onClarifyAnswerChange = (criterionId: string, value: string) => {
+    const next = { ...clarifyAnswers, [criterionId]: value };
+    setClarifyAnswers(next);
+    persist({ clarifyAnswers: next });
+  };
+
+  const applyVersion = (text: string) => {
+    setFocal(text);
+    setRefined(null);
+    setAlternatives(null);
+    persist({ refined: null, alternatives: null });
+  };
+
+  const dismissRefined = () => {
+    setRefined(null);
+    setAlternatives(null);
+    persist({ refined: null, alternatives: null });
+  };
+
+  const onContinueStep1 = async () => {
+    if (!focalReady) return;
+    setContinuingStep1(true);
+    let nextHorizon = horizon;
+    let nextSuggestedHorizon = suggestedHorizon;
+    try {
+      const result = await suggestFocalHorizon({ focalQuestion: refined ?? focal });
+      nextHorizon = result.suggestedHorizon;
+      nextSuggestedHorizon = { horizon: result.suggestedHorizon, rationale: result.rationale };
+      setHorizon(nextHorizon);
+      setSuggestedHorizon(nextSuggestedHorizon);
+    } catch (err) {
+      console.error("[onboarding] horizon suggestion failed", err);
+    } finally {
+      persist({ focal, refined, horizon: nextHorizon, suggestedHorizon: nextSuggestedHorizon, step: 2 });
+      setContinuingStep1(false);
+      setStep(2);
     }
   };
 
@@ -126,11 +260,70 @@ export default function OnboardingPage() {
                 <span>{focalReady ? "" : `${Math.max(0, 20 - focal.length)} more for AI refine`}</span>
               </div>
 
-              {focalReady && (
-                <Button variant="soft" className="mt-3.5 w-full px-3 py-2.5" onClick={refine} disabled={refining}>
+              {focal.trim().length > 0 && criteria && (
+                <div className="mt-3 grid grid-cols-2 gap-1.5">
+                  {criteria.map((c) => (
+                    <div
+                      key={c.id}
+                      title={c.reason}
+                      className={cn("flex items-center gap-1.5 text-[11.5px]", c.ok ? "text-[#15803D]" : "text-text-3")}
+                    >
+                      <span
+                        className={cn(
+                          "flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-full text-[9px]",
+                          c.ok ? "bg-[#DCFCE7] text-[#15803D]" : "bg-[#F3F4F6] text-text-3"
+                        )}
+                      >
+                        {c.ok ? "✓" : "·"}
+                      </span>
+                      {c.label}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {focalReady && !clarifying && (
+                <Button variant="soft" className="mt-3.5 w-full px-3 py-2.5" onClick={startRefine} disabled={refining || clarifyLoading}>
                   <Icons.Sparkle size={14} />
-                  {refining ? "Refining…" : "Refine with AI"}
+                  {clarifyLoading ? "Thinking…" : refining ? "Refining…" : "Refine with AI"}
                 </Button>
+              )}
+
+              {clarifying && clarifyQuestions && (
+                <div className="slide-up mt-3.5 rounded-[14px] border border-dashed border-brand-orange100 bg-brand-orangeLight p-4">
+                  <div className="mb-2.5 flex items-center gap-1.5">
+                    <Icons.Sparkle size={12} stroke="#C2410C" />
+                    <span className="font-mono text-[11px] font-medium uppercase tracking-[0.06em] text-brand-orange700">
+                      {clarifyQuestions.length === 1 ? "One quick question before I refine this" : "A couple quick questions before I refine this"}
+                    </span>
+                  </div>
+                  {clarifyQuestions.map((q) => (
+                    <label key={q.criterionId} className="mb-2.5 block">
+                      <span className="mb-1 block text-[12.5px] text-brand-orange700">{q.question}</span>
+                      <Input
+                        value={clarifyAnswers[q.criterionId] || ""}
+                        onChange={(e) => onClarifyAnswerChange(q.criterionId, e.target.value)}
+                      />
+                    </label>
+                  ))}
+                  <div className="mt-1 flex gap-2">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      disabled={refining}
+                      onClick={() =>
+                        runRefine(
+                          clarifyQuestions.map((q) => ({ criterionId: q.criterionId, question: q.question, answer: clarifyAnswers[q.criterionId] || "" }))
+                        )
+                      }
+                    >
+                      {refining ? "Refining…" : "Continue"}
+                    </Button>
+                    <Button variant="ghost" size="sm" disabled={refining} onClick={() => runRefine([])}>
+                      Skip
+                    </Button>
+                  </div>
+                </div>
               )}
 
               {refining && (
@@ -154,34 +347,41 @@ export default function OnboardingPage() {
                     </span>
                   </div>
                   <p className="mb-3 text-sm leading-[1.55] text-brand-orange700">{refined}</p>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      onClick={() => {
-                        setFocal(refined);
-                        setRefined(null);
-                      }}
-                    >
+                  <div className={cn("flex gap-2", alternatives && alternatives.length > 0 && "mb-3.5")}>
+                    <Button variant="primary" size="sm" onClick={() => applyVersion(refined)}>
                       Use this version
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => setRefined(null)}>
+                    <Button variant="ghost" size="sm" onClick={dismissRefined}>
                       Keep original
                     </Button>
                   </div>
+                  {alternatives && alternatives.length > 0 && (
+                    <div className="flex flex-col gap-2 border-t border-brand-orange100 pt-3">
+                      <span className="font-mono text-[11px] uppercase tracking-[0.06em] text-brand-orange700">
+                        Or try a different framing
+                      </span>
+                      {alternatives.map((alt, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => applyVersion(alt)}
+                          className="rounded-[10px] border border-brand-orange100 bg-white px-2.5 py-2.5 text-left text-[13px] leading-[1.5] text-brand-orange700"
+                        >
+                          {alt}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
               <Button
                 variant="primary"
                 className="mt-[22px] w-full rounded-[14px] px-4 py-3"
-                disabled={!focalReady}
-                onClick={() => {
-                  persist({ focal, refined, step: 2 });
-                  setStep(2);
-                }}
+                disabled={!focalReady || continuingStep1}
+                onClick={onContinueStep1}
               >
-                Continue <Icons.ArrowRight size={14} />
+                {continuingStep1 ? "Thinking…" : "Continue"} <Icons.ArrowRight size={14} />
               </Button>
             </>
           )}
@@ -193,7 +393,7 @@ export default function OnboardingPage() {
               <p className="mb-[22px] text-sm text-muted-foreground">
                 Choose a horizon that gives your scenarios room to diverge meaningfully.
               </p>
-              <div className="mb-[22px] grid grid-cols-2 gap-3">
+              <div className="mb-3 grid grid-cols-2 gap-3">
                 {HORIZONS.map((h) => {
                   const selected = horizon === h.id;
                   return (
@@ -214,7 +414,13 @@ export default function OnboardingPage() {
                   );
                 })}
               </div>
-              <div className="flex gap-2.5">
+              {suggestedHorizon && suggestedHorizon.horizon === horizon && (
+                <div className="mb-[22px] flex items-start gap-1.5 rounded-[10px] bg-brand-orangeLight px-3 py-2 text-[11.5px] leading-[1.5] text-brand-orange700">
+                  <Icons.Sparkle size={12} stroke="#C2410C" className="mt-0.5 flex-shrink-0" />
+                  <span>AI suggested this horizon — {suggestedHorizon.rationale}</span>
+                </div>
+              )}
+              <div className={cn("flex gap-2.5", !suggestedHorizon || suggestedHorizon.horizon !== horizon ? "mt-[19px]" : undefined)}>
                 <Button
                   variant="ghost"
                   onClick={() => {
