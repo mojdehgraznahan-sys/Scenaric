@@ -15,6 +15,7 @@ import { Chip } from "@/components/chip";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 import { askSignalsChat, type SignalsChatResult } from "@/lib/actions/ai-signals";
+import { runMacroTrendSweep } from "@/lib/actions/ai-research-suggestions";
 import { AIGenerationFailedError } from "@/lib/ai/errors";
 import type {
   ValidatePlausibilityResult,
@@ -35,8 +36,14 @@ import type { MonitoringChatResult } from "@/lib/actions/ai-monitoring-chat";
 import { createManualIndicator } from "@/lib/actions/indicators";
 import type { NextStepsResult, SummarizeWeekSignalsResult, WhatsChangedResult, ExplainProgressResult } from "@/lib/actions/ai-home-tasks";
 import type { HomeChatResult } from "@/lib/actions/ai-home-chat";
-import type { DraftFocalQuestionResult, SharpenFocalQuestionResult, CritiqueFocalQuestionResult } from "@/lib/actions/ai-settings-tasks";
+import type {
+  DraftFocalQuestionResult,
+  SharpenFocalQuestionResult,
+  CritiqueFocalQuestionResult,
+  RefreshIndustryResearchResult,
+} from "@/lib/actions/ai-settings-tasks";
 import type { SettingsChatResult } from "@/lib/actions/ai-settings-chat";
+import type { KnowledgeChatResult } from "@/lib/actions/ai-knowledge-chat";
 
 interface ChatMsg {
   role: "ai" | "user";
@@ -61,17 +68,15 @@ interface ChatMsg {
   // The project this suggestion was generated against — the add button disables itself if
   // the active project has since changed, rather than silently writing to the wrong one.
   suggestedForProjectId?: string;
+  // Settings chat's explicit "Research" send action only (askSettingsChat's research:true
+  // branch) — true only when this specific message used live web search, so the badge below
+  // never appears on the default closed-book "Send" path.
+  researched?: boolean;
+  webCitations?: { title: string; url: string }[];
 }
 
 const INITIAL: ChatMsg[] = [
   { role: "ai", text: "Hi — I'm your AI Analyst. I've read your 12 sources and 5 interviews. Ask me anything about your scenarios." },
-];
-
-const SIGNALS_INITIAL: ChatMsg[] = [
-  {
-    role: "ai",
-    text: "Hi — ask me about your Signals Library. I'll only answer from the signals and insights already in this project, and I'll say so plainly if something isn't grounded yet.",
-  },
 ];
 
 const CANNED_REPLIES = [
@@ -87,13 +92,6 @@ const SUGGESTED = [
   "Which scenario has the highest downside?",
   "Stress-test my current strategy",
   "Summarise this week's signals",
-];
-
-const SIGNALS_SUGGESTED = [
-  "What are my highest-impact signals?",
-  "Suggest a signal about supply chain risk",
-  "Which STEEP category has the least coverage?",
-  "Summarize my Economic signals",
 ];
 
 type StorylineTaskId = "validate_plausibility" | "validate_chain" | "find_missing_links" | "explain_chain";
@@ -174,6 +172,50 @@ interface MonitoringResultEntry {
   suggestion?: SuggestIndicatorForScenarioResult;
 }
 
+type KnowledgeTaskId =
+  | "scan_local_actors"
+  | "pull_recent_news"
+  | "research_competitors"
+  | "research_regulations"
+  | "research_supply_chain_geopolitics"
+  | "research_international_markets";
+
+const KNOWLEDGE_TASKS: { id: KnowledgeTaskId; label: string }[] = [
+  { id: "scan_local_actors", label: "Scan for local actors (web)" },
+  { id: "pull_recent_news", label: "Pull recent news" },
+  { id: "research_competitors", label: "Research competitors' recent moves" },
+  { id: "research_regulations", label: "Research regulations" },
+  { id: "research_supply_chain_geopolitics", label: "Research supply chain & geopolitics" },
+  { id: "research_international_markets", label: "Research US & international markets" },
+];
+
+// All six tasks normalize to one shared result shape (ai-knowledge-tasks.ts) — unlike Home's
+// per-task result shapes below, no per-task union of optional fields is needed here.
+interface KnowledgeResultEntry {
+  task: KnowledgeTaskId;
+  ts: number;
+  ok: boolean;
+  error?: string;
+  summary?: string;
+}
+
+type SignalsTaskId = "suggest_signals" | "scan_driving_forces";
+
+const SIGNALS_TASKS: { id: SignalsTaskId; label: string }[] = [
+  { id: "suggest_signals", label: "Suggest signals" },
+  { id: "scan_driving_forces", label: "Scan for driving forces (web)" },
+];
+
+// Both tasks normalize to one shared summary shape, same convention KnowledgeResultEntry above
+// already uses — no per-task result union needed.
+interface SignalsResultEntry {
+  task: SignalsTaskId;
+  ts: number;
+  ok: boolean;
+  error?: string;
+  summary?: string;
+}
+
 type HomeTaskId = "next_steps" | "summarize_week_signals" | "whats_changed" | "explain_progress";
 
 const HOME_TASKS: { id: HomeTaskId; label: string }[] = [
@@ -194,12 +236,13 @@ interface HomeResultEntry {
   progress?: ExplainProgressResult;
 }
 
-type SettingsTaskId = "draft_focal_question" | "sharpen_focal_question" | "critique_focal_question";
+type SettingsTaskId = "draft_focal_question" | "sharpen_focal_question" | "critique_focal_question" | "refresh_industry_research";
 
 const SETTINGS_TASKS: { id: SettingsTaskId; label: string }[] = [
   { id: "draft_focal_question", label: "Draft a focal question from my project description" },
   { id: "sharpen_focal_question", label: "Sharpen my focal question" },
   { id: "critique_focal_question", label: "Is this focal question too broad/narrow?" },
+  { id: "refresh_industry_research", label: "Refresh industry research" },
 ];
 
 interface SettingsResultEntry {
@@ -210,6 +253,7 @@ interface SettingsResultEntry {
   draft?: DraftFocalQuestionResult;
   sharpen?: SharpenFocalQuestionResult;
   critique?: CritiqueFocalQuestionResult;
+  refresh?: RefreshIndustryResearchResult;
   // Set once "Accept"/"Use this" succeeds, so the button can't fire twice — same convention
   // as ChatMsg's `added` flag on the other suggestion cards.
   applied?: boolean;
@@ -235,8 +279,10 @@ function ScenarioChatPanel({
   setInput,
   thinking,
   onSend,
+  onResearch,
   onAddOption,
   onAddIndicator,
+  onAddSignal,
   activeProjectId,
 }: {
   messages: ChatMsg[];
@@ -244,8 +290,14 @@ function ScenarioChatPanel({
   setInput: (v: string) => void;
   thinking: boolean;
   onSend: (text?: string) => void;
+  // Settings-only: a second, explicitly-labeled send action permitted to use live web search
+  // (see SCHWARTZ_METHODOLOGY_SKILL.md's research-mode section) — omitted everywhere else, so
+  // Storyline/Narrative/Strategy/Monitoring/Home's chat stays exactly as it was.
+  onResearch?: (text?: string) => void;
   onAddOption?: (index: number) => void;
   onAddIndicator?: (index: number) => void;
+  // Signals-only — mirrors onAddOption/onAddIndicator's confirm-before-save contract.
+  onAddSignal?: (index: number) => void;
   activeProjectId?: string | null;
 }) {
   const scrollRef = React.useRef<HTMLDivElement>(null);
@@ -323,10 +375,52 @@ function ScenarioChatPanel({
                   </Button>
                 </div>
               )}
+              {m.suggestedSignal && onAddSignal && (
+                <div className="mt-2.5 rounded-[10px] border border-border bg-white p-3 text-brand-dark">
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <Chip category={m.suggestedSignal.category} />
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded px-[7px] py-0.5 text-[10px] font-semibold uppercase tracking-[0.04em]",
+                        m.suggestedSignal.groundedIn.length > 0 ? "bg-[#ECFDF5] text-[#065F46]" : "bg-brand-orangeLight text-brand-orange700"
+                      )}
+                    >
+                      {m.suggestedSignal.groundedIn.length > 0
+                        ? `Grounded in ${m.suggestedSignal.groundedIn.length} insight${m.suggestedSignal.groundedIn.length === 1 ? "" : "s"}`
+                        : "External pattern — review before adding"}
+                    </span>
+                  </div>
+                  <div className="mb-1 text-[13px] font-semibold leading-[1.3]">{m.suggestedSignal.title}</div>
+                  <div className="mb-2.5 text-[12.5px] leading-[1.5] text-muted-foreground">{m.suggestedSignal.body}</div>
+                  <Button
+                    variant={m.added ? "ghost" : "soft"}
+                    size="sm"
+                    className="w-full"
+                    disabled={m.added || m.suggestedForProjectId !== activeProjectId}
+                    onClick={() => onAddSignal(i)}
+                  >
+                    {m.added ? "Added to Signals ✓" : m.suggestedForProjectId !== activeProjectId ? "Switched projects — can't add" : "+ Add to Signals"}
+                  </Button>
+                </div>
+              )}
               {m.inference && (
                 <div className="mt-2 rounded-[8px] border border-brand-orange100 bg-brand-orangeLight px-2.5 py-1.5 text-[11.5px] leading-[1.5] text-brand-orange700">
                   <span className="font-semibold uppercase tracking-[0.04em]">Inferred — </span>
                   {m.inference}
+                </div>
+              )}
+              {m.researched && (
+                <div className="mt-2 rounded-[8px] border border-[#BFDBFE] bg-[#EFF6FF] px-2.5 py-1.5 text-[11.5px] leading-[1.5] text-[#1D4ED8]">
+                  <span className="font-semibold uppercase tracking-[0.04em]">🌐 Live research — verify independently</span>
+                  {m.webCitations && m.webCitations.length > 0 && (
+                    <ul className="m-0 mt-1 flex list-none flex-col gap-0.5 p-0">
+                      {m.webCitations.map((c, j) => (
+                        <li key={j} className="truncate">
+                          — {c.title}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               )}
             </div>
@@ -350,6 +444,17 @@ function ScenarioChatPanel({
           placeholder="Ask anything…"
           className="flex-1 border-0 bg-transparent px-2.5 py-[7px] text-[13px] outline-none"
         />
+        {onResearch && (
+          <Button
+            variant="ghost"
+            title="Ask with live web research — answer will be badged as unverified external content"
+            onClick={() => onResearch()}
+            disabled={!input.trim() || thinking}
+            className="h-8 w-8 p-2"
+          >
+            <Icons.Search size={12} />
+          </Button>
+        )}
         <Button variant="primary" onClick={() => onSend()} disabled={!input.trim() || thinking} className="h-8 w-8 p-2">
           <Icons.Send size={12} />
         </Button>
@@ -358,26 +463,27 @@ function ScenarioChatPanel({
   );
 }
 
-export function AskAI({ context }: { context?: "signals" | "storyline" | "narrative" | "strategy" | "monitoring" | "home" | "settings" }) {
+export function AskAI({ context }: { context?: "signals" | "storyline" | "narrative" | "strategy" | "monitoring" | "home" | "settings" | "knowledge" }) {
   const store = useStore();
   const [open, setOpen] = React.useState(false);
-  const [messages, setMessages] = React.useState<ChatMsg[]>(context === "signals" ? SIGNALS_INITIAL : INITIAL);
+  const [messages, setMessages] = React.useState<ChatMsg[]>(INITIAL);
   const [input, setInput] = React.useState("");
   const [thinking, setThinking] = React.useState(false);
   const scrollRef = React.useRef<HTMLDivElement>(null);
 
-  const storageKey = context === "signals" ? "fm.askai.signals" : "fm.askai";
+  const storageKey = "fm.askai";
 
-  // Reload from this context's own storage slot whenever the context changes (e.g. the
-  // user navigates between the Signals page and everywhere else while the chat drawer's
-  // component instance stays mounted) — keeps real signals-grounded history from ever
-  // mixing with the general canned-reply thread.
+  // Reload from storage whenever the context changes (e.g. the user navigates between pages
+  // while the chat drawer's component instance stays mounted) — only meaningful for the
+  // canned-reply default context now; every named context keeps its own dedicated,
+  // non-persisted state (e.g. signalsChatMessages below), same convention Home/Settings/
+  // Knowledge already use.
   React.useEffect(() => {
     try {
       const stored = localStorage.getItem(storageKey);
-      setMessages(stored ? JSON.parse(stored) : context === "signals" ? SIGNALS_INITIAL : INITIAL);
+      setMessages(stored ? JSON.parse(stored) : INITIAL);
     } catch {
-      setMessages(context === "signals" ? SIGNALS_INITIAL : INITIAL);
+      setMessages(INITIAL);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageKey]);
@@ -409,57 +515,11 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
     setInput("");
     setThinking(true);
 
-    if (context === "signals") {
-      const projectId = store.activeProjectId;
-      if (!projectId) {
-        setMessages((m) => [...m, { role: "ai", text: "No active project — open a project first." }]);
-        setThinking(false);
-        return;
-      }
-      try {
-        const result = await askSignalsChat({ projectId, question: t });
-        setMessages((m) => [
-          ...m,
-          { role: "ai", text: result.answer, suggestedSignal: result.suggestedSignal, cites: result.cites, suggestedForProjectId: projectId },
-        ]);
-      } catch (err) {
-        console.error("[ask-ai] signals chat failed", err);
-        const text =
-          err instanceof AIGenerationFailedError
-            ? "Couldn't get a grounded answer right now — try rephrasing or ask again in a moment."
-            : "Something went wrong answering that — try again.";
-        setMessages((m) => [...m, { role: "ai", text }]);
-      } finally {
-        setThinking(false);
-      }
-      return;
-    }
-
     setTimeout(() => {
       const reply = CANNED_REPLIES[Math.floor(Math.random() * CANNED_REPLIES.length)];
       setMessages((m) => [...m, { role: "ai", text: reply }]);
       setThinking(false);
     }, 900 + Math.random() * 500);
-  };
-
-  const onAddSignal = async (index: number) => {
-    const msg = messages[index];
-    const suggestion = msg.suggestedSignal;
-    if (!suggestion || msg.added || msg.suggestedForProjectId !== store.activeProjectId) return;
-    try {
-      await store.createSignal({
-        projectId: store.activeProjectId!,
-        category: suggestion.category,
-        source: "Ask AI",
-        title: suggestion.title,
-        body: suggestion.body,
-        origin: suggestion.origin,
-        groundedInsightIds: suggestion.groundedIn,
-      });
-      setMessages((m) => m.map((msg, i) => (i === index ? { ...msg, added: true } : msg)));
-    } catch (err) {
-      console.error("[ask-ai] failed to add suggested signal", err);
-    }
   };
 
   // Storyline mode — fixed task menu, never freeform. Results are ephemeral (not persisted
@@ -725,6 +785,174 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
     }
   };
 
+  // Signals mode — fixed task menu, never freeform (freeform is signalsChatMessages below), same
+  // convention as Home/Knowledge above. Results are ephemeral one-line summaries (both tasks
+  // already write through the store or the same research_suggestions confirm-before-merge flow
+  // Knowledge Base's scan uses — this panel just reports what happened, it isn't the review UI).
+  const [signalsResults, setSignalsResults] = React.useState<SignalsResultEntry[]>([]);
+  const [runningSignalsTask, setRunningSignalsTask] = React.useState<SignalsTaskId | null>(null);
+
+  const runSignalsTask = async (taskId: SignalsTaskId) => {
+    const projectId = store.activeProjectId;
+    if (!projectId) return;
+    setRunningSignalsTask(taskId);
+    try {
+      let summary: string;
+      if (taskId === "suggest_signals") {
+        // Same combined suggest-then-score logic page-signals.tsx's old onSuggestSignals had —
+        // store.suggestSignals/scoreUnscoredSignals both call refreshSignals internally, so
+        // store.signals (and every page reading it) updates with no extra event needed.
+        const suggestion = await store.suggestSignals(projectId);
+        if (suggestion.created === 0) {
+          summary = "No new signals to suggest right now.";
+        } else {
+          const scoring = await store.scoreUnscoredSignals(projectId);
+          summary = `Suggested ${suggestion.created} signal(s), scored ${scoring.scored}.`;
+        }
+      } else {
+        const result = await runMacroTrendSweep(projectId);
+        summary = result.sufficientEvidence
+          ? `Found ${result.suggestionsCreated} driving force(s) to review below.`
+          : result.gap || "No new driving forces found.";
+        // Step 3 research_suggestions live in page-signals.tsx's own local state, not the
+        // store — tell it to refetch (same fm:*-updated convention page-settings.tsx/
+        // page-knowledge.tsx already use).
+        window.dispatchEvent(new CustomEvent("fm:signals-updated", { detail: { projectId } }));
+      }
+      setSignalsResults((r) => [{ task: taskId, ts: Date.now(), ok: true, summary }, ...r]);
+    } catch (err) {
+      console.error("[ask-ai] signals task failed", err);
+      setSignalsResults((r) => [{ task: taskId, ts: Date.now(), ok: false, error: "Something went wrong running that task." }, ...r]);
+    } finally {
+      setRunningSignalsTask(null);
+    }
+  };
+
+  // Signals' own "Ask anything…" — project-scoped, backed by askSignalsChat (ai-signals.ts),
+  // already a real grounded chat (unlike Knowledge Base's old canned demo). Resets whenever the
+  // active project changes, same convention as homeChatMessages/knowledgeChatMessages.
+  const [signalsChatMessages, setSignalsChatMessages] = React.useState<ChatMsg[]>([]);
+  const [signalsChatInput, setSignalsChatInput] = React.useState("");
+  const [signalsChatThinking, setSignalsChatThinking] = React.useState(false);
+
+  React.useEffect(() => {
+    setSignalsChatMessages([]);
+  }, [store.activeProjectId]);
+
+  const sendSignalsChat = async (text?: string) => {
+    const t = (text || signalsChatInput).trim();
+    const projectId = store.activeProjectId;
+    if (!t || !projectId) return;
+    setSignalsChatMessages((m) => [...m, { role: "user", text: t }]);
+    setSignalsChatInput("");
+    setSignalsChatThinking(true);
+    try {
+      const result: SignalsChatResult = await askSignalsChat({ projectId, question: t });
+      setSignalsChatMessages((m) => [
+        ...m,
+        { role: "ai", text: result.answer, suggestedSignal: result.suggestedSignal, cites: result.cites, suggestedForProjectId: projectId },
+      ]);
+    } catch (err) {
+      console.error("[ask-ai] signals chat failed", err);
+      const text =
+        err instanceof AIGenerationFailedError
+          ? "Couldn't get a grounded answer right now — try rephrasing or ask again in a moment."
+          : "Something went wrong answering that — try again.";
+      setSignalsChatMessages((m) => [...m, { role: "ai", text }]);
+    } finally {
+      setSignalsChatThinking(false);
+    }
+  };
+
+  // Backing action for "+ Add to Signals" above — the one place a freeform Signals chat
+  // answer's suggested signal can actually be written into the project, only after this
+  // explicit click, never automatically from sendSignalsChat itself.
+  const onAddSignalFromChat = async (index: number) => {
+    const msg = signalsChatMessages[index];
+    const suggestion = msg.suggestedSignal;
+    const projectId = store.activeProjectId;
+    if (!suggestion || msg.added || msg.suggestedForProjectId !== projectId || !projectId) return;
+    try {
+      await store.createSignal({
+        projectId,
+        category: suggestion.category,
+        source: "Ask AI",
+        title: suggestion.title,
+        body: suggestion.body,
+        origin: suggestion.origin,
+        groundedInsightIds: suggestion.groundedIn,
+      });
+      setSignalsChatMessages((m) => m.map((msg, i) => (i === index ? { ...msg, added: true } : msg)));
+    } catch (err) {
+      console.error("[ask-ai] failed to add suggested signal", err);
+    }
+  };
+
+  // Knowledge mode — fixed task menu, never freeform (freeform is knowledgeChatMessages below),
+  // same convention as Home/Strategy/Monitoring. Results are ephemeral for the same reason (a
+  // one-line summary of what a scan/pull found, not a conversation worth keeping) — the actual
+  // reviewable output (research_suggestions, new sources/insights) lives on the Knowledge Base
+  // page itself, which refetches via the fm:knowledge-updated event dispatched below.
+  const [knowledgeResults, setKnowledgeResults] = React.useState<KnowledgeResultEntry[]>([]);
+  const [runningKnowledgeTask, setRunningKnowledgeTask] = React.useState<KnowledgeTaskId | null>(null);
+
+  const runKnowledgeTask = async (taskId: KnowledgeTaskId) => {
+    const projectId = store.activeProjectId;
+    if (!projectId) return;
+    setRunningKnowledgeTask(taskId);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/knowledge/ask-ai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task: taskId }),
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      const data: { summary: string } = await res.json();
+      setKnowledgeResults((r) => [{ task: taskId, ts: Date.now(), ok: true, summary: data.summary }, ...r]);
+      window.dispatchEvent(new CustomEvent("fm:knowledge-updated", { detail: { projectId } }));
+    } catch (err) {
+      console.error("[ask-ai] knowledge task failed", err);
+      setKnowledgeResults((r) => [{ task: taskId, ts: Date.now(), ok: false, error: "Something went wrong running that task." }, ...r]);
+    } finally {
+      setRunningKnowledgeTask(null);
+    }
+  };
+
+  // Knowledge Base's own "Ask anything…" — project-scoped, backed by askKnowledgeChat
+  // (ai-knowledge-chat.ts). Resets whenever the active project changes, same convention as
+  // homeChatMessages/monitoringChatMessages.
+  const [knowledgeChatMessages, setKnowledgeChatMessages] = React.useState<ChatMsg[]>([]);
+  const [knowledgeChatInput, setKnowledgeChatInput] = React.useState("");
+  const [knowledgeChatThinking, setKnowledgeChatThinking] = React.useState(false);
+
+  React.useEffect(() => {
+    setKnowledgeChatMessages([]);
+  }, [store.activeProjectId]);
+
+  const sendKnowledgeChat = async (text?: string) => {
+    const t = (text || knowledgeChatInput).trim();
+    const projectId = store.activeProjectId;
+    if (!t || !projectId) return;
+    setKnowledgeChatMessages((m) => [...m, { role: "user", text: t }]);
+    setKnowledgeChatInput("");
+    setKnowledgeChatThinking(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/knowledge/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: t }),
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      const data: KnowledgeChatResult = await res.json();
+      setKnowledgeChatMessages((m) => [...m, { role: "ai", text: data.answer, cites: data.cites, inference: data.inference }]);
+    } catch (err) {
+      console.error("[ask-ai] knowledge chat failed", err);
+      setKnowledgeChatMessages((m) => [...m, { role: "ai", text: "Something went wrong answering that — try again." }]);
+    } finally {
+      setKnowledgeChatThinking(false);
+    }
+  };
+
   // Home mode — fixed task menu, never freeform (freeform is homeChatMessages below), same
   // convention as Strategy/Monitoring above. Results are ephemeral for the same reason
   // (data tied to the current live project state, not a conversation worth keeping).
@@ -818,7 +1046,8 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
       const entry: SettingsResultEntry = { task: taskId, ts: Date.now(), ok: true };
       if (taskId === "draft_focal_question") entry.draft = data as DraftFocalQuestionResult;
       else if (taskId === "sharpen_focal_question") entry.sharpen = data as SharpenFocalQuestionResult;
-      else entry.critique = data as CritiqueFocalQuestionResult;
+      else if (taskId === "critique_focal_question") entry.critique = data as CritiqueFocalQuestionResult;
+      else entry.refresh = data as RefreshIndustryResearchResult;
       setSettingsResults((r) => [entry, ...r]);
     } catch (err) {
       console.error("[ask-ai] settings task failed", err);
@@ -832,7 +1061,7 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
   // draft_focal_question or sharpen_focal_question result card, then tells page-settings.tsx
   // (if open) to refetch — same fm:project-settings-updated cross-component resync
   // project-settings.ts's own consumers already use.
-  const applySettingsSuggestion = async (index: number, patch: { focal_question?: string; horizon?: string; refined_focal_question?: string }, appliedIndex?: number) => {
+  const applySettingsSuggestion = async (index: number, patch: { focal_question?: string; horizon?: string; refined_focal_question?: string | null }, appliedIndex?: number) => {
     const projectId = store.activeProjectId;
     if (!projectId) return;
     try {
@@ -860,7 +1089,7 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
     setSettingsChatMessages([]);
   }, [store.activeProjectId]);
 
-  const sendSettingsChat = async (text?: string) => {
+  const sendSettingsChat = async (text?: string, research = false) => {
     const t = (text || settingsChatInput).trim();
     const projectId = store.activeProjectId;
     if (!t || !projectId) return;
@@ -871,11 +1100,14 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
       const res = await fetch(`/api/projects/${projectId}/settings/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: t }),
+        body: JSON.stringify({ question: t, research }),
       });
       if (!res.ok) throw new Error(`Request failed (${res.status}).`);
       const data: SettingsChatResult = await res.json();
-      setSettingsChatMessages((m) => [...m, { role: "ai", text: data.answer, cites: data.cites, inference: data.inference }]);
+      setSettingsChatMessages((m) => [
+        ...m,
+        { role: "ai", text: data.answer, cites: data.cites, inference: data.inference, researched: data.researched, webCitations: data.webCitations },
+      ]);
     } catch (err) {
       console.error("[ask-ai] settings chat failed", err);
       setSettingsChatMessages((m) => [...m, { role: "ai", text: "Something went wrong answering that — try again." }]);
@@ -883,6 +1115,11 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
       setSettingsChatThinking(false);
     }
   };
+
+  // The explicit "Research" send action (distinct button from "Send" in ScenarioChatPanel) —
+  // the only path here allowed to use live web search. See SCHWARTZ_METHODOLOGY_SKILL.md's
+  // research-mode section and RESEARCH_MODE_ALLOWED_STEPS's "settings.research_chat" entry.
+  const sendSettingsResearchChat = (text?: string) => sendSettingsChat(text, true);
 
   // "Ask anything…" alongside the fixed task menus above — shared between storyline and
   // narrative context since both are scoped to the same scenario and hit the same grounded
@@ -924,8 +1161,8 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
     }
   };
 
-  const suggested = context === "signals" ? SIGNALS_SUGGESTED : SUGGESTED;
-  const emptyGreetingCount = context === "signals" ? SIGNALS_INITIAL.length : INITIAL.length;
+  const suggested = SUGGESTED;
+  const emptyGreetingCount = INITIAL.length;
 
   return (
     <>
@@ -956,9 +1193,11 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
               <div className="flex-1">
                 <div className="text-sm font-semibold tracking-[-0.01em]">Ask AI</div>
                 <div className="font-mono text-[11px] tracking-[0.04em] text-text-3">
-                  {context === "signals"
-                    ? "SIGNALS MODE · GROUNDED IN YOUR SIGNALS"
-                    : context === "storyline"
+                  {context === "knowledge"
+                    ? "KNOWLEDGE MODE · SCOPED TASKS + GROUNDED CHAT"
+                    : context === "signals"
+                      ? "SIGNALS MODE · SCOPED TASKS + GROUNDED CHAT"
+                      : context === "storyline"
                       ? "STORYLINE MODE · SCOPED TASKS ONLY"
                       : context === "narrative"
                         ? "NARRATIVE MODE · SCOPED TASKS ONLY"
@@ -975,7 +1214,13 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
               </div>
               <button
                 onClick={() => {
-                  if (context === "storyline") setStorylineResults([]);
+                  if (context === "knowledge") {
+                    setKnowledgeResults([]);
+                    setKnowledgeChatMessages([]);
+                  } else if (context === "signals") {
+                    setSignalsResults([]);
+                    setSignalsChatMessages([]);
+                  } else if (context === "storyline") setStorylineResults([]);
                   else if (context === "narrative") setNarrativeResults([]);
                   else if (context === "strategy") {
                     setStrategyResults([]);
@@ -992,6 +1237,8 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
                   } else setMessages([{ role: "ai", text: "Cleared. What would you like to explore?" }]);
                 }}
                 title={
+                  context === "knowledge" ||
+                  context === "signals" ||
                   context === "storyline" ||
                   context === "narrative" ||
                   context === "strategy" ||
@@ -1449,6 +1696,108 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
                   activeProjectId={store.activeProjectId}
                 />
               </div>
+            ) : context === "signals" ? (
+              // Fixed task menu, never freeform, PLUS the real "Ask anything…" freeform panel
+              // below it — same structure as the Knowledge branch below. Both tasks normalize to
+              // a one-line summary, so results render uniformly (no per-task branches).
+              <div className="scroll-y flex flex-1 flex-col gap-2.5 p-4">
+                <div className="flex flex-col gap-1.5">
+                  <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">TASKS</div>
+                  {SIGNALS_TASKS.map((t) => {
+                    const disabled = !!runningSignalsTask || !store.activeProjectId;
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => runSignalsTask(t.id)}
+                        disabled={disabled}
+                        className="rounded-[10px] border border-border bg-white px-3 py-2.5 text-left text-[12.5px] text-[#374151] transition-[border,background] duration-[120ms] hover:border-brand-orange100 hover:bg-brand-orangeLight disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {runningSignalsTask === t.id ? "Running…" : t.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {signalsResults.length > 0 && (
+                  <div className="mt-1 flex flex-col gap-2.5">
+                    <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">RESULTS</div>
+                    {signalsResults.map((r, i) => {
+                      const label = SIGNALS_TASKS.find((t) => t.id === r.task)?.label ?? r.task;
+                      return (
+                        <div key={i} className="rounded-[10px] border border-border bg-bg p-3 text-brand-dark">
+                          <div className="mb-1.5 flex items-center justify-between gap-2">
+                            <span className="text-[12.5px] font-semibold">{label}</span>
+                            <span className="font-mono text-[10px] text-text-3">{new Date(r.ts).toLocaleTimeString()}</span>
+                          </div>
+                          {!r.ok && <div className="text-[12.5px] text-[#EF4444]">{r.error}</div>}
+                          {r.ok && <p className="m-0 text-[12.5px] leading-[1.5] text-muted-foreground [text-wrap:pretty]">{r.summary}</p>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <ScenarioChatPanel
+                  messages={signalsChatMessages}
+                  input={signalsChatInput}
+                  setInput={setSignalsChatInput}
+                  thinking={signalsChatThinking}
+                  onSend={sendSignalsChat}
+                  onAddSignal={onAddSignalFromChat}
+                  activeProjectId={store.activeProjectId}
+                />
+              </div>
+            ) : context === "knowledge" ? (
+              // Fixed task menu, never freeform, PLUS the real "Ask anything…" freeform panel
+              // below it — same structure as the Home branch below. Every task normalizes to a
+              // one-line summary (ai-knowledge-tasks.ts), so results render uniformly (no
+              // per-task branches like Home's).
+              <div className="scroll-y flex flex-1 flex-col gap-2.5 p-4">
+                <div className="flex flex-col gap-1.5">
+                  <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">TASKS</div>
+                  {KNOWLEDGE_TASKS.map((t) => {
+                    const disabled = !!runningKnowledgeTask || !store.activeProjectId;
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => runKnowledgeTask(t.id)}
+                        disabled={disabled}
+                        className="rounded-[10px] border border-border bg-white px-3 py-2.5 text-left text-[12.5px] text-[#374151] transition-[border,background] duration-[120ms] hover:border-brand-orange100 hover:bg-brand-orangeLight disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {runningKnowledgeTask === t.id ? "Running…" : t.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {knowledgeResults.length > 0 && (
+                  <div className="mt-1 flex flex-col gap-2.5">
+                    <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">RESULTS</div>
+                    {knowledgeResults.map((r, i) => {
+                      const label = KNOWLEDGE_TASKS.find((t) => t.id === r.task)?.label ?? r.task;
+                      return (
+                        <div key={i} className="rounded-[10px] border border-border bg-bg p-3 text-brand-dark">
+                          <div className="mb-1.5 flex items-center justify-between gap-2">
+                            <span className="text-[12.5px] font-semibold">{label}</span>
+                            <span className="font-mono text-[10px] text-text-3">{new Date(r.ts).toLocaleTimeString()}</span>
+                          </div>
+                          {!r.ok && <div className="text-[12.5px] text-[#EF4444]">{r.error}</div>}
+                          {r.ok && <p className="m-0 text-[12.5px] leading-[1.5] text-muted-foreground [text-wrap:pretty]">{r.summary}</p>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <ScenarioChatPanel
+                  messages={knowledgeChatMessages}
+                  input={knowledgeChatInput}
+                  setInput={setKnowledgeChatInput}
+                  thinking={knowledgeChatThinking}
+                  onSend={sendKnowledgeChat}
+                  activeProjectId={store.activeProjectId}
+                />
+              </div>
             ) : context === "home" ? (
               // Fixed task menu, never freeform, PLUS the real "Ask anything…" freeform panel
               // below it — same structure as the monitoring branch above. No store.*AskAiContext
@@ -1600,7 +1949,9 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
                                     size="sm"
                                     className="w-full"
                                     disabled={r.applied}
-                                    onClick={() => applySettingsSuggestion(i, { focal_question: r.draft!.focalQuestion, horizon: r.draft!.horizon })}
+                                    onClick={() =>
+                                      applySettingsSuggestion(i, { focal_question: r.draft!.focalQuestion, horizon: r.draft!.horizon, refined_focal_question: null })
+                                    }
                                   >
                                     {r.applied ? "Applied ✓" : "Accept"}
                                   </Button>
@@ -1637,6 +1988,8 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
                               <p className="m-0 text-muted-foreground">{r.critique.rationale}</p>
                             </div>
                           )}
+
+                          {r.ok && r.refresh && <p className="m-0 text-[12.5px] leading-[1.5] text-muted-foreground">{r.refresh.summary}</p>}
                         </div>
                       );
                     })}
@@ -1649,6 +2002,7 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
                   setInput={setSettingsChatInput}
                   thinking={settingsChatThinking}
                   onSend={sendSettingsChat}
+                  onResearch={sendSettingsResearchChat}
                   activeProjectId={store.activeProjectId}
                 />
               </div>
@@ -1665,38 +2019,6 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
                   )}
                 >
                   {m.text}
-                  {m.suggestedSignal && (
-                    <div className="mt-2.5 rounded-[10px] border border-border bg-white p-3 text-brand-dark">
-                      <div className="mb-1.5 flex items-center justify-between gap-2">
-                        <Chip category={m.suggestedSignal.category} />
-                        <span
-                          className={cn(
-                            "inline-flex items-center rounded px-[7px] py-0.5 text-[10px] font-semibold uppercase tracking-[0.04em]",
-                            m.suggestedSignal.groundedIn.length > 0 ? "bg-[#ECFDF5] text-[#065F46]" : "bg-brand-orangeLight text-brand-orange700"
-                          )}
-                        >
-                          {m.suggestedSignal.groundedIn.length > 0
-                            ? `Grounded in ${m.suggestedSignal.groundedIn.length} insight${m.suggestedSignal.groundedIn.length === 1 ? "" : "s"}`
-                            : "External pattern — review before adding"}
-                        </span>
-                      </div>
-                      <div className="mb-1 text-[13px] font-semibold leading-[1.3]">{m.suggestedSignal.title}</div>
-                      <div className="mb-2.5 text-[12.5px] leading-[1.5] text-muted-foreground">{m.suggestedSignal.body}</div>
-                      <Button
-                        variant={m.added ? "ghost" : "soft"}
-                        size="sm"
-                        className="w-full"
-                        disabled={m.added || m.suggestedForProjectId !== store.activeProjectId}
-                        onClick={() => onAddSignal(i)}
-                      >
-                        {m.added
-                          ? "Added to Signals ✓"
-                          : m.suggestedForProjectId !== store.activeProjectId
-                            ? "Switched projects — can't add"
-                            : "+ Add to Signals"}
-                      </Button>
-                    </div>
-                  )}
                 </div>
               ))}
               {thinking && (

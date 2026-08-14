@@ -8,6 +8,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
 import { z } from "zod";
+import { researchIndustry } from "./ai-research-industry";
 
 const FOCAL_QUESTION_FORM_RULES = `A well-formed focal question must:
 - Be answerable "yes we should" / "no we shouldn't", or as a choice among named options —
@@ -204,4 +205,38 @@ export async function critiqueFocalQuestion(projectId: string): Promise<Critique
   });
 
   return { verdict: output.verdict, rationale: output.rationale };
+}
+
+// ─────────────────────── Task 4: Refresh industry research ───────────────────────
+
+// Thin wrapper around the existing Step 2/3 cold-start research pipeline
+// (ai-research-industry.ts's researchIndustry — itself pullNewsFeed + runLocalForceScan, both
+// already on RESEARCH_MODE_ALLOWED_STEPS). Not a new research surface: this just gives the
+// Settings "Ask AI" panel a button for the same web_search-backed scan the Knowledge Base page's
+// "Research my industry" already runs, so Settings never needs its own webSearch-enabled step.
+// News lands as sources+insights directly; local forces (competitors/regulators/etc.) land as
+// unconfirmed research_suggestions requiring explicit confirm on the Knowledge Base page — same
+// write paths as today, nothing new.
+export interface RefreshIndustryResearchResult {
+  summary: string;
+  newsFound: number;
+  localForcesFound: number;
+}
+
+function summarizeHalf(label: string, outcome: { failed: true; error: string } | { sufficientEvidence: boolean; gap?: string | null }, countKey?: number): string {
+  if ("failed" in outcome) return `${label}: couldn't complete (${outcome.error})`;
+  if (!outcome.sufficientEvidence) return `${label}: nothing new found${outcome.gap ? ` (${outcome.gap})` : "."}`;
+  return `${label}: ${countKey} new item${countKey === 1 ? "" : "s"} found.`;
+}
+
+export async function refreshIndustryResearch(projectId: string): Promise<RefreshIndustryResearchResult> {
+  const result = await researchIndustry(projectId);
+
+  const newsFound = "failed" in result.news ? 0 : result.news.sourcesCreated;
+  const localForcesFound = "failed" in result.localForces ? 0 : result.localForces.suggestionsCreated;
+
+  const newsMsg = summarizeHalf("News", result.news, newsFound);
+  const forcesMsg = summarizeHalf("Local forces", result.localForces, localForcesFound);
+
+  return { summary: `${newsMsg} ${forcesMsg}`, newsFound, localForcesFound };
 }

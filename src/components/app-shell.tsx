@@ -32,21 +32,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </div>
       <AskAI
         context={
-          page === "signals"
-            ? "signals"
-            : page === "storyline"
-              ? "storyline"
-              : page === "narrative"
-                ? "narrative"
-                : page === "strategy"
-                  ? "strategy"
-                  : page === "monitoring"
-                    ? "monitoring"
-                    : page === "home"
-                      ? "home"
-                      : page === "settings"
-                        ? "settings"
-                        : undefined
+          page === "knowledge"
+            ? "knowledge"
+            : page === "signals"
+              ? "signals"
+              : page === "storyline"
+                ? "storyline"
+                : page === "narrative"
+                  ? "narrative"
+                  : page === "strategy"
+                    ? "strategy"
+                    : page === "monitoring"
+                      ? "monitoring"
+                      : page === "home"
+                        ? "home"
+                        : page === "settings"
+                          ? "settings"
+                          : undefined
         }
       />
       <GlobalToast navigate={navigate} />

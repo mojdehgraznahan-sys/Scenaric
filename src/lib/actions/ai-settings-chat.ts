@@ -6,6 +6,8 @@
 // identity fields + signals rather than the whole-project grounding Home chat uses.
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
+import { AIWebSearchError } from "@/lib/ai/errors";
+import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 
 const SettingsChatSchema = z.object({
@@ -38,14 +40,63 @@ Rules:
 
 Output schema: { answer: string, cites: string[], inference: string | null }`;
 
+// research:true variant — the Settings "Ask AI" freeform box's explicit "Research" send action
+// (see RESEARCH_MODE_ALLOWED_STEPS's "settings.research_chat" entry in ../ai/client.ts). Only
+// reachable when the user deliberately clicks "Research" instead of "Send"; never the default.
+// sufficient_evidence/gap is the same escape valve ai-news-feed.ts/ai-research-suggestions.ts
+// use — without it, a first observed failure mode was the model satisfying the schema with a
+// placeholder ("I'll research this for you now.") and an empty webCitations array instead of
+// actually invoking web_search.
+const SettingsResearchChatSchema = z.object({
+  sufficient_evidence: z.boolean(),
+  gap: z.string().nullable(),
+  answer: z.string(),
+  cites: z.array(z.string()),
+  inference: z.string().nullable(),
+  webCitations: z.array(z.object({ title: z.string(), url: z.string() })),
+});
+
+const SETTINGS_RESEARCH_CHAT_TASK_PROMPT = `Task: The user has explicitly asked to research this
+question live rather than answer only from the project's own stored data — e.g. competitive
+landscape, regulatory/rules changes, geopolitical developments, tariffs, or international-market
+conditions relevant to this project's industry and focal question. You MUST call the web_search
+tool at least once and read real results before writing your final answer — never finalize a
+response (including \`sufficient_evidence: false\`) without having actually searched first; an
+acknowledgment like "I'll research this now" is never a valid final answer on its own.
+
+Input: { question: string, project: { name: string, focal_question: string,
+  refined_focal_question: string | null, horizon: string, industry: string, summary: string },
+  signals: [{ id: string, title: string, category: string }] }
+
+Rules:
+- Ground the answer in what you actually find via web_search — never fabricate a statistic,
+  regulation, company name, or event.
+- If, after actually searching, nothing genuinely relevant turns up, return
+  sufficient_evidence:false and a gap explaining what you looked for and why it came up empty —
+  do not pad with generic industry commentary or an empty acknowledgment to look complete.
+- \`webCitations\` lists the real title/url of each source the answer actually relied on — must
+  be non-empty whenever sufficient_evidence is true.
+- If you also reason beyond what you found (extrapolation, general knowledge), put that in
+  \`inference\` — never inline it in \`answer\` as if it were a cited fact.
+- \`cites\` lists any of this project's own signal ids the answer also relied on (empty if none).
+- Keep \`answer\` under ~150 words unless the user explicitly asks for more depth.
+
+Output schema: { sufficient_evidence: boolean, gap: string | null, answer: string,
+  cites: string[], inference: string | null, webCitations: [{ title: string, url: string }] }`;
+
 export interface SettingsChatResult {
   answer: string;
   cites: string[];
   inference: string | null;
+  researched: boolean;
+  webCitations: { title: string; url: string }[];
 }
 
-// POST .../projects/:id/settings/chat { question }
-export async function askSettingsChat(input: { projectId: string; question: string }): Promise<SettingsChatResult> {
+// POST .../projects/:id/settings/chat { question, research? }
+// research:false (default, omitted) is byte-identical to the original closed-book behavior —
+// same step ("settings.chat"), same prompt, no webSearch. research:true is the one explicit,
+// user-invoked exception to Step 1's closed-book rule (see SCHWARTZ_METHODOLOGY_SKILL.md).
+export async function askSettingsChat(input: { projectId: string; question: string; research?: boolean }): Promise<SettingsChatResult> {
   const supabase = createClient();
 
   const { data: project, error: projectError } = await supabase
@@ -58,6 +109,29 @@ export async function askSettingsChat(input: { projectId: string; question: stri
   const { data: signals, error: signalsError } = await supabase.from("signals").select("id, title, category").eq("project_id", input.projectId);
   if (signalsError) throw signalsError;
 
+  if (input.research) {
+    let output: z.infer<typeof SettingsResearchChatSchema>;
+    try {
+      output = await runStructured({
+        step: "settings.research_chat",
+        projectId: input.projectId,
+        taskPrompt: SETTINGS_RESEARCH_CHAT_TASK_PROMPT,
+        input: { question: input.question, project, signals },
+        schema: SettingsResearchChatSchema,
+        effort: "medium",
+        webSearch: { maxUses: 5 },
+        maxTokens: 6000,
+      });
+    } catch (err) {
+      if (err instanceof Anthropic.APIError) throw new AIWebSearchError(err);
+      throw err;
+    }
+    if (!output.sufficient_evidence) {
+      return { answer: output.gap || "Couldn't find anything relevant via live search — try rephrasing.", cites: [], inference: null, researched: true, webCitations: [] };
+    }
+    return { answer: output.answer, cites: output.cites, inference: output.inference, researched: true, webCitations: output.webCitations };
+  }
+
   const output = await runStructured({
     step: "settings.chat",
     projectId: input.projectId,
@@ -67,5 +141,5 @@ export async function askSettingsChat(input: { projectId: string; question: stri
     effort: "medium",
   });
 
-  return { answer: output.answer, cites: output.cites, inference: output.inference };
+  return { answer: output.answer, cites: output.cites, inference: output.inference, researched: false, webCitations: [] };
 }

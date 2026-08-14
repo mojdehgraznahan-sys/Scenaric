@@ -15,7 +15,6 @@ import * as React from "react";
 import { Icons } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 import { useNavigate } from "@/lib/use-navigate";
@@ -91,11 +90,15 @@ export function PageProjects() {
     setRenaming(null);
   };
 
-  const createProject = async (name: string, focalQuestion: string) => {
+  // Name-only create — the rest (focal question, time horizon, industry, plus the AI-assisted
+  // "Ask AI about this project" panel) lives on the fuller Settings/Project page, so we land
+  // there instead of /home once the project row exists.
+  const createProject = async (name: string) => {
     try {
-      const proj = await store.createProject({ name: name.trim(), focal_question: focalQuestion.trim() });
+      const proj = await store.createProject({ name: name.trim() });
       setCreateOpen(false);
-      openProject(proj);
+      store.setActiveProjectId(proj.id);
+      navigate("/settings");
     } catch (err) {
       console.error("[page-projects] create failed", err);
     }
@@ -400,9 +403,8 @@ function ProjectsEmptyState({ onCreate }: { onCreate: () => void }) {
 
 /* ─────────────────────────── New project modal ─────────────────────────── */
 
-function NewProjectModal({ onClose, onCreate }: { onClose: () => void; onCreate: (name: string, focal: string) => void }) {
+function NewProjectModal({ onClose, onCreate }: { onClose: () => void; onCreate: (name: string) => void }) {
   const [name, setName] = React.useState("");
-  const [focal, setFocal] = React.useState("");
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -446,25 +448,22 @@ function NewProjectModal({ onClose, onCreate }: { onClose: () => void; onCreate:
 
         <h2 className="text-[19px] font-semibold tracking-[-0.01em] text-brand-dark">New project</h2>
         <div className="mb-[18px] mt-1 text-[13px] text-muted-foreground">
-          Name it and (optionally) set a starting focal question — you can refine both later.
+          Name it — you&apos;ll set the focal question, time horizon, and industry next.
         </div>
 
-        <label className="mb-3.5 block">
+        <label className="mb-5 block">
           <span className="mb-[5px] block text-xs font-medium text-brand-dark">
             Project name<span className="text-brand-orange"> *</span>
           </span>
-          <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. AI Regulation Outlook" className="w-full" />
-        </label>
-        <label className="mb-5 block">
-          <span className="mb-[5px] block text-xs font-medium text-brand-dark">
-            Focal question <span className="font-normal text-text-3">· optional</span>
-          </span>
-          <Textarea
-            rows={3}
-            value={focal}
-            onChange={(e) => setFocal(e.target.value)}
-            placeholder="The strategic decision you're trying to make..."
-            className="min-h-[72px] w-full"
+          <Input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && canSubmit) onCreate(name);
+            }}
+            placeholder="e.g. AI Regulation Outlook"
+            className="w-full"
           />
         </label>
 
@@ -472,7 +471,7 @@ function NewProjectModal({ onClose, onCreate }: { onClose: () => void; onCreate:
           <button onClick={onClose} className="border-0 bg-transparent px-1.5 py-2 text-[13.5px] font-medium text-muted-foreground">
             Cancel
           </button>
-          <Button variant="primary" size="sm" disabled={!canSubmit} onClick={() => onCreate(name, focal)}>
+          <Button variant="primary" size="sm" disabled={!canSubmit} onClick={() => onCreate(name)}>
             Create project
           </Button>
         </div>

@@ -18,7 +18,6 @@ import { getInsight, type InsightRow } from "@/lib/actions/insights";
 import { getSource } from "@/lib/actions/sources";
 import { suggestSignalCategory } from "@/lib/actions/ai-signals";
 import {
-  runMacroTrendSweep,
   listResearchSuggestions,
   confirmResearchSuggestion,
   dismissResearchSuggestion,
@@ -106,14 +105,14 @@ export function PageSignals() {
   const [form, setForm] = React.useState<NewSignalForm>(EMPTY_FORM);
   const [formError, setFormError] = React.useState<string | null>(null);
   const [submitting, setSubmitting] = React.useState(false);
+  // "Suggest signals" and "Scan for driving forces (web)" now live in the Ask AI panel
+  // (ask-ai.tsx's context="signals" TASKS) rather than this toolbar — see
+  // SCHWARTZ_METHODOLOGY_SKILL.md's research-mode policy for why the scan itself stages
+  // unconfirmed research_suggestions rather than writing signals directly. This page still owns
+  // reviewing/confirming what it finds; researchSuggestions is refreshed via the
+  // fm:signals-updated listener below whenever Ask AI runs that scan.
   const [suggesting, setSuggesting] = React.useState(false);
   const [suggestResult, setSuggestResult] = React.useState<string | null>(null);
-  // Step 3 exploratory research (SCHWARTZ_METHODOLOGY_SKILL.md's research-mode policy) — a
-  // live web sweep for STEEP driving forces, staged as unconfirmed research_suggestions,
-  // never auto-inserted as signals. researchSuggestions holds only status:'suggested' rows;
-  // Confirm/Dismiss below is the required confirm-before-merge step.
-  const [sweeping, setSweeping] = React.useState(false);
-  const [sweepResult, setSweepResult] = React.useState<string | null>(null);
   const [researchSuggestions, setResearchSuggestions] = React.useState<ResearchSuggestionRow[]>([]);
   const [workingSuggestionId, setWorkingSuggestionId] = React.useState<string | null>(null);
   const [addingToMatrixId, setAddingToMatrixId] = React.useState<string | null>(null);
@@ -342,25 +341,18 @@ export function PageSignals() {
     refreshResearchSuggestions();
   }, [refreshResearchSuggestions]);
 
-  const onScanDrivingForces = async () => {
+  // Resync when Ask AI's "Scan for driving forces (web)" task (ask-ai.tsx's context="signals")
+  // writes new research_suggestions, same lightweight cross-component convention
+  // page-settings.tsx's/page-knowledge.tsx's fm:*-updated listeners already use.
+  React.useEffect(() => {
     if (!store.activeProjectId) return;
-    setSweeping(true);
-    setSweepResult(null);
-    try {
-      const result = await runMacroTrendSweep(store.activeProjectId);
-      setSweepResult(
-        result.sufficientEvidence
-          ? `Found ${result.suggestionsCreated} driving force(s) to review below.`
-          : result.gap || "No new driving forces found."
-      );
-      await refreshResearchSuggestions();
-    } catch (err) {
-      console.error("[signals] macro trend sweep failed", err);
-      setSweepResult("Couldn't run that scan right now — try again in a moment.");
-    } finally {
-      setSweeping(false);
-    }
-  };
+    const onUpdated = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.projectId === store.activeProjectId) refreshResearchSuggestions();
+    };
+    window.addEventListener("fm:signals-updated", onUpdated);
+    return () => window.removeEventListener("fm:signals-updated", onUpdated);
+  }, [store.activeProjectId, refreshResearchSuggestions]);
 
   const onConfirmResearchSuggestion = async (id: string) => {
     if (!store.activeProjectId) return;
@@ -385,26 +377,6 @@ export function PageSignals() {
       console.error("[signals] failed to dismiss research suggestion", err);
     } finally {
       setWorkingSuggestionId(null);
-    }
-  };
-
-  const onSuggestSignals = async () => {
-    if (!store.activeProjectId) return;
-    setSuggesting(true);
-    setSuggestResult(null);
-    try {
-      const suggestion = await store.suggestSignals(store.activeProjectId);
-      if (suggestion.created === 0) {
-        setSuggestResult("No new signals to suggest right now.");
-      } else {
-        const scoring = await store.scoreUnscoredSignals(store.activeProjectId);
-        setSuggestResult(`Suggested ${suggestion.created} signal(s), scored ${scoring.scored}.`);
-      }
-    } catch (err) {
-      console.error("[signals] suggestion failed", err);
-      setSuggestResult("Couldn't suggest signals right now — try again in a moment.");
-    } finally {
-      setSuggesting(false);
     }
   };
 
@@ -460,10 +432,12 @@ export function PageSignals() {
             </div>
           </div>
           <div className="flex gap-2">
+            {/* Trigger always shows the static "Sort" label (matches the handoff design) — the
+                dropdown itself keeps its full 4-mode behavior via sortMode/onSortChange. */}
             <Select value={sortMode} onValueChange={onSortChange}>
               <SelectTrigger className="h-8 w-auto gap-1.5 border-border px-2.5 text-xs">
                 <Icons.Filter size={12} />
-                <SelectValue />
+                Sort
               </SelectTrigger>
               <SelectContent>
                 {SORT_OPTIONS.map((o) => (
@@ -473,17 +447,6 @@ export function PageSignals() {
                 ))}
               </SelectContent>
             </Select>
-            <Button
-              variant="soft"
-              size="sm"
-              onClick={onSuggestSignals}
-              disabled={suggesting || !store.activeProjectId}
-            >
-              <Icons.Sparkle size={12} /> {suggesting ? "Suggesting…" : "Suggest signals"}
-            </Button>
-            <Button variant="ghost" size="sm" onClick={onScanDrivingForces} disabled={sweeping || !store.activeProjectId}>
-              <Icons.Sparkle size={12} /> {sweeping ? "Scanning…" : "Scan for driving forces (web)"}
-            </Button>
             <Button variant="primary" size="sm" onClick={() => setAddOpen(true)}>
               <Icons.Plus size={12} /> Add Signal
             </Button>
@@ -493,12 +456,6 @@ export function PageSignals() {
         {suggestResult && (
           <div className="mb-3.5 rounded-[10px] border border-border bg-[#F9FAFB] px-3 py-2 text-xs text-muted-foreground">
             {suggestResult}
-          </div>
-        )}
-
-        {sweepResult && (
-          <div className="mb-3.5 rounded-[10px] border border-border bg-[#F9FAFB] px-3 py-2 text-xs text-muted-foreground">
-            {sweepResult}
           </div>
         )}
 
@@ -569,58 +526,15 @@ export function PageSignals() {
         )}
         <div className="grid grid-cols-3 gap-3">
           {sortedFiltered.map((s) => (
-            <div
+            <SignalCard
               key={s.id}
-              onClick={() => setSelected(s)}
-              className="flex cursor-pointer flex-col gap-2 rounded-[10px] border border-border bg-white p-3.5 transition-[border,transform] duration-[120ms] hover:border-border-strong"
-            >
-              <div className="flex items-center justify-between">
-                <Chip category={s.category} />
-                <span className="font-mono text-[10.5px] text-text-3">{s.source}</span>
-              </div>
-              <div className="text-sm font-semibold leading-[1.3] tracking-[-0.01em] text-brand-dark">{s.title}</div>
-              <div className="flex-1 text-[12.5px] leading-[1.5] text-muted-foreground">{s.body}</div>
-              {s.impact != null && s.uncertainty != null ? (
-                <div className="mt-1 flex items-center gap-2">
-                  <span className="font-mono text-[11px] text-text-3">IMPACT</span>
-                  <Stars value={s.impact} size={11} />
-                  <span className={cn("ml-auto", BADGE_BASE, uncertaintyBadge(s.uncertainty))}>{s.uncertainty}</span>
-                </div>
-              ) : (
-                <div className="mt-1 flex items-center">
-                  <span className={cn(BADGE_BASE, "bg-[#F3F4F6] text-[#4B5563]")}>Not yet scored</span>
-                </div>
-              )}
-              <div className="mt-1 flex items-center gap-1.5">
-                <Button
-                  variant="soft"
-                  size="sm"
-                  className="flex-1"
-                  disabled={addingToMatrixId === s.id}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onAddToMatrix(s);
-                  }}
-                >
-                  {addingToMatrixId === s.id ? "Adding…" : "+ Add to Matrix"}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="p-1.5"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDeleteSignal(s.id);
-                  }}
-                  aria-label={`Delete ${s.title}`}
-                >
-                  <Icons.Trash size={14} />
-                </Button>
-              </div>
-              {addToMatrixError && addToMatrixError.id === s.id && (
-                <div className="text-[11px] text-[#DC2626]">{addToMatrixError.message}</div>
-              )}
-            </div>
+              s={s}
+              onOpen={() => setSelected(s)}
+              onAddToMatrix={() => onAddToMatrix(s)}
+              addingToMatrix={addingToMatrixId === s.id}
+              addToMatrixError={addToMatrixError && addToMatrixError.id === s.id ? addToMatrixError.message : null}
+              onDelete={() => onDeleteSignal(s.id)}
+            />
           ))}
         </div>
       </div>
@@ -1012,6 +926,107 @@ export function PageSignals() {
           </DialogContent>
         )}
       </Dialog>
+    </div>
+  );
+}
+
+/* ─────────────────────────── Signal card ─────────────────────────── */
+// Kebab menu (Icons.MoreH → "Delete") matches the handoff mockup's decorative "..." affordance
+// (design/handoff/2026-07-24/.../page-signals.jsx) — same open/close-on-outside-click pattern
+// as page-projects.tsx's ProjectCard menu. Same immediate-delete behavior as before, just
+// relocated behind the menu instead of an always-visible trash icon.
+function SignalCard({
+  s,
+  onOpen,
+  onAddToMatrix,
+  addingToMatrix,
+  addToMatrixError,
+  onDelete,
+}: {
+  s: Signal;
+  onOpen: () => void;
+  onAddToMatrix: () => void;
+  addingToMatrix: boolean;
+  addToMatrixError: string | null;
+  onDelete: () => void;
+}) {
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const menuRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [menuOpen]);
+
+  return (
+    <div
+      onClick={onOpen}
+      className="flex cursor-pointer flex-col gap-2 rounded-[10px] border border-border bg-white p-3.5 transition-[border,transform] duration-[120ms] hover:border-border-strong"
+    >
+      <div className="flex items-center justify-between">
+        <Chip category={s.category} />
+        <span className="font-mono text-[10.5px] text-text-3">{s.source}</span>
+      </div>
+      <div className="text-sm font-semibold leading-[1.3] tracking-[-0.01em] text-brand-dark">{s.title}</div>
+      <div className="flex-1 text-[12.5px] leading-[1.5] text-muted-foreground">{s.body}</div>
+      {s.impact != null && s.uncertainty != null ? (
+        <div className="mt-1 flex items-center gap-2">
+          <span className="font-mono text-[11px] text-text-3">IMPACT</span>
+          <Stars value={s.impact} size={11} />
+          <span className={cn("ml-auto", BADGE_BASE, uncertaintyBadge(s.uncertainty))}>{s.uncertainty}</span>
+        </div>
+      ) : (
+        <div className="mt-1 flex items-center">
+          <span className={cn(BADGE_BASE, "bg-[#F3F4F6] text-[#4B5563]")}>Not yet scored</span>
+        </div>
+      )}
+      <div className="mt-1 flex items-center gap-1.5">
+        <Button
+          variant="soft"
+          size="sm"
+          className="flex-1"
+          disabled={addingToMatrix}
+          onClick={(e) => {
+            e.stopPropagation();
+            onAddToMatrix();
+          }}
+        >
+          {addingToMatrix ? "Adding…" : "+ Add to Matrix"}
+        </Button>
+        <div ref={menuRef} className="relative flex-shrink-0">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen((o) => !o);
+            }}
+            aria-label={`More options for ${s.title}`}
+            className="flex h-8 w-8 items-center justify-center rounded-md border-0 bg-transparent text-text-3 hover:bg-[#F5F5F5] hover:text-brand-dark"
+          >
+            <Icons.MoreH size={14} />
+          </button>
+          {menuOpen && (
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="slide-up absolute right-0 top-[calc(100%+4px)] z-30 w-32 rounded-[9px] border border-border bg-white p-[5px] shadow-[0_10px_28px_rgba(15,23,42,0.12)]"
+            >
+              <button
+                onClick={() => {
+                  setMenuOpen(false);
+                  onDelete();
+                }}
+                className="w-full rounded-md border-0 bg-transparent px-[9px] py-[7px] text-left text-[12.5px] text-[#EF4444] hover:bg-[#FEF2F2]"
+              >
+                Delete
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+      {addToMatrixError && <div className="text-[11px] text-[#DC2626]">{addToMatrixError}</div>}
     </div>
   );
 }

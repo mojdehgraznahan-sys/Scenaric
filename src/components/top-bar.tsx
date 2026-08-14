@@ -27,7 +27,7 @@ export function TopBar({ page }: { page: string }) {
   const store = useStore();
   return (
     <div className="flex h-topbar flex-shrink-0 items-center gap-3 border-b border-border bg-white px-5">
-      <div className="text-sm font-semibold tracking-[-0.01em]">{store.project.name}</div>
+      <div className="text-sm font-semibold tracking-[-0.01em]">{page === "projects" ? "Scenaric.ai" : store.project.name}</div>
       {page !== "projects" && (
         <div className="ml-2 flex items-center gap-1 font-mono text-xs text-text-3">
           <span>/</span>

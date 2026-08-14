@@ -38,9 +38,13 @@ export async function getNextGate(projectId: string, stepsComplete: number): Pro
 
   switch (term) {
     case 1: {
-      const { data, error } = await supabase.from("projects").select("refined_focal_question").eq("id", projectId).single();
+      // Same effective-value check compute_steps_complete() uses (0032_step1_gate_effective_
+      // focal_question.sql) — refined_focal_question if set, else the plain typed-and-saved
+      // focal_question — so this card/Ask AI answer never disagrees with the Home tile.
+      const { data, error } = await supabase.from("projects").select("focal_question, refined_focal_question").eq("id", projectId).single();
       if (error) throw error;
-      return { term, label: STEP_LABELS[0], route: STEP_ROUTES[0], current: data.refined_focal_question ? 1 : 0, required: 1 };
+      const hasFocalQuestion = !!(data.refined_focal_question?.trim() || data.focal_question?.trim());
+      return { term, label: STEP_LABELS[0], route: STEP_ROUTES[0], current: hasFocalQuestion ? 1 : 0, required: 1 };
     }
     case 2: {
       const { count, error } = await supabase.from("insights").select("id", { count: "exact", head: true }).eq("project_id", projectId);

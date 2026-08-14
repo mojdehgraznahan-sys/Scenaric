@@ -118,8 +118,17 @@ export interface RunScanResult {
   suggestionsCreated: number;
 }
 
+export interface RunScanOptions {
+  /** Steers (never restricts) this one call toward a specific angle — e.g. "competitors only,
+   *  emphasize recent moves" — without changing the output schema or actor_type/category enum.
+   *  Same spirit as ai-news-feed.ts's focusTopics param. Omitted by default; every existing
+   *  caller (this page's generic scan buttons, Signals' "Scan for driving forces") is
+   *  unaffected. */
+  focus?: string;
+}
+
 // Step 2 — Key forces. "Scan for local actors (web)" on the Knowledge Base page.
-export async function runLocalForceScan(projectId: string): Promise<RunScanResult> {
+export async function runLocalForceScan(projectId: string, options: RunScanOptions = {}): Promise<RunScanResult> {
   const supabase = createClient();
 
   const { data: project, error: projectError } = await supabase
@@ -141,7 +150,7 @@ export async function runLocalForceScan(projectId: string): Promise<RunScanResul
     output = await runStructured({
       step: "signals.local_force_scan",
       projectId,
-      taskPrompt: LOCAL_FORCE_SCAN_TASK_PROMPT,
+      taskPrompt: options.focus ? `${LOCAL_FORCE_SCAN_TASK_PROMPT}\n\nFOCUS (this call only): ${options.focus}` : LOCAL_FORCE_SCAN_TASK_PROMPT,
       input: {
         focal_question: project.refined_focal_question ?? project.focal_question,
         industry: project.industry,
@@ -184,7 +193,7 @@ export async function runLocalForceScan(projectId: string): Promise<RunScanResul
 }
 
 // Step 3 — Driving forces. "Scan for driving forces (web)" on the Signals Library page.
-export async function runMacroTrendSweep(projectId: string): Promise<RunScanResult> {
+export async function runMacroTrendSweep(projectId: string, options: RunScanOptions = {}): Promise<RunScanResult> {
   const supabase = createClient();
 
   const { data: project, error: projectError } = await supabase
@@ -202,7 +211,7 @@ export async function runMacroTrendSweep(projectId: string): Promise<RunScanResu
     output = await runStructured({
       step: "signals.macro_trend_sweep",
       projectId,
-      taskPrompt: MACRO_TREND_SWEEP_TASK_PROMPT,
+      taskPrompt: options.focus ? `${MACRO_TREND_SWEEP_TASK_PROMPT}\n\nFOCUS (this call only): ${options.focus}` : MACRO_TREND_SWEEP_TASK_PROMPT,
       input: {
         focal_question: project.refined_focal_question ?? project.focal_question,
         industry: project.industry,

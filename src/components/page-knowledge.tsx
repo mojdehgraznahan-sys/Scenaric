@@ -25,14 +25,7 @@ import {
 import { listInsights, deleteInsight, type InsightRow } from "@/lib/actions/insights";
 import { listInterviews, createInterview, type InterviewRow, type SteepTag } from "@/lib/actions/interviews";
 import { extractInsightsForProject } from "@/lib/actions/ai-insights";
-import { pullNewsFeed } from "@/lib/actions/ai-news-feed";
-import {
-  runLocalForceScan,
-  listResearchSuggestions,
-  confirmResearchSuggestion,
-  dismissResearchSuggestion,
-  type ResearchSuggestionRow,
-} from "@/lib/actions/ai-research-suggestions";
+import { listResearchSuggestions, confirmResearchSuggestion, dismissResearchSuggestion, type ResearchSuggestionRow } from "@/lib/actions/ai-research-suggestions";
 import { researchIndustry } from "@/lib/actions/ai-research-industry";
 
 const TYPE_OPTIONS = [
@@ -90,14 +83,13 @@ export function PageKnowledge() {
   const [uploadError, setUploadError] = React.useState<string | null>(null);
   const [extracting, setExtracting] = React.useState(false);
   const [extractResult, setExtractResult] = React.useState<string | null>(null);
-  const [pullingNews, setPullingNews] = React.useState(false);
-  const [newsResult, setNewsResult] = React.useState<string | null>(null);
   // Step 2 exploratory research (SCHWARTZ_METHODOLOGY_SKILL.md's research-mode policy) — a
   // live web scan for local actors, staged as unconfirmed research_suggestions, never
   // auto-inserted as insights. suggestions holds only status:'suggested' rows; Confirm/Dismiss
-  // below is the required confirm-before-merge step.
-  const [scanning, setScanning] = React.useState(false);
-  const [scanResult, setScanResult] = React.useState<string | null>(null);
+  // below is the required confirm-before-merge step. The scan itself (and "Pull recent news")
+  // now runs from the Ask AI panel (ask-ai.tsx's context="knowledge") rather than a toolbar
+  // button here — this page only owns reviewing/confirming what it finds, refreshed via the
+  // fm:knowledge-updated listener below.
   const [suggestions, setSuggestions] = React.useState<ResearchSuggestionRow[]>([]);
   const [workingSuggestionId, setWorkingSuggestionId] = React.useState<string | null>(null);
   // Cold-start convenience for a project with zero uploaded sources — runs the news pull and
@@ -135,6 +127,19 @@ export function PageKnowledge() {
   React.useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Resync when the Ask AI panel's Knowledge-mode tasks (scan/pull/research — ask-ai.tsx's
+  // context="knowledge") write new sources/insights/research_suggestions, same lightweight
+  // cross-component convention page-settings.tsx's fm:project-settings-updated already uses.
+  React.useEffect(() => {
+    if (!projectId) return;
+    const onUpdated = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.projectId === projectId) refresh();
+    };
+    window.addEventListener("fm:knowledge-updated", onUpdated);
+    return () => window.removeEventListener("fm:knowledge-updated", onUpdated);
+  }, [projectId, refresh]);
 
   const onFiles = async (files: FileList) => {
     if (!projectId) return;
@@ -209,49 +214,6 @@ export function PageKnowledge() {
       setExtractResult("Couldn't extract insights right now — try again in a moment.");
     } finally {
       setExtracting(false);
-    }
-  };
-
-  // News-feed connector — pulls recent, dated news relevant to the project's focal
-  // question/STEEP categories in as `web_feed` sources, then runs the same insight
-  // extraction every other source type goes through (see ai-news-feed.ts).
-  const onPullNews = async () => {
-    if (!projectId) return;
-    setPullingNews(true);
-    setNewsResult(null);
-    try {
-      const result = await pullNewsFeed(projectId);
-      if (!result.sufficientEvidence) {
-        setNewsResult(result.gap || "No relevant recent news found.");
-      } else {
-        setNewsResult(`Pulled ${result.sourcesCreated} news item(s), extracted ${result.insightsCreated} insight(s).`);
-      }
-      await refresh();
-    } catch (err) {
-      console.error("[knowledge] news feed pull failed", err);
-      setNewsResult("Couldn't pull recent news right now — try again in a moment.");
-    } finally {
-      setPullingNews(false);
-    }
-  };
-
-  const onScanLocalForces = async () => {
-    if (!projectId) return;
-    setScanning(true);
-    setScanResult(null);
-    try {
-      const result = await runLocalForceScan(projectId);
-      setScanResult(
-        result.sufficientEvidence
-          ? `Found ${result.suggestionsCreated} local actor(s) to review below.`
-          : result.gap || "No new local actors found."
-      );
-      await refresh();
-    } catch (err) {
-      console.error("[knowledge] local force scan failed", err);
-      setScanResult("Couldn't run that scan right now — try again in a moment.");
-    } finally {
-      setScanning(false);
     }
   };
 
@@ -362,12 +324,6 @@ export function PageKnowledge() {
           <div className="flex gap-2">
             <Button variant="ghost" size="sm" onClick={() => setInviteOpen(true)}>
               Invite participant
-            </Button>
-            <Button variant="ghost" size="sm" onClick={onPullNews} disabled={pullingNews || !projectId}>
-              <Icons.Radio size={12} /> {pullingNews ? "Pulling news…" : "Pull recent news"}
-            </Button>
-            <Button variant="ghost" size="sm" onClick={onScanLocalForces} disabled={scanning || !projectId}>
-              <Icons.Sparkle size={12} /> {scanning ? "Scanning…" : "Scan for local actors (web)"}
             </Button>
             <Button variant="soft" size="sm" onClick={onExtractInsights} disabled={extracting || !projectId}>
               <Icons.Sparkle size={12} /> {extracting ? "Extracting…" : "Extract insights"}
@@ -494,18 +450,6 @@ export function PageKnowledge() {
             {extractResult && (
               <div className="mt-2.5 rounded-[10px] border border-brand-orange100 bg-brand-orangeLight px-3 py-2 text-xs text-brand-orange700">
                 {extractResult}
-              </div>
-            )}
-
-            {newsResult && (
-              <div className="mt-2.5 rounded-[10px] border border-brand-orange100 bg-brand-orangeLight px-3 py-2 text-xs text-brand-orange700">
-                {newsResult}
-              </div>
-            )}
-
-            {scanResult && (
-              <div className="mt-2.5 rounded-[10px] border border-brand-orange100 bg-brand-orangeLight px-3 py-2 text-xs text-brand-orange700">
-                {scanResult}
               </div>
             )}
 

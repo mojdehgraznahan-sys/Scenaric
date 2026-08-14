@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { draftFocalQuestion, sharpenFocalQuestion, critiqueFocalQuestion } from "@/lib/actions/ai-settings-tasks";
+import { draftFocalQuestion, sharpenFocalQuestion, critiqueFocalQuestion, refreshIndustryResearch } from "@/lib/actions/ai-settings-tasks";
 import { errorResponse } from "@/lib/api/error-response";
 
 // Fixed task menu — never freeform (see ask-ai.tsx's context="settings" branch; freeform is
 // the separate /settings/chat route). Same dispatch shape as /monitoring/ask-ai.
 export const maxDuration = 120;
 
-type Task = "draft_focal_question" | "sharpen_focal_question" | "critique_focal_question";
+type Task = "draft_focal_question" | "sharpen_focal_question" | "critique_focal_question" | "refresh_industry_research";
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
   const projectId = params.id;
@@ -28,6 +28,9 @@ export async function POST(request: Request, { params }: { params: { id: string 
 
       case "critique_focal_question":
         return NextResponse.json(await critiqueFocalQuestion(projectId));
+
+      case "refresh_industry_research":
+        return NextResponse.json(await refreshIndustryResearch(projectId));
 
       default:
         return NextResponse.json({ error: `Unknown task: ${body.task}` }, { status: 400 });

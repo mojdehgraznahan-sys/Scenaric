@@ -18,6 +18,12 @@ import type { ProjectSettings } from "@/lib/actions/project-settings";
 import type { ProjectAiSettings } from "@/lib/actions/project-ai-settings";
 import type { IntegrationCard } from "@/lib/actions/project-integrations";
 import type { ProjectBilling } from "@/lib/actions/billing";
+import type {
+  SharpenFocalQuestionResult,
+  CritiqueFocalQuestionResult,
+  RefreshIndustryResearchResult,
+} from "@/lib/actions/ai-settings-tasks";
+import type { SettingsChatResult } from "@/lib/actions/ai-settings-chat";
 
 const TABS = ["Project", "Team", "AI Analyst", "Integrations", "Billing"];
 
@@ -103,7 +109,11 @@ export function PageSettings() {
       if (!res.ok) throw new Error(`Request failed (${res.status}).`);
       const data: ProjectSettings = await res.json();
       setProjectSettings(data);
-      setDraft({ name: data.name, focal_question: data.focal_question, horizon: data.horizon, industry: data.industry });
+      // The effective question — same refined-overrides-raw fallback every AI prompt in the app
+      // already uses (see project-settings.ts) — not the raw column alone, or an accepted
+      // "Use this"/draft suggestion (which writes refined_focal_question) would never visibly
+      // show up here.
+      setDraft({ name: data.name, focal_question: data.refined_focal_question ?? data.focal_question, horizon: data.horizon, industry: data.industry });
     } catch (err) {
       console.error("[settings] failed to load project settings", err);
     }
@@ -127,10 +137,15 @@ export function PageSettings() {
     return () => window.removeEventListener("fm:project-settings-updated", onUpdated);
   }, [projectId, loadProjectSettings]);
 
+  // Same effective-value baseline loadProjectSettings seeds draft from — comparing against the
+  // raw focal_question column here would misfire the moment a refined value is loaded (the
+  // dirty flag would incorrectly flip true even though nothing's actually been typed).
+  const effectiveFocalQuestion = projectSettings ? (projectSettings.refined_focal_question ?? projectSettings.focal_question) : "";
+
   const projectDirty =
     !!projectSettings &&
     (draft.name !== projectSettings.name ||
-      draft.focal_question !== projectSettings.focal_question ||
+      draft.focal_question !== effectiveFocalQuestion ||
       draft.horizon !== projectSettings.horizon ||
       draft.industry !== projectSettings.industry);
 
@@ -138,6 +153,14 @@ export function PageSettings() {
     if (!projectId) return;
     setSavingProject(true);
     try {
+      // If the user actually edited the focal question (vs. just Name/Horizon/Industry), clear
+      // any stale refined_focal_question at the same time — otherwise every AI prompt elsewhere
+      // in the app (Home, Strategy, Monitoring, ...) would keep silently preferring the old
+      // refined text over this fresh edit forever, since they all read
+      // `refined_focal_question ?? focal_question`.
+      const focalQuestionChanged = draft.focal_question !== effectiveFocalQuestion;
+      const body = focalQuestionChanged ? { ...draft, refined_focal_question: null } : draft;
+
       // Bounded timeout (same guard as sources.ts's processWebSource) — without this, a
       // stalled connection never rejects, the fetch never settles, and this button would stay
       // disabled forever with no recovery path.
@@ -148,7 +171,7 @@ export function PageSettings() {
         res = await fetch(`/api/projects/${projectId}/settings`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(draft),
+          body: JSON.stringify(body),
           signal: controller.signal,
         });
       } finally {
@@ -164,6 +187,117 @@ export function PageSettings() {
       toast(timedOut ? "Save timed out — check your connection and try again." : err instanceof Error ? err.message : "Couldn't save — try again.");
     } finally {
       setSavingProject(false);
+    }
+  };
+
+  // ---- Project tab: inline "Ask AI about this project" ----
+  // Mirrors ask-ai.tsx's context="settings" branch (same backend endpoints, same
+  // fixed-task-menu + freeform-chat shape) but rendered inline in the Project tab card per the
+  // design, rather than only reachable via the floating ⌘I drawer. Kept as its own local state
+  // block rather than sharing ask-ai.tsx's — every context in that file already keeps its own
+  // local result/chat state rather than one shared blob, so this follows the same convention.
+  type SettingsAskAiTask = "sharpen_focal_question" | "critique_focal_question" | "refresh_industry_research";
+
+  interface SettingsAskAiResultEntry {
+    task: SettingsAskAiTask;
+    ts: number;
+    ok: boolean;
+    error?: string;
+    sharpen?: SharpenFocalQuestionResult;
+    critique?: CritiqueFocalQuestionResult;
+    refresh?: RefreshIndustryResearchResult;
+    applied?: boolean;
+    appliedIndex?: number;
+  }
+
+  const ASK_AI_CHIPS: { id: SettingsAskAiTask; label: string }[] = [
+    { id: "sharpen_focal_question", label: "Sharpen my focal question" },
+    { id: "critique_focal_question", label: "Is this too broad or narrow?" },
+    { id: "refresh_industry_research", label: "Refresh industry research" },
+  ];
+
+  const [askAiResults, setAskAiResults] = React.useState<SettingsAskAiResultEntry[]>([]);
+  const [runningAskAiTask, setRunningAskAiTask] = React.useState<SettingsAskAiTask | null>(null);
+
+  const runAskAiTask = async (task: SettingsAskAiTask) => {
+    if (!projectId) return;
+    setRunningAskAiTask(task);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/settings/ask-ai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task }),
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      const data = await res.json();
+      const entry: SettingsAskAiResultEntry = { task, ts: Date.now(), ok: true };
+      if (task === "sharpen_focal_question") entry.sharpen = data as SharpenFocalQuestionResult;
+      else if (task === "critique_focal_question") entry.critique = data as CritiqueFocalQuestionResult;
+      else entry.refresh = data as RefreshIndustryResearchResult;
+      setAskAiResults((r) => [entry, ...r]);
+    } catch (err) {
+      console.error("[settings] ask-ai task failed", err);
+      setAskAiResults((r) => [{ task, ts: Date.now(), ok: false, error: "Something went wrong running that task." }, ...r]);
+    } finally {
+      setRunningAskAiTask(null);
+    }
+  };
+
+  // Fires the actual write (PATCH /settings) behind sharpen's "Use this" button, then refetches
+  // this tab's own draft AND tells the floating drawer (if open) to resync — same
+  // fm:project-settings-updated convention ask-ai.tsx's applySettingsSuggestion already uses.
+  const applyAskAiSuggestion = async (index: number, patch: { refined_focal_question: string }, appliedIndex: number) => {
+    if (!projectId) return;
+    try {
+      const res = await fetch(`/api/projects/${projectId}/settings`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      setAskAiResults((r) => r.map((entry, i) => (i === index ? { ...entry, applied: true, appliedIndex } : entry)));
+      await loadProjectSettings(projectId);
+      window.dispatchEvent(new CustomEvent("fm:project-settings-updated", { detail: { projectId } }));
+    } catch (err) {
+      console.error("[settings] failed to apply ask-ai suggestion", err);
+      toast("Couldn't apply that suggestion — try again.");
+    }
+  };
+
+  // Freeform "Ask anything…" — Send stays closed-book (askSettingsChat's default), Research is
+  // the one explicit, user-invoked exception permitted to use live web search (see
+  // SCHWARTZ_METHODOLOGY_SKILL.md's research-mode section).
+  interface SettingsChatMsg {
+    role: "ai" | "user";
+    text: string;
+    researched?: boolean;
+    webCitations?: { title: string; url: string }[];
+  }
+
+  const [chatMessages, setChatMessages] = React.useState<SettingsChatMsg[]>([]);
+  const [chatInput, setChatInput] = React.useState("");
+  const [chatThinking, setChatThinking] = React.useState<"send" | "research" | null>(null);
+
+  const sendAskAiChat = async (research: boolean) => {
+    const question = chatInput.trim();
+    if (!question || !projectId) return;
+    setChatMessages((m) => [...m, { role: "user", text: question }]);
+    setChatInput("");
+    setChatThinking(research ? "research" : "send");
+    try {
+      const res = await fetch(`/api/projects/${projectId}/settings/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question, research }),
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      const data: SettingsChatResult = await res.json();
+      setChatMessages((m) => [...m, { role: "ai", text: data.answer, researched: data.researched, webCitations: data.webCitations }]);
+    } catch (err) {
+      console.error("[settings] ask-ai chat failed", err);
+      setChatMessages((m) => [...m, { role: "ai", text: "Something went wrong answering that — try again." }]);
+    } finally {
+      setChatThinking(null);
     }
   };
 
@@ -354,6 +488,137 @@ export function PageSettings() {
                   {savingProject ? "Saving…" : "Save changes"}
                 </Button>
               </div>
+
+              <div className="border-t border-[#F3F4F6] py-4">
+                <div className="mb-3 flex items-center gap-1.5 text-[13.5px] font-semibold">
+                  <Icons.Sparkle size={14} stroke="#F97316" />
+                  Ask AI about this project
+                </div>
+
+                <div className="mb-3 flex flex-wrap gap-1.5">
+                  {ASK_AI_CHIPS.map((chip) => (
+                    <Button
+                      key={chip.id}
+                      variant="soft"
+                      size="sm"
+                      disabled={!!runningAskAiTask || !projectId}
+                      onClick={() => runAskAiTask(chip.id)}
+                    >
+                      {runningAskAiTask === chip.id ? "Running…" : chip.label}
+                    </Button>
+                  ))}
+                </div>
+
+                {askAiResults.length > 0 && (
+                  <div className="mb-3 flex flex-col gap-2">
+                    {askAiResults.map((r, i) => {
+                      const label = ASK_AI_CHIPS.find((c) => c.id === r.task)?.label ?? r.task;
+                      return (
+                        <div key={i} className="rounded-[10px] border border-border bg-bg p-3 text-brand-dark">
+                          <div className="mb-1.5 flex items-center justify-between gap-2">
+                            <span className="text-[12.5px] font-semibold">{label}</span>
+                            <span className="font-mono text-[10px] text-text-3">{new Date(r.ts).toLocaleTimeString()}</span>
+                          </div>
+                          {!r.ok && <div className="text-[12.5px] text-[#EF4444]">{r.error}</div>}
+
+                          {r.ok && r.sharpen && (
+                            <ul className="m-0 flex list-none flex-col gap-2 p-0 text-[12.5px] leading-[1.5]">
+                              {r.sharpen.alternatives.map((alt, j) => (
+                                <li key={j} className="rounded-[8px] border border-border bg-white p-2.5">
+                                  <div className="mb-1 font-medium">{alt.refinedQuestion}</div>
+                                  <p className="m-0 mb-2 text-muted-foreground">{alt.rationale}</p>
+                                  <Button
+                                    variant={r.applied && r.appliedIndex === j ? "ghost" : "soft"}
+                                    size="sm"
+                                    className="w-full"
+                                    disabled={r.applied}
+                                    onClick={() => applyAskAiSuggestion(i, { refined_focal_question: alt.refinedQuestion }, j)}
+                                  >
+                                    {r.applied && r.appliedIndex === j ? "Applied ✓" : "Use this"}
+                                  </Button>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+
+                          {r.ok && r.critique && (
+                            <div className="text-[12.5px] leading-[1.5]">
+                              <div className="mb-1 font-mono text-[10.5px] uppercase tracking-[0.04em] text-brand-orange">
+                                {r.critique.verdict.replace("_", " ")}
+                              </div>
+                              <p className="m-0 text-muted-foreground">{r.critique.rationale}</p>
+                            </div>
+                          )}
+
+                          {r.ok && r.refresh && <p className="m-0 text-[12.5px] leading-[1.5] text-muted-foreground">{r.refresh.summary}</p>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {chatMessages.length > 0 && (
+                  <div className="mb-2 flex max-h-[240px] flex-col gap-2 overflow-y-auto">
+                    {chatMessages.map((m, i) => (
+                      <div
+                        key={i}
+                        className={cn(
+                          "max-w-[90%] whitespace-pre-wrap rounded-xl px-3 py-2 text-[12.5px] leading-[1.5]",
+                          m.role === "ai" ? "self-start bg-bg text-brand-dark" : "self-end bg-brand-orange text-white"
+                        )}
+                      >
+                        {m.text}
+                        {m.researched && (
+                          <div className="mt-2 rounded-[8px] border border-[#BFDBFE] bg-[#EFF6FF] px-2.5 py-1.5 text-[11.5px] leading-[1.5] text-[#1D4ED8]">
+                            <span className="font-semibold uppercase tracking-[0.04em]">🌐 Live research — verify independently</span>
+                            {m.webCitations && m.webCitations.length > 0 && (
+                              <ul className="m-0 mt-1 flex list-none flex-col gap-0.5 p-0">
+                                {m.webCitations.map((c, j) => (
+                                  <li key={j} className="truncate">
+                                    — {c.title}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {chatThinking && (
+                      <div className="flex items-center gap-1.5 self-start rounded-xl bg-bg px-3 py-2">
+                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-text-3" />
+                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-text-3" />
+                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-text-3" />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") sendAskAiChat(false);
+                    }}
+                    placeholder="Ask anything about this project…"
+                    className="flex-1"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    title="Ask with live web research — answer will be badged as unverified external content"
+                    disabled={!chatInput.trim() || !!chatThinking}
+                    onClick={() => sendAskAiChat(true)}
+                  >
+                    <Icons.Search size={12} />
+                  </Button>
+                  <Button variant="primary" size="sm" disabled={!chatInput.trim() || !!chatThinking} onClick={() => sendAskAiChat(false)}>
+                    Send
+                  </Button>
+                </div>
+              </div>
+
               <div className="flex justify-between border-t border-[#F3F4F6] py-4">
                 <div>
                   <div className="text-[13px] font-medium text-[#EF4444]">Reset prototype</div>

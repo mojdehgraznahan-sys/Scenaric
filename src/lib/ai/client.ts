@@ -31,6 +31,11 @@ export const RESEARCH_MODE_ALLOWED_STEPS: readonly string[] = [
   "grounding.generate", // Signpost (ai-grounding.ts) — a deliberate carve-out: live-web-cited
   // early-warning indicators, treated as step-8-adjacent rather than narrative/storyline
   // generation proper, which stays closed-book everywhere else
+  "settings.research_chat", // Settings "Ask AI" freeform box's explicit, user-invoked "Research"
+  // send action (ai-settings-chat.ts's askSettingsChat with research:true) — NOT a general
+  // loosening of Step 1's closed-book rule. Only fires when the user clicks "Research" instead
+  // of "Send" for that one message; the default "Send" path (step "settings.chat") stays
+  // closed-book exactly as before. See SCHWARTZ_METHODOLOGY_SKILL.md's research-mode section.
 ];
 
 // §3 — reused verbatim by every AI call in every step below. Sent as a cached system

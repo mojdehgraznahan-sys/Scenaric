@@ -96,3 +96,14 @@ Rules that apply wherever research is allowed (steps 2, 3, 8):
 - Steps 2/3 suggestions require explicit user confirmation before becoming a signal/insight.
 - Step 8's ingestion job may update indicator status automatically, but every status change must cite the specific news item that triggered it (grounded_in on the reading row) — never an ungrounded model judgment.
 - Research calls never happen inside steps 4-7 or Strategic Options, even opportunistically — if a feature request implies fetching live data inside one of those steps, flag it per the "when uncertain" checklist below rather than building it.
+
+**One narrow, explicit exception:** Settings' "Ask AI about this project" freeform box has a
+separate **"Research"** send action (distinct from its default "Send") that the user must
+deliberately click — it's the only way Step 1 reasoning ever touches live web search
+(`settings.research_chat` on `RESEARCH_MODE_ALLOWED_STEPS`, `askSettingsChat({ research: true })`
+in `ai-settings-tasks.ts`/`ai-settings-chat.ts`). It answers one-off competitive/regulatory/
+geopolitical/tariff/market questions and badges the answer as live-researched, unverified
+content — it does not change the default closed-book "Send" path, and it is not itself a Step 1
+generation prompt (it never drafts/sharpens/critiques the focal question). Don't treat this as
+precedent for adding research to any other closed-book step without the same explicit,
+user-invoked, clearly-labeled shape.
