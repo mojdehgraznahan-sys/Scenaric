@@ -664,10 +664,12 @@ export interface Database {
           project_id: string;
           source_id: string | null;
           participant_name: string;
+          participant_email: string | null;
           role: string | null;
           transcript: string | null;
           tag: "Social" | "Technology" | "Economic" | "Ecological" | "Political" | null;
           key_quote: string | null;
+          invited_at: string | null;
           created_at: string;
         };
         Insert: {
@@ -675,10 +677,12 @@ export interface Database {
           project_id: string;
           source_id?: string | null;
           participant_name: string;
+          participant_email?: string | null;
           role?: string | null;
           transcript?: string | null;
           tag?: "Social" | "Technology" | "Economic" | "Ecological" | "Political" | null;
           key_quote?: string | null;
+          invited_at?: string | null;
           created_at?: string;
         };
         Update: {
@@ -686,10 +690,12 @@ export interface Database {
           project_id?: string;
           source_id?: string | null;
           participant_name?: string;
+          participant_email?: string | null;
           role?: string | null;
           transcript?: string | null;
           tag?: "Social" | "Technology" | "Economic" | "Ecological" | "Political" | null;
           key_quote?: string | null;
+          invited_at?: string | null;
           created_at?: string;
         };
         Relationships: [];

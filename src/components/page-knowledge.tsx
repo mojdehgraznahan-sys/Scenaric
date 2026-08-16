@@ -23,7 +23,7 @@ import {
   type SourceType,
 } from "@/lib/actions/sources";
 import { listInsights, deleteInsight, type InsightRow } from "@/lib/actions/insights";
-import { listInterviews, createInterview, type InterviewRow, type SteepTag } from "@/lib/actions/interviews";
+import { listInterviews, inviteParticipant, type InterviewRow, type SteepTag } from "@/lib/actions/interviews";
 import { extractInsightsForProject } from "@/lib/actions/ai-insights";
 import { listResearchSuggestions, confirmResearchSuggestion, dismissResearchSuggestion, type ResearchSuggestionRow } from "@/lib/actions/ai-research-suggestions";
 import { researchIndustry } from "@/lib/actions/ai-research-industry";
@@ -65,13 +65,20 @@ function progressBarClass(status: SourceRow["status"]) {
 
 interface InviteForm {
   participantName: string;
+  participantEmail: string;
   role: string;
   tag: SteepTag | "";
   keyQuote: string;
   sourceId: string;
 }
 
-const EMPTY_INVITE_FORM: InviteForm = { participantName: "", role: "", tag: "", keyQuote: "", sourceId: "" };
+const EMPTY_INVITE_FORM: InviteForm = { participantName: "", participantEmail: "", role: "", tag: "", keyQuote: "", sourceId: "" };
+
+// Same window-global toast convention page-settings.tsx/page-monitoring.tsx already use
+// (GlobalToast in app-shell.tsx).
+interface FmWindow extends Window {
+  FM_toast?: (opts: { message: string; actionText?: string; action?: string; duration?: number }) => void;
+}
 
 export function PageKnowledge() {
   const store = useStore();
@@ -276,6 +283,10 @@ export function PageKnowledge() {
       setInviteError("Participant name is required.");
       return;
     }
+    if (!inviteForm.participantEmail.trim()) {
+      setInviteError("Participant email is required to send an invite.");
+      return;
+    }
     if (!projectId) {
       setInviteError("No active project.");
       return;
@@ -283,9 +294,10 @@ export function PageKnowledge() {
     setInviteSubmitting(true);
     setInviteError(null);
     try {
-      await createInterview({
+      const result = await inviteParticipant({
         projectId,
         participantName: inviteForm.participantName.trim(),
+        participantEmail: inviteForm.participantEmail.trim(),
         role: inviteForm.role.trim() || null,
         tag: inviteForm.tag || null,
         keyQuote: inviteForm.keyQuote.trim() || null,
@@ -294,8 +306,17 @@ export function PageKnowledge() {
       setInviteOpen(false);
       setInviteForm(EMPTY_INVITE_FORM);
       await refresh();
+      const w = window as FmWindow;
+      if (w.FM_toast) {
+        w.FM_toast(
+          result.emailSent
+            ? { message: `Invite sent to ${result.interview.participant_email}` }
+            : { message: "Saved — but the invite email failed to send.", duration: 6000 }
+        );
+      }
+      if (!result.emailSent) console.error("[knowledge] invite email failed", result.emailError);
     } catch (err) {
-      console.error("[knowledge] failed to log interview", err);
+      console.error("[knowledge] failed to invite participant", err);
       setInviteError("Couldn't save that — try again.");
     } finally {
       setInviteSubmitting(false);
@@ -652,6 +673,18 @@ export function PageKnowledge() {
                 placeholder="e.g. Jan Oosterom"
               />
             </div>
+            <div>
+              <Label htmlFor="participant-email" className="mb-1.5 block text-xs">
+                Email
+              </Label>
+              <Input
+                id="participant-email"
+                type="email"
+                value={inviteForm.participantEmail}
+                onChange={(e) => setInviteForm((f) => ({ ...f, participantEmail: e.target.value }))}
+                placeholder="e.g. jan@example.com"
+              />
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label htmlFor="participant-role" className="mb-1.5 block text-xs">
@@ -718,7 +751,7 @@ export function PageKnowledge() {
             )}
             <div className="mt-1 flex gap-2">
               <Button variant="primary" className="flex-1" onClick={onSubmitInvite} disabled={inviteSubmitting}>
-                {inviteSubmitting ? "Saving…" : "Save participant"}
+                {inviteSubmitting ? "Sending…" : "Send invite"}
               </Button>
               <Button variant="ghost" onClick={() => setInviteOpen(false)}>
                 Cancel
