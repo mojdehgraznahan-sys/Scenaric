@@ -350,6 +350,22 @@ export function PageMatrix({ navigate }: { navigate: Navigate }) {
 
   const selectedDot = dots.find((d) => d.id === selectedId);
   const selectedSignal = selectedDot ? store.signals.find((s) => s.id === selectedDot.sigId) : null;
+
+  // Ask AI drawer (ask-ai.tsx, context="matrix") lives in AppShell, a sibling of this page's
+  // content — this is how it learns the currently-selected dot and top axis pair, same
+  // convention Storyline/Monitoring already use for their own *AskAiContext slots.
+  React.useEffect(() => {
+    store.setMatrixAskAiContext({
+      selectedDot: selectedSignal && selectedDot ? { signalId: selectedSignal.id, title: selectedSignal.title, bucket: selectedDot.bucket } : null,
+      topAxisPair: critical.map((id) => {
+        const s = store.signals.find((sig) => sig.id === id);
+        const d = dots.find((x) => x.sigId === id);
+        return { signalId: id, title: (s && s.title) || (d && d.label) || id };
+      }),
+      axesLocked,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSignal?.id, selectedDot?.bucket, critical.join(), axesLocked]);
   const [reaxisOpen, setReaxisOpen] = React.useState(false);
   const [buildOpen, setBuildOpen] = React.useState(false);
   const hasScenarios = (store.scenarios || []).some((s) => !s.archived);

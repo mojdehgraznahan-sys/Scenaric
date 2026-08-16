@@ -44,6 +44,8 @@ import type {
 } from "@/lib/actions/ai-settings-tasks";
 import type { SettingsChatResult } from "@/lib/actions/ai-settings-chat";
 import type { KnowledgeChatResult } from "@/lib/actions/ai-knowledge-chat";
+import type { ExplainDotResult, CoverageGapsResult, AlternateAxisPairResult, BucketSummaryResult } from "@/lib/actions/ai-matrix-tasks";
+import type { IndependenceResult } from "@/lib/actions/ai-matrix";
 
 interface ChatMsg {
   role: "ai" | "user";
@@ -210,6 +212,53 @@ const SIGNALS_TASKS: { id: SignalsTaskId; label: string }[] = [
 // already uses — no per-task result union needed.
 interface SignalsResultEntry {
   task: SignalsTaskId;
+  ts: number;
+  ok: boolean;
+  error?: string;
+  summary?: string;
+}
+
+// Matrix mode — fixed task menu, never freeform, same shape as Storyline/Narrative (no
+// ScenarioChatPanel): Step 4 (Rank forces) is closed-book, and you asked for 6 canned prompts,
+// not a chat. "explain_dot" and "check_independence" need page context (store.matrixAskAiContext,
+// see needsDot/needsAxisPair below); the other four need only store.activeProjectId.
+type MatrixTaskId = "explain_dot" | "check_independence" | "coverage_gaps" | "alternate_axis_pair" | "predetermined_elements" | "wildcards";
+
+const MATRIX_TASKS: { id: MatrixTaskId; label: string; needsDot: boolean; needsAxisPair: boolean }[] = [
+  { id: "explain_dot", label: "Why is this signal a critical uncertainty?", needsDot: true, needsAxisPair: false },
+  { id: "check_independence", label: "Are my two selected axes truly independent?", needsDot: false, needsAxisPair: true },
+  { id: "coverage_gaps", label: "What am I missing?", needsDot: false, needsAxisPair: false },
+  { id: "alternate_axis_pair", label: "Suggest an alternate axis pair", needsDot: false, needsAxisPair: false },
+  { id: "predetermined_elements", label: "Explain the predetermined elements", needsDot: false, needsAxisPair: false },
+  { id: "wildcards", label: "Any wildcards I should know about?", needsDot: false, needsAxisPair: false },
+];
+
+interface MatrixResultEntry {
+  task: MatrixTaskId;
+  ts: number;
+  ok: boolean;
+  error?: string;
+  dotExplanation?: ExplainDotResult;
+  independence?: IndependenceResult;
+  coverageGaps?: CoverageGapsResult;
+  alternatePair?: AlternateAxisPairResult;
+  bucketSummary?: BucketSummaryResult;
+}
+
+// Canvas mode — fixed task menu, never freeform, same no-chat shape as Storyline/Narrative/
+// Matrix. All 3 tasks are project-wide (no per-scenario selection context needed).
+type CanvasTaskId = "predetermined_elements" | "weakest_storyline" | "summarize_all";
+
+const CANVAS_TASKS: { id: CanvasTaskId; label: string }[] = [
+  { id: "predetermined_elements", label: "What predetermined elements show up in every scenario?" },
+  { id: "weakest_storyline", label: "Which scenario has the weakest storyline?" },
+  { id: "summarize_all", label: "Summarize all 4 scenarios" },
+];
+
+// All 3 tasks normalize to one shared summary shape, same convention Knowledge/Signals above
+// already use — no per-task result union needed.
+interface CanvasResultEntry {
+  task: CanvasTaskId;
   ts: number;
   ok: boolean;
   error?: string;
@@ -463,7 +512,11 @@ function ScenarioChatPanel({
   );
 }
 
-export function AskAI({ context }: { context?: "signals" | "storyline" | "narrative" | "strategy" | "monitoring" | "home" | "settings" | "knowledge" }) {
+export function AskAI({
+  context,
+}: {
+  context?: "signals" | "storyline" | "narrative" | "strategy" | "monitoring" | "home" | "settings" | "knowledge" | "matrix" | "canvas";
+}) {
   const store = useStore();
   const [open, setOpen] = React.useState(false);
   const [messages, setMessages] = React.useState<ChatMsg[]>(INITIAL);
@@ -888,6 +941,76 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
     }
   };
 
+  // Matrix mode — fixed task menu, never freeform, same convention as Storyline/Narrative
+  // above (no ScenarioChatPanel — Step 4 is closed-book and this is 6 canned prompts, not a
+  // chat). Results are ephemeral diagnostics, same reasoning as Storyline's.
+  const [matrixResults, setMatrixResults] = React.useState<MatrixResultEntry[]>([]);
+  const [runningMatrixTask, setRunningMatrixTask] = React.useState<MatrixTaskId | null>(null);
+
+  const runMatrixTask = async (taskId: MatrixTaskId) => {
+    const projectId = store.activeProjectId;
+    const ctx = store.matrixAskAiContext;
+    if (!projectId) return;
+    if (taskId === "explain_dot" && !ctx?.selectedDot) return;
+    if (taskId === "check_independence" && (ctx?.topAxisPair.length ?? 0) !== 2) return;
+    setRunningMatrixTask(taskId);
+    try {
+      const body: { task: MatrixTaskId; signalId?: string; axisASignalId?: string; axisBSignalId?: string; excludeSignalIds?: string[] } = { task: taskId };
+      if (taskId === "explain_dot") body.signalId = ctx!.selectedDot!.signalId;
+      if (taskId === "check_independence") {
+        body.axisASignalId = ctx!.topAxisPair[0].signalId;
+        body.axisBSignalId = ctx!.topAxisPair[1].signalId;
+      }
+      if (taskId === "alternate_axis_pair") body.excludeSignalIds = (ctx?.topAxisPair ?? []).map((p) => p.signalId);
+      const res = await fetch(`/api/projects/${projectId}/matrix/ask-ai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      const data = await res.json();
+      const entry: MatrixResultEntry = { task: taskId, ts: Date.now(), ok: true };
+      if (taskId === "explain_dot") entry.dotExplanation = data as ExplainDotResult;
+      else if (taskId === "check_independence") entry.independence = data as IndependenceResult;
+      else if (taskId === "coverage_gaps") entry.coverageGaps = data as CoverageGapsResult;
+      else if (taskId === "alternate_axis_pair") entry.alternatePair = data as AlternateAxisPairResult;
+      else entry.bucketSummary = data as BucketSummaryResult;
+      setMatrixResults((r) => [entry, ...r]);
+    } catch (err) {
+      console.error("[ask-ai] matrix task failed", err);
+      setMatrixResults((r) => [{ task: taskId, ts: Date.now(), ok: false, error: "Something went wrong running that task." }, ...r]);
+    } finally {
+      setRunningMatrixTask(null);
+    }
+  };
+
+  // Canvas mode — fixed task menu, never freeform, same no-chat convention as Storyline/
+  // Narrative/Matrix. All 3 tasks are project-wide, so no page-context/gating checks are needed
+  // — just store.activeProjectId, same as Knowledge/Signals' simplest tasks.
+  const [canvasResults, setCanvasResults] = React.useState<CanvasResultEntry[]>([]);
+  const [runningCanvasTask, setRunningCanvasTask] = React.useState<CanvasTaskId | null>(null);
+
+  const runCanvasTask = async (taskId: CanvasTaskId) => {
+    const projectId = store.activeProjectId;
+    if (!projectId) return;
+    setRunningCanvasTask(taskId);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/canvas/ask-ai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task: taskId }),
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      const data: { summary: string } = await res.json();
+      setCanvasResults((r) => [{ task: taskId, ts: Date.now(), ok: true, summary: data.summary }, ...r]);
+    } catch (err) {
+      console.error("[ask-ai] canvas task failed", err);
+      setCanvasResults((r) => [{ task: taskId, ts: Date.now(), ok: false, error: "Something went wrong running that task." }, ...r]);
+    } finally {
+      setRunningCanvasTask(null);
+    }
+  };
+
   // Knowledge mode — fixed task menu, never freeform (freeform is knowledgeChatMessages below),
   // same convention as Home/Strategy/Monitoring. Results are ephemeral for the same reason (a
   // one-line summary of what a scan/pull found, not a conversation worth keeping) — the actual
@@ -1193,9 +1316,13 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
               <div className="flex-1">
                 <div className="text-sm font-semibold tracking-[-0.01em]">Ask AI</div>
                 <div className="font-mono text-[11px] tracking-[0.04em] text-text-3">
-                  {context === "knowledge"
-                    ? "KNOWLEDGE MODE · SCOPED TASKS + GROUNDED CHAT"
-                    : context === "signals"
+                  {context === "canvas"
+                    ? "CANVAS MODE · SCOPED TASKS ONLY"
+                    : context === "matrix"
+                    ? "MATRIX MODE · SCOPED TASKS ONLY"
+                    : context === "knowledge"
+                      ? "KNOWLEDGE MODE · SCOPED TASKS + GROUNDED CHAT"
+                      : context === "signals"
                       ? "SIGNALS MODE · SCOPED TASKS + GROUNDED CHAT"
                       : context === "storyline"
                       ? "STORYLINE MODE · SCOPED TASKS ONLY"
@@ -1214,7 +1341,9 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
               </div>
               <button
                 onClick={() => {
-                  if (context === "knowledge") {
+                  if (context === "canvas") setCanvasResults([]);
+                  else if (context === "matrix") setMatrixResults([]);
+                  else if (context === "knowledge") {
                     setKnowledgeResults([]);
                     setKnowledgeChatMessages([]);
                   } else if (context === "signals") {
@@ -1237,6 +1366,8 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
                   } else setMessages([{ role: "ai", text: "Cleared. What would you like to explore?" }]);
                 }}
                 title={
+                  context === "canvas" ||
+                  context === "matrix" ||
                   context === "knowledge" ||
                   context === "signals" ||
                   context === "storyline" ||
@@ -1746,6 +1877,146 @@ export function AskAI({ context }: { context?: "signals" | "storyline" | "narrat
                   onAddSignal={onAddSignalFromChat}
                   activeProjectId={store.activeProjectId}
                 />
+              </div>
+            ) : context === "matrix" ? (
+              // Fixed task menu, never freeform — no input bar at all for this mode (Step 4 is
+              // closed-book; same shape as the Storyline branch above). Results render as cards
+              // below the menu, newest first.
+              <div className="scroll-y flex flex-1 flex-col gap-2.5 p-4">
+                <div className="flex flex-col gap-1.5">
+                  <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">TASKS</div>
+                  {MATRIX_TASKS.map((t) => {
+                    const noDot = t.needsDot && !store.matrixAskAiContext?.selectedDot;
+                    const noAxisPair = t.needsAxisPair && (store.matrixAskAiContext?.topAxisPair.length ?? 0) !== 2;
+                    const disabled = !!runningMatrixTask || !store.activeProjectId || noDot || noAxisPair;
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => runMatrixTask(t.id)}
+                        disabled={disabled}
+                        title={noDot ? "Select a signal on the Matrix first" : noAxisPair ? "Select 2 axis candidates first" : undefined}
+                        className="rounded-[10px] border border-border bg-white px-3 py-2.5 text-left text-[12.5px] text-[#374151] transition-[border,background] duration-[120ms] hover:border-brand-orange100 hover:bg-brand-orangeLight disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {runningMatrixTask === t.id ? "Running…" : t.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {matrixResults.length > 0 && (
+                  <div className="mt-1 flex flex-col gap-2.5">
+                    <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">RESULTS</div>
+                    {matrixResults.map((r, i) => {
+                      const label = MATRIX_TASKS.find((t) => t.id === r.task)?.label ?? r.task;
+                      return (
+                        <div key={i} className="rounded-[10px] border border-border bg-bg p-3 text-brand-dark">
+                          <div className="mb-1.5 flex items-center justify-between gap-2">
+                            <span className="text-[12.5px] font-semibold">{label}</span>
+                            <span className="font-mono text-[10px] text-text-3">{new Date(r.ts).toLocaleTimeString()}</span>
+                          </div>
+                          {!r.ok && <div className="text-[12.5px] text-[#EF4444]">{r.error}</div>}
+
+                          {r.ok && r.dotExplanation && (
+                            <div className="text-[12.5px] leading-[1.5]">
+                              <div className="mb-1 font-mono text-[10.5px] uppercase tracking-[0.04em] text-brand-orange">
+                                {r.dotExplanation.bucket.replace("_", " ")}
+                              </div>
+                              <p className="m-0 text-muted-foreground">{r.dotExplanation.explanation}</p>
+                            </div>
+                          )}
+
+                          {r.ok && r.independence && (
+                            <div className="text-[12.5px] leading-[1.5]">
+                              <div className="mb-1 font-mono text-[10.5px] uppercase tracking-[0.04em] text-brand-orange">{r.independence.state}</div>
+                              <ul className="m-0 flex list-none flex-col gap-1 p-0 text-muted-foreground">
+                                {r.independence.rationale.map((line, j) => (
+                                  <li key={j}>— {line}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+
+                          {r.ok && r.coverageGaps && (
+                            <div className="text-[12.5px] leading-[1.5]">
+                              {!r.coverageGaps.sufficientEvidence || r.coverageGaps.gaps.length === 0 ? (
+                                <p className="m-0 text-muted-foreground">{r.coverageGaps.gap || "Coverage already looks reasonably balanced."}</p>
+                              ) : (
+                                <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+                                  {r.coverageGaps.gaps.map((g, j) => (
+                                    <li key={j}>
+                                      <span className="font-semibold">{g.area}</span>
+                                      <span className="text-muted-foreground"> — {g.reason}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          )}
+
+                          {r.ok && r.alternatePair && (
+                            <div className="text-[12.5px] leading-[1.5]">
+                              {!r.alternatePair.sufficientEvidence || !r.alternatePair.pair ? (
+                                <p className="m-0 text-muted-foreground">{r.alternatePair.gap || "No better alternative pairing found."}</p>
+                              ) : (
+                                <>
+                                  <div className="mb-1 font-semibold">
+                                    {r.alternatePair.pair[0].title} × {r.alternatePair.pair[1].title}
+                                  </div>
+                                  <p className="m-0 text-muted-foreground">{r.alternatePair.rationale}</p>
+                                </>
+                              )}
+                            </div>
+                          )}
+
+                          {r.ok && r.bucketSummary && (
+                            <p className="m-0 text-[12.5px] leading-[1.5] text-muted-foreground [text-wrap:pretty]">{r.bucketSummary.summary}</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ) : context === "canvas" ? (
+              // Fixed task menu, never freeform — no input bar at all for this mode (all 3 tasks
+              // are project-wide, same shape as the Matrix branch above). Every task normalizes
+              // to a one-line summary, so results render uniformly.
+              <div className="scroll-y flex flex-1 flex-col gap-2.5 p-4">
+                <div className="flex flex-col gap-1.5">
+                  <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">TASKS</div>
+                  {CANVAS_TASKS.map((t) => {
+                    const disabled = !!runningCanvasTask || !store.activeProjectId;
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => runCanvasTask(t.id)}
+                        disabled={disabled}
+                        className="rounded-[10px] border border-border bg-white px-3 py-2.5 text-left text-[12.5px] text-[#374151] transition-[border,background] duration-[120ms] hover:border-brand-orange100 hover:bg-brand-orangeLight disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {runningCanvasTask === t.id ? "Running…" : t.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {canvasResults.length > 0 && (
+                  <div className="mt-1 flex flex-col gap-2.5">
+                    <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">RESULTS</div>
+                    {canvasResults.map((r, i) => {
+                      const label = CANVAS_TASKS.find((t) => t.id === r.task)?.label ?? r.task;
+                      return (
+                        <div key={i} className="rounded-[10px] border border-border bg-bg p-3 text-brand-dark">
+                          <div className="mb-1.5 flex items-center justify-between gap-2">
+                            <span className="text-[12.5px] font-semibold">{label}</span>
+                            <span className="font-mono text-[10px] text-text-3">{new Date(r.ts).toLocaleTimeString()}</span>
+                          </div>
+                          {!r.ok && <div className="text-[12.5px] text-[#EF4444]">{r.error}</div>}
+                          {r.ok && r.summary && <p className="m-0 text-[12.5px] leading-[1.5] text-muted-foreground [text-wrap:pretty]">{r.summary}</p>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             ) : context === "knowledge" ? (
               // Fixed task menu, never freeform, PLUS the real "Ask anything…" freeform panel

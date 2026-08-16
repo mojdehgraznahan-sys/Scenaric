@@ -32,9 +32,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </div>
       <AskAI
         context={
-          page === "knowledge"
-            ? "knowledge"
-            : page === "signals"
+          page === "canvas"
+            ? "canvas"
+            : page === "matrix"
+            ? "matrix"
+            : page === "knowledge"
+              ? "knowledge"
+              : page === "signals"
               ? "signals"
               : page === "storyline"
                 ? "storyline"

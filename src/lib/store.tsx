@@ -35,6 +35,7 @@ import {
 } from "./actions/ai-signals";
 import { getMatrixData, updateMatrixDotPosition as updateMatrixDotPositionAction, type MatrixDotData } from "./actions/matrix";
 import { classifyMatrixBuckets, reclassifySignal } from "./actions/ai-matrix";
+import type { MatrixBucket } from "./matrix-mapping";
 import { buildScenarios as buildScenariosAction, type AxisInput } from "./actions/ai-scenarios";
 import { getScenarios, setScenarioArchived, type ScenarioWithAxes } from "./actions/scenarios";
 import type {
@@ -279,6 +280,22 @@ export interface Store {
   // store.activeProjectId, same convention as Strategy's "Suggest a hedge".
   monitoringAskAiContext: { selectedIndicator: { id: string; name: string } | null } | null;
   setMonitoringAskAiContext: (v: { selectedIndicator: { id: string; name: string } | null } | null) => void;
+  // Matrix's own Ask AI scoping — "Why is this signal a critical uncertainty?" needs
+  // selectedDot (the currently-selected dot's signal id/title/bucket); "Are my two selected
+  // axes truly independent?" needs topAxisPair to have exactly 2 entries. The other four tasks
+  // need neither, just store.activeProjectId, same convention as Strategy's "Suggest a hedge".
+  matrixAskAiContext: {
+    selectedDot: { signalId: string; title: string; bucket: MatrixBucket | null } | null;
+    topAxisPair: { signalId: string; title: string }[];
+    axesLocked: boolean;
+  } | null;
+  setMatrixAskAiContext: (
+    v: {
+      selectedDot: { signalId: string; title: string; bucket: MatrixBucket | null } | null;
+      topAxisPair: { signalId: string; title: string }[];
+      axesLocked: boolean;
+    } | null
+  ) => void;
   scenarios: Scenario[];
   scenariosLoading: boolean;
   setScenarios: (v: Scenario[]) => void;
@@ -723,6 +740,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     selectedCell: { optionId: string; optionName: string; scenarioId: string; scenarioName: string } | null;
   } | null>(null);
   const [monitoringAskAiContext, setMonitoringAskAiContext] = useState<{ selectedIndicator: { id: string; name: string } | null } | null>(null);
+  const [matrixAskAiContext, setMatrixAskAiContext] = useState<{
+    selectedDot: { signalId: string; title: string; bucket: MatrixBucket | null } | null;
+    topAxisPair: { signalId: string; title: string }[];
+    axesLocked: boolean;
+  } | null>(null);
   const [strategies, setStrategies] = usePersistentState("fm.strategies", seed.strategies);
   const [criticalUncertainties, setCriticalUncertainties] = usePersistentState<string[]>(
     "fm.cu",
@@ -801,6 +823,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setStrategyAskAiContext,
     monitoringAskAiContext,
     setMonitoringAskAiContext,
+    matrixAskAiContext,
+    setMatrixAskAiContext,
     scenarios,
     scenariosLoading,
     setScenarios,

@@ -99,6 +99,10 @@ export function PageSignals() {
   const navigate = useNavigate();
   const router = useRouter();
   const searchParams = useSearchParams();
+  // Signals is the default/first tab (the page's primary content); Suggestions is the staging
+  // area for pending research_suggestions. Plain component state, not URL-persisted — unlike
+  // sortMode (a filter over what you're looking at), this doesn't need to be bookmarkable.
+  const [tab, setTab] = React.useState<"signals" | "suggestions">("signals");
   const [filter, setFilter] = React.useState<"All" | SteepCategory>("All");
   const [selected, setSelected] = React.useState<Signal | null>(null);
   const [addOpen, setAddOpen] = React.useState(false);
@@ -432,42 +436,65 @@ export function PageSignals() {
             </div>
           </div>
           <div className="flex gap-2">
-            {/* Trigger always shows the static "Sort" label (matches the handoff design) — the
-                dropdown itself keeps its full 4-mode behavior via sortMode/onSortChange. */}
-            <Select value={sortMode} onValueChange={onSortChange}>
-              <SelectTrigger className="h-8 w-auto gap-1.5 border-border px-2.5 text-xs">
-                <Icons.Filter size={12} />
-                Sort
-              </SelectTrigger>
-              <SelectContent>
-                {SORT_OPTIONS.map((o) => (
-                  <SelectItem key={o.value} value={o.value}>
-                    {o.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {/* Sort only affects the signal grid, so it only shows on that tab. Trigger always
+                shows the static "Sort" label (matches the handoff design) — the dropdown itself
+                keeps its full 4-mode behavior via sortMode/onSortChange. */}
+            {tab === "signals" && (
+              <Select value={sortMode} onValueChange={onSortChange}>
+                <SelectTrigger className="h-8 w-auto gap-1.5 border-border px-2.5 text-xs">
+                  <Icons.Filter size={12} />
+                  Sort
+                </SelectTrigger>
+                <SelectContent>
+                  {SORT_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             <Button variant="primary" size="sm" onClick={() => setAddOpen(true)}>
               <Icons.Plus size={12} /> Add Signal
             </Button>
           </div>
         </div>
 
-        {suggestResult && (
-          <div className="mb-3.5 rounded-[10px] border border-border bg-[#F9FAFB] px-3 py-2 text-xs text-muted-foreground">
-            {suggestResult}
-          </div>
-        )}
+        {/* Tabs — same underline treatment as page-knowledge.tsx's RIGHT_TABS. */}
+        <div className="mb-3.5 flex border-b border-border">
+          {(
+            [
+              { id: "signals", label: "Signals" },
+              { id: "suggestions", label: "Suggestions" },
+            ] as const
+          ).map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={cn(
+                "mx-3.5 -mb-px flex items-center gap-1.5 border-b-2 px-0.5 py-2 text-[13px] font-medium first:ml-0",
+                tab === t.id ? "border-brand-orange text-brand-orange" : "border-transparent text-muted-foreground"
+              )}
+            >
+              {t.label}
+              {t.id === "suggestions" && researchSuggestions.length > 0 && (
+                <span className="inline-flex items-center rounded bg-brand-orangeLight px-[6px] py-0.5 text-[10px] font-semibold text-brand-orange700">
+                  {researchSuggestions.length}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
 
-        {researchSuggestions.length > 0 && (
-          <div className="mb-3.5 rounded-[10px] border border-[#FDE68A] bg-[#FFFBEB] p-3">
-            <div className="mb-2 text-xs font-semibold text-[#92400E]">
-              {researchSuggestions.length} driving force{researchSuggestions.length === 1 ? "" : "s"} found via web research — review before
-              adding
+        {tab === "suggestions" ? (
+          researchSuggestions.length === 0 ? (
+            <div className="rounded-[10px] border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
+              No pending suggestions yet — run &quot;Scan for driving forces (web)&quot; from Ask AI (⌘I) to find some.
             </div>
+          ) : (
             <div className="flex flex-col gap-2">
               {researchSuggestions.map((s) => (
-                <div key={s.id} className="rounded-[9px] border border-[#FDE68A] bg-white px-3 py-2.5">
+                <div key={s.id} className="rounded-[9px] border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2.5">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
                       <div className="text-[13px] font-semibold text-brand-dark">{s.title}</div>
@@ -491,52 +518,60 @@ export function PageSignals() {
                 </div>
               ))}
             </div>
-          </div>
-        )}
+          )
+        ) : (
+          <>
+            {suggestResult && (
+              <div className="mb-3.5 rounded-[10px] border border-border bg-[#F9FAFB] px-3 py-2 text-xs text-muted-foreground">
+                {suggestResult}
+              </div>
+            )}
 
-        {/* Filter pills */}
-        <div className="mb-[18px] flex flex-wrap gap-2">
-          {CATEGORIES.map((c) => {
-            const active = filter === c;
-            return (
-              <button
-                key={c}
-                onClick={() => setFilter(c)}
-                className={cn("rounded-full border px-3 py-[5px] text-xs font-medium", active ? PILL[c].active : PILL[c].inactive)}
-              >
-                {c}
-              </button>
-            );
-          })}
-        </div>
+            {/* Filter pills */}
+            <div className="mb-[18px] flex flex-wrap gap-2">
+              {CATEGORIES.map((c) => {
+                const active = filter === c;
+                return (
+                  <button
+                    key={c}
+                    onClick={() => setFilter(c)}
+                    className={cn("rounded-full border px-3 py-[5px] text-xs font-medium", active ? PILL[c].active : PILL[c].inactive)}
+                  >
+                    {c}
+                  </button>
+                );
+              })}
+            </div>
 
-        {/* Cards */}
-        {store.signalsLoading && signals.length === 0 && (
-          <div className="mb-3 text-center text-xs text-muted-foreground">Loading signals…</div>
+            {/* Cards */}
+            {store.signalsLoading && signals.length === 0 && (
+              <div className="mb-3 text-center text-xs text-muted-foreground">Loading signals…</div>
+            )}
+            {!store.signalsLoading && unscoredCount > 0 && (
+              <div className="mb-3.5 flex items-center justify-between rounded-[10px] border border-border bg-[#F9FAFB] px-3.5 py-2.5">
+                <span className="text-xs text-muted-foreground">
+                  {unscoredCount} signal{unscoredCount === 1 ? "" : "s"} not yet scored.
+                </span>
+                <Button variant="ghost" size="sm" onClick={onScoreUnscored} disabled={suggesting}>
+                  {suggesting ? "Scoring…" : "Score now"}
+                </Button>
+              </div>
+            )}
+            <div className="grid grid-cols-3 gap-3">
+              {sortedFiltered.map((s) => (
+                <SignalCard
+                  key={s.id}
+                  s={s}
+                  onOpen={() => setSelected(s)}
+                  onAddToMatrix={() => onAddToMatrix(s)}
+                  addingToMatrix={addingToMatrixId === s.id}
+                  addToMatrixError={addToMatrixError && addToMatrixError.id === s.id ? addToMatrixError.message : null}
+                  onDelete={() => onDeleteSignal(s.id)}
+                />
+              ))}
+            </div>
+          </>
         )}
-        {!store.signalsLoading && unscoredCount > 0 && (
-          <div className="mb-3.5 flex items-center justify-between rounded-[10px] border border-border bg-[#F9FAFB] px-3.5 py-2.5">
-            <span className="text-xs text-muted-foreground">
-              {unscoredCount} signal{unscoredCount === 1 ? "" : "s"} not yet scored.
-            </span>
-            <Button variant="ghost" size="sm" onClick={onScoreUnscored} disabled={suggesting}>
-              {suggesting ? "Scoring…" : "Score now"}
-            </Button>
-          </div>
-        )}
-        <div className="grid grid-cols-3 gap-3">
-          {sortedFiltered.map((s) => (
-            <SignalCard
-              key={s.id}
-              s={s}
-              onOpen={() => setSelected(s)}
-              onAddToMatrix={() => onAddToMatrix(s)}
-              addingToMatrix={addingToMatrixId === s.id}
-              addToMatrixError={addToMatrixError && addToMatrixError.id === s.id ? addToMatrixError.message : null}
-              onDelete={() => onDeleteSignal(s.id)}
-            />
-          ))}
-        </div>
       </div>
 
       {/* Detail modal */}
