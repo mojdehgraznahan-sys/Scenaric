@@ -81,7 +81,7 @@ the project's own already-grounded data.
 
 | Step | Research allowed? | What it does here |
 |---|---|---|
-| 1. Focal question | No | Closed-book drafting/sharpening from user-provided text only |
+| 1. Focal question | No, except one narrow onboarding exception* | Closed-book drafting/scoring from the user's own interview answers only; see exception below for the one live-research carve-out |
 | 2. Key forces (local) | **Yes — exploratory** | Scans for local-actor forces (customers/suppliers/competitors/regulators) the user hasn't uploaded anything about; lands as unconfirmed suggestions only |
 | 3. Driving forces (macro/STEEP) | **Yes — exploratory** | Broad macro-trend sweep across STEEP categories; same unconfirmed-suggestion path as step 2 |
 | 4. Rank forces | No | Deterministic scoring/bucketing over existing signals, temp=0 |
@@ -105,5 +105,21 @@ in `ai-settings-tasks.ts`/`ai-settings-chat.ts`). It answers one-off competitive
 geopolitical/tariff/market questions and badges the answer as live-researched, unverified
 content — it does not change the default closed-book "Send" path, and it is not itself a Step 1
 generation prompt (it never drafts/sharpens/critiques the focal question). Don't treat this as
+precedent for adding research to any other closed-book step without the same explicit,
+user-invoked, clearly-labeled shape.
+
+**A second narrow, explicit exception:** Onboarding's Step 1 interview has a one-time
+**research panel** that fires only after the user deliberately submits a company name and
+industry on the interview's intro card — it is not fetched silently on page load and does not
+re-fire per keystroke (`onboarding.research_context` on `RESEARCH_MODE_ALLOWED_STEPS`,
+`researchOnboardingContext` in `ai-focal-question.ts`). It surfaces 5 short, clearly-labeled
+sections (competitors, regulatory, market, macro, recent news) badged in the UI as
+live-researched, unverified content, purely as background context while the user answers the
+4 interview blocks — it never writes to signals/insights/research_suggestions, and nothing
+from it is persisted past the onboarding session. Critically, this exception covers *only* the
+research panel itself: the actual focal-question drafting and scoring
+(`draftFocalQuestionCandidates`, `checkFocalCriteria`) remain fully closed-book, reasoning only
+over the user's own interview answers plus whatever the research panel already surfaced —
+neither call is ever given `webSearch` itself. As with the exception above, this is not
 precedent for adding research to any other closed-book step without the same explicit,
 user-invoked, clearly-labeled shape.

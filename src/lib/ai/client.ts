@@ -36,6 +36,12 @@ export const RESEARCH_MODE_ALLOWED_STEPS: readonly string[] = [
   // loosening of Step 1's closed-book rule. Only fires when the user clicks "Research" instead
   // of "Send" for that one message; the default "Send" path (step "settings.chat") stays
   // closed-book exactly as before. See SCHWARTZ_METHODOLOGY_SKILL.md's research-mode section.
+  "onboarding.research_context", // Onboarding's interview intro card's research panel
+  // (researchOnboardingContext in ai-focal-question.ts) — fires once, only after the user
+  // deliberately submits a company name + industry, never silently/per-keystroke. NOT a
+  // general loosening of Step 1's closed-book rule: the actual focal-question drafting/scoring
+  // (draftFocalQuestionCandidates, checkFocalCriteria) remain closed-book and never pass
+  // webSearch. See SCHWARTZ_METHODOLOGY_SKILL.md's research-mode section.
 ];
 
 // §3 — reused verbatim by every AI call in every step below. Sent as a cached system

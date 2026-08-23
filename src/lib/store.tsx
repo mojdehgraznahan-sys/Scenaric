@@ -98,23 +98,75 @@ interface User {
   initials: string;
   avatarColor: string;
 }
+type FocalInterviewBlockStatus = "pending" | "active" | "answered" | "skipped";
+
+interface FocalInterviewBlockA {
+  keepsAwake: string;
+  decision5to10yr: string;
+  ownerAndDeadline: string;
+  ifWrongBreaks: string;
+}
+interface FocalInterviewBlockB {
+  oracleQ1: string;
+  oracleQ2: string;
+  oracleQ3: string;
+}
+interface FocalInterviewBlockC {
+  bestCaseAndPath: string;
+  worstCaseAndPivots: string;
+  turningPoints: string;
+}
+interface FocalInterviewBlockD {
+  inevitable: string;
+  genuinelyUncertain: string;
+  dependencies: string;
+}
+
+interface OnboardingResearchState {
+  status: "idle" | "loading" | "ready" | "error";
+  data: {
+    competitors: string | null;
+    regulatory: string | null;
+    market: string | null;
+    macro: string | null;
+    recentNews: string | null;
+    citations: { title: string; url: string }[];
+  } | null;
+  error: string | null;
+}
+
+interface FocalQuestionCandidateState {
+  question: string;
+  criteria: { id: string; label: string; ok: boolean; reason: string }[];
+}
+
 interface OnboardingState {
   step: number;
+  // Step 1a — interview intro card.
+  companyName: string;
+  industry: string;
+  companySubmitted: boolean;
+  // Step 1b — research panel (onboarding.research_context, ai-focal-question.ts).
+  research: OnboardingResearchState;
+  // Step 1c — the 4-block interview.
+  blockStatus: { A: FocalInterviewBlockStatus; B: FocalInterviewBlockStatus; C: FocalInterviewBlockStatus; D: FocalInterviewBlockStatus };
+  activeBlock: "A" | "B" | "C" | "D" | null;
+  blockA: FocalInterviewBlockA;
+  blockB: FocalInterviewBlockB;
+  blockC: FocalInterviewBlockC;
+  blockD: FocalInterviewBlockD;
+  // Step 1d/1e — AI-drafted candidates + the picked one.
+  candidates: FocalQuestionCandidateState[] | null;
+  candidatesGap: string | null;
+  pickedFocal: string | null;
+  // Feeds Step 2/3 exactly as before the interview rebuild.
   focal: string;
-  refined: string | null;
+  refined: string | null; // no longer set by the new flow — always null; kept only because
+  // launch()'s createProject({refined_focal_question: refined}) call still passes it through.
   horizon: string;
   name: string;
   summary: string;
-  industry: string;
   complete: boolean;
-  // Step 1 AI wiring (ai-focal-question.ts) — durable request/response data, persisted here
-  // per its own "no project row exists yet" constraint rather than a project-scoped table.
-  // Transient in-flight UI status (loading/error flags) stays local useState in page.tsx,
-  // same split already used for refined/horizon above vs. that file's own refining/refineError.
-  criteria: { id: string; label: string; ok: boolean; reason: string }[] | null;
-  clarifyQuestions: { criterionId: string; question: string }[] | null;
-  clarifyAnswers: Record<string, string>;
-  alternatives: string[] | null;
   suggestedHorizon: { horizon: string; rationale: string } | null;
 }
 
@@ -410,20 +462,33 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const [accountType, setAccountType] = usePersistentState("fm.accountType", "self");
 
-  // Onboarding
-  const [onboarding, setOnboarding] = usePersistentState<OnboardingState>("fm.onb", {
+  // Onboarding — "fm.onb.v2" (not "fm.onb"): the interview rebuild changed this shape
+  // entirely, and usePersistentState does zero shape validation on load, so a returning
+  // browser's old-shape blob under the old key would crash the new interview reading
+  // e.g. onboarding.blockA.keepsAwake off an object that never had a blockA key. Renaming the
+  // key orphans old data harmlessly rather than needing real migration logic for what's
+  // inherently short-lived, in-progress-wizard scratch state.
+  const [onboarding, setOnboarding] = usePersistentState<OnboardingState>("fm.onb.v2", {
     step: 1,
-    focal: seed.project.focal_question,
+    companyName: "",
+    industry: "Technology",
+    companySubmitted: false,
+    research: { status: "idle", data: null, error: null },
+    blockStatus: { A: "active", B: "pending", C: "pending", D: "pending" },
+    activeBlock: "A",
+    blockA: { keepsAwake: "", decision5to10yr: "", ownerAndDeadline: "", ifWrongBreaks: "" },
+    blockB: { oracleQ1: "", oracleQ2: "", oracleQ3: "" },
+    blockC: { bestCaseAndPath: "", worstCaseAndPivots: "", turningPoints: "" },
+    blockD: { inevitable: "", genuinelyUncertain: "", dependencies: "" },
+    candidates: null,
+    candidatesGap: null,
+    pickedFocal: null,
+    focal: "",
     refined: null,
     horizon: "5-10 years",
-    name: seed.project.name,
-    summary: seed.project.summary,
-    industry: "Technology",
+    name: "",
+    summary: "",
     complete: false,
-    criteria: null,
-    clarifyQuestions: null,
-    clarifyAnswers: {},
-    alternatives: null,
     suggestedHorizon: null,
   });
 
@@ -840,7 +905,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     navCollapsed,
     setNavCollapsed,
     reset: () => {
-      ["fm.accountType", "fm.onb", "fm.scenarios", "fm.strategies", "fm.cu"].forEach((k) =>
+      ["fm.accountType", "fm.onb.v2", "fm.scenarios", "fm.strategies", "fm.cu"].forEach((k) =>
         window.localStorage.removeItem(k)
       );
       supabase.auth.signOut().finally(() => {
