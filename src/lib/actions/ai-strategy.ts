@@ -14,16 +14,7 @@ import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
 import { NotFoundError, ValidationError } from "@/lib/ai/errors";
 import { getProjectAiSettings } from "./project-ai-settings";
-
-// Risk is a byproduct of real robust-count data, never a raw model guess (§0 Principle 5) —
-// shared with ai-strategy-tasks.ts's stressTestOption, which must re-derive an option's risk
-// the exact same way after a stress test flips a score, not with a second, possibly-diverging
-// rubric.
-export const riskFromRobustCount = (robustCount: number): "Low" | "Medium" | "High" => {
-  if (robustCount >= 3) return "Low";
-  if (robustCount === 2) return "Medium";
-  return "High";
-};
+import { riskFromRobustCount } from "@/lib/strategy-risk";
 
 const StrategyScoreSchema = z.object({
   scenario_id: z.string(),

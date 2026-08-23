@@ -10,7 +10,7 @@ import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
 import { NotFoundError } from "@/lib/ai/errors";
 import { z } from "zod";
-import { STATUS_ORDINAL, type IndicatorStatus } from "./indicators-monitoring";
+import { STATUS_ORDINAL, type IndicatorStatus } from "@/lib/indicator-status";
 import { generateIndicatorsForScenario, type GenerateIndicatorsResult } from "./ai-indicators";
 
 // ─────────────────────── Task 1: Which scenario is most likely emerging? ───────────────────────

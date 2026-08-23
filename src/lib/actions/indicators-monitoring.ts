@@ -11,16 +11,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { pullNewsFeed } from "./ai-news-feed";
 import { evaluateIndicatorsAgainstNews, type IndicatorStatusUpdate } from "./ai-indicators-evaluation";
 import { getConnectedSlackWebhookUrl, sendSlackAlert } from "./project-integrations";
-
-export type IndicatorStatus = "On track" | "Watch" | "Alert";
-
-// "up" = escalating severity (this scenario's discriminating signal strengthening), "down" =
-// the reverse — a scenario isn't intrinsically good or bad, so this is a strength-of-signal
-// axis, not a "risk" or "good/bad" one. Documented here since the direction is genuinely
-// ambiguous language otherwise; any future UI copy should not imply "up = good." Exported so
-// ai-monitoring-tasks.ts's "most likely scenario" ranking reuses the exact same severity
-// weighting rather than redefining it.
-export const STATUS_ORDINAL: Record<IndicatorStatus, number> = { "On track": 0, Watch: 1, Alert: 2 };
+import { STATUS_ORDINAL, type IndicatorStatus } from "@/lib/indicator-status";
 
 function computeTrend(ascendingReadings: { value: number }[]): "up" | "flat" | "down" | null {
   if (ascendingReadings.length < 2) return null;

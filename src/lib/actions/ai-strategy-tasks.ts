@@ -11,7 +11,7 @@ import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
 import { NotFoundError } from "@/lib/ai/errors";
 import { z } from "zod";
-import { riskFromRobustCount } from "./ai-strategy";
+import { riskFromRobustCount } from "@/lib/strategy-risk";
 
 async function loadPredeterminedElements(supabase: ReturnType<typeof createClient>, projectId: string): Promise<{ id: string; title: string; body: string }[]> {
   const { data: dots, error: dotsError } = await supabase.from("matrix_dots").select("signal_id").eq("project_id", projectId).eq("bucket", "predetermined");

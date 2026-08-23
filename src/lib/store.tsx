@@ -524,7 +524,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   // The real state transition happens via setActiveProjectId; kept only so existing
   // call sites (page-projects.tsx's openProject) that pass a full Project object don't
   // need to change — `project` above already re-derives from activeProjectId.
-  const setProject = useCallback((_v: Project) => {}, []);
+  const setProject = useCallback((_v: Project) => {
+    void _v;
+  }, []);
 
   // ---- Matrix (real, Supabase) — Matrix backend build, Step 4 (§7) ----
   // Declared before Signals below so createSignal/updateSignal/scoreUnscoredSignals can call
