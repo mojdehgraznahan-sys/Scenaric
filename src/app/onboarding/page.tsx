@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 import { useNavigate } from "@/lib/use-navigate";
-import { suggestFocalHorizon } from "@/lib/actions/ai-focal-question";
+import { suggestFocalHorizon, draftProjectSummary } from "@/lib/actions/ai-focal-question";
 import FocalInterview, { type FocalInterviewCompleteResult } from "./focal-interview";
 import { EYEBROW, INDUSTRIES } from "./focal-interview-blocks";
 
@@ -38,6 +38,16 @@ export default function OnboardingPage() {
   const [summary, setSummary] = React.useState(store.onboarding.summary || "");
   const [industry, setIndustry] = React.useState(store.onboarding.industry || "Technology");
 
+  // Mirrors focal-interview.tsx's onboardingRef pattern — draftProjectSummary resolves
+  // asynchronously, possibly after the user has already reached Step 3 and started typing;
+  // reading this ref (not the render-time `summary` closure) at resolution time is how the
+  // "never overwrite what the user already typed" check below stays correct regardless of
+  // timing.
+  const summaryRef = React.useRef(summary);
+  summaryRef.current = summary;
+  const [draftingSummary, setDraftingSummary] = React.useState(false);
+  const [summaryAiDrafted, setSummaryAiDrafted] = React.useState(false);
+
   // Fires once FocalInterview's own multi-block interview is complete (a candidate picked, or
   // "Use my wording"). refined stays permanently null going forward — the old flow's separate
   // "refine one raw string" step is superseded by the interview drafting candidates directly.
@@ -53,6 +63,33 @@ export default function OnboardingPage() {
     setIndustry(pickedIndustry);
     setName((prev) => prev || companyName);
     setContinuingStep1(true);
+
+    // Fires in true parallel with the horizon suggestion below — never awaited before that
+    // block's `finally`, so it adds no latency to the Step 1→2 transition. Resolves in the
+    // background while the user reads Step 2's horizon card; by the time they reach Step 3
+    // the summary is normally already sitting in the field.
+    setDraftingSummary(true);
+    draftProjectSummary({
+      companyName,
+      industry: pickedIndustry,
+      focalQuestion: pickedFocal,
+      blockA: store.onboarding.blockA,
+      blockB: store.onboarding.blockB,
+      blockC: store.onboarding.blockC,
+      blockD: store.onboarding.blockD,
+      research:
+        store.onboarding.research.status === "ready" && store.onboarding.research.data
+          ? { sufficientEvidence: true, gap: null, ...store.onboarding.research.data }
+          : null,
+    })
+      .then((result) => {
+        if (summaryRef.current) return; // user already typed something — never overwrite
+        setSummary(result.summary);
+        setSummaryAiDrafted(true);
+      })
+      .catch((err) => console.error("[onboarding] summary draft failed", err))
+      .finally(() => setDraftingSummary(false));
+
     let nextHorizon = horizon;
     let nextSuggestedHorizon = suggestedHorizon;
     try {
@@ -204,10 +241,19 @@ export default function OnboardingPage() {
                     id="proj-summary"
                     rows={3}
                     value={summary}
-                    onChange={(e) => setSummary(e.target.value)}
-                    placeholder="Your project summary..."
-                    className="min-h-[80px]"
+                    onChange={(e) => {
+                      setSummary(e.target.value);
+                      setSummaryAiDrafted(false);
+                    }}
+                    placeholder={draftingSummary ? "Drafting a summary from your answers…" : "Your project summary..."}
+                    className={cn("min-h-[80px]", draftingSummary && !summary && "pulse")}
                   />
+                  {summaryAiDrafted && (
+                    <div className="mt-1.5 flex items-start gap-1.5 text-[11.5px] leading-[1.5] text-brand-orange700">
+                      <Icons.Sparkle size={12} stroke="#C2410C" className="mt-0.5 flex-shrink-0" />
+                      <span>AI drafted this from your interview answers — edit freely.</span>
+                    </div>
+                  )}
                 </div>
                 <div className="grid grid-cols-2 gap-2.5">
                   <div>

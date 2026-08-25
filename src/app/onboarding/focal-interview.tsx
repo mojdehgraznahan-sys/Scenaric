@@ -369,8 +369,14 @@ export default function FocalInterview({
     return () => {
       cancelled = true;
     };
+    // Deliberately NOT depending on onboarding.research.status: this effect is the one thing
+    // that sets it, so including it here would make React tear down (cancel) this same
+    // in-flight request the instant "loading" commits — long before the real 30-45s
+    // web-search call resolves, silently discarding the result. Fires once per
+    // companySubmitted transition; the status !== "idle" guard above still protects against a
+    // genuine double-fire (e.g. React Strict Mode's dev-only double-invoke).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onboarding.companySubmitted, onboarding.research.status]);
+  }, [onboarding.companySubmitted]);
 
   // 1d — fires once all 4 blocks are past pending/active, regardless of how much was actually
   // answered; draftFocalQuestionCandidates's own sufficient_evidence escape valve (rendered as

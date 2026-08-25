@@ -26,6 +26,10 @@
 //   6. draftFocalQuestionCandidates — NEW. Synthesizes the interview's block A-D answers (any
 //      subset possibly empty/skipped) + research findings into 3 scored candidate questions.
 //      Closed-book — never passes webSearch itself.
+//   7. draftProjectSummary — NEW. Fires alongside suggestFocalHorizon once the interview's
+//      final "Continue" is clicked, drafting Step 3's project summary from the same interview
+//      answers + the picked focal question, so the field is normally already populated by the
+//      time the user reaches Step 3. Closed-book — never passes webSearch itself.
 import { z } from "zod";
 import Anthropic from "@anthropic-ai/sdk";
 import { runStructured } from "@/lib/ai/client";
@@ -530,4 +534,80 @@ export async function draftFocalQuestionCandidates(
       criteria: order.map((id) => ({ id, label: CRITERION_LABEL[id], ok: c[id].ok, reason: c[id].reason })),
     })),
   };
+}
+
+/* ── 7. draftProjectSummary ───────────────────────────────────────────── */
+// Closed-book — fires alongside suggestFocalHorizon once a candidate is picked, drafting Step
+// 3's project summary from the same interview answers + the picked focal question. Unlike §6,
+// no sufficient_evidence escape valve: focalQuestion is always non-empty and substantive by
+// construction (Step 1 can't complete without a picked candidate), so there's always something
+// real to summarize.
+
+const DraftSummarySchema = z.object({ summary: z.string() });
+
+const DRAFT_SUMMARY_TASK_PROMPT = `Task: Write a short project summary (1-2 sentences) — the
+kind of blurb that shows on a project card, not a restatement of the focal question itself —
+synthesizing the user's picked focal question, company/industry, and whichever interview block
+answers are non-empty.
+
+Input: { company_name: string, industry: string, focal_question: string,
+  block_a: { keeps_awake, decision_5_to_10yr, owner_and_deadline, if_wrong_breaks: string|null },
+  block_b: { oracle_q1, oracle_q2, oracle_q3: string|null },
+  block_c: { best_case_and_path, worst_case_and_pivots, turning_points: string|null },
+  block_d: { inevitable, genuinely_uncertain, dependencies: string|null },
+  research: { competitors, regulatory, market, macro, recent_news: string|null } | null
+    /* context only — never re-search, never treat as the user's own words */ }
+
+Rules:
+- Ground the summary ONLY in the given focal_question, company_name/industry, and whichever
+  block answers are non-empty — never invent a fact, figure, or competitor not present in them.
+  research findings may be referenced only as background context, never asserted as the user's
+  own words.
+- Lead with what the project is actually about (the real decision/stakes), not a generic
+  "this is a scenario-planning project for X" framing.
+- Never restate focal_question verbatim — synthesize, don't repeat.
+- If very little was answered beyond the focal question itself, keep the summary short and
+  focused on just the focal question's own scope — do not pad with invented detail to sound
+  more complete.
+
+Output schema: { summary: string }`;
+
+export async function draftProjectSummary(input: FocalInterviewAnswers & { focalQuestion: string }): Promise<{ summary: string }> {
+  const output = await runStructured({
+    step: "focal_question.draft_summary",
+    projectId: null,
+    page: PAGE,
+    taskPrompt: DRAFT_SUMMARY_TASK_PROMPT,
+    input: {
+      company_name: input.companyName,
+      industry: input.industry,
+      focal_question: input.focalQuestion,
+      block_a: {
+        keeps_awake: input.blockA.keepsAwake,
+        decision_5_to_10yr: input.blockA.decision5to10yr,
+        owner_and_deadline: input.blockA.ownerAndDeadline,
+        if_wrong_breaks: input.blockA.ifWrongBreaks,
+      },
+      block_b: { oracle_q1: input.blockB.oracleQ1, oracle_q2: input.blockB.oracleQ2, oracle_q3: input.blockB.oracleQ3 },
+      block_c: {
+        best_case_and_path: input.blockC.bestCaseAndPath,
+        worst_case_and_pivots: input.blockC.worstCaseAndPivots,
+        turning_points: input.blockC.turningPoints,
+      },
+      block_d: { inevitable: input.blockD.inevitable, genuinely_uncertain: input.blockD.genuinelyUncertain, dependencies: input.blockD.dependencies },
+      research: input.research
+        ? {
+            competitors: input.research.competitors,
+            regulatory: input.research.regulatory,
+            market: input.research.market,
+            macro: input.research.macro,
+            recent_news: input.research.recentNews,
+          }
+        : null,
+    },
+    schema: DraftSummarySchema,
+    effort: "medium",
+  });
+
+  return { summary: output.summary };
 }
