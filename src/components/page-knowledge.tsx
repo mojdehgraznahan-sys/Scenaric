@@ -365,7 +365,8 @@ export function PageKnowledge() {
               </div>
             </div>
             <Button variant="primary" size="sm" className="flex-shrink-0" onClick={onResearchIndustry} disabled={researchingIndustry || !projectId}>
-              <Icons.Sparkle size={12} /> {researchingIndustry ? "Researching…" : "Research my industry"}
+              {researchingIndustry ? <Icons.Loader size={12} className="animate-spin" /> : <Icons.Sparkle size={12} />}{" "}
+              {researchingIndustry ? "Researching…" : "Research my industry"}
             </Button>
           </div>
         )}
@@ -403,8 +404,10 @@ export function PageKnowledge() {
         </div>
 
         <div className="grid grid-cols-2 gap-3.5">
-          {/* Left: dropzone + sources */}
-          <div>
+          {/* Left: dropzone + sources — self-start + sticky so this column pins near the top of
+              the page's scroll container instead of leaving blank space once the (often much
+              longer) Insights column on the right needs to scroll. */}
+          <div className="self-start sticky top-0">
             {activeType === "Web" ? (
               <div className="rounded-xl border-2 border-dashed border-border bg-white p-7 text-center">
                 <Icons.Link size={20} stroke="#9CA3AF" className="mx-auto mb-2" />
