@@ -363,7 +363,7 @@ export function PageSignals() {
     setWorkingSuggestionId(id);
     try {
       await confirmResearchSuggestion(store.activeProjectId, id);
-      await refreshResearchSuggestions();
+      await Promise.all([refreshResearchSuggestions(), store.refreshSignals(store.activeProjectId)]);
     } catch (err) {
       console.error("[signals] failed to confirm research suggestion", err);
     } finally {

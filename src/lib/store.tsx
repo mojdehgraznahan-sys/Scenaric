@@ -292,6 +292,7 @@ export interface Store {
   setActiveProjectId: (v: string | null) => void;
   signals: Signal[];
   signalsLoading: boolean;
+  refreshSignals: (projectId: string) => Promise<void>;
   createSignal: (input: {
     projectId: string;
     category: SteepCategory;
@@ -880,6 +881,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setActiveProjectId,
     signals,
     signalsLoading,
+    refreshSignals,
     createSignal,
     updateSignal,
     deleteSignal,
