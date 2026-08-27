@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { useStore } from "@/lib/store";
+import { useStore, DEFAULT_ONBOARDING_STATE } from "@/lib/store";
 import { useNavigate } from "@/lib/use-navigate";
 import { suggestFocalHorizon, draftProjectSummary } from "@/lib/actions/ai-focal-question";
 import FocalInterview, { type FocalInterviewCompleteResult } from "./focal-interview";
@@ -31,12 +31,24 @@ const HORIZONS = [
 export default function OnboardingPage() {
   const store = useStore();
   const navigate = useNavigate();
-  const [step, setStep] = React.useState(store.onboarding.step || 1);
-  const [focal, setFocal] = React.useState(store.onboarding.focal || "");
-  const [horizon, setHorizon] = React.useState(store.onboarding.horizon || "5-10 years");
-  const [name, setName] = React.useState(store.onboarding.name || "");
-  const [summary, setSummary] = React.useState(store.onboarding.summary || "");
-  const [industry, setIndustry] = React.useState(store.onboarding.industry || "Technology");
+
+  // /onboarding is reachable repeatedly now (every "+ New Project", not just once after
+  // signup) — if the persisted blob is from an already-launched attempt (`complete: true`),
+  // seed local state fresh instead of resuming it. page-projects.tsx also resets proactively
+  // before navigating here (avoids even the brief flash this fallback would otherwise show);
+  // this is the defense-in-depth path for direct/back navigation landing here with stale state.
+  const seed = store.onboarding.complete ? DEFAULT_ONBOARDING_STATE : store.onboarding;
+  React.useEffect(() => {
+    if (store.onboarding.complete) store.resetOnboarding();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const [step, setStep] = React.useState(seed.step || 1);
+  const [focal, setFocal] = React.useState(seed.focal || "");
+  const [horizon, setHorizon] = React.useState(seed.horizon || "5-10 years");
+  const [name, setName] = React.useState(seed.name || "");
+  const [summary, setSummary] = React.useState(seed.summary || "");
+  const [industry, setIndustry] = React.useState(seed.industry || "Technology");
 
   // Mirrors focal-interview.tsx's onboardingRef pattern — draftProjectSummary resolves
   // asynchronously, possibly after the user has already reached Step 3 and started typing;
@@ -51,7 +63,7 @@ export default function OnboardingPage() {
   // Fires once FocalInterview's own multi-block interview is complete (a candidate picked, or
   // "Use my wording"). refined stays permanently null going forward — the old flow's separate
   // "refine one raw string" step is superseded by the interview drafting candidates directly.
-  const [suggestedHorizon, setSuggestedHorizon] = React.useState<{ horizon: string; rationale: string } | null>(store.onboarding.suggestedHorizon);
+  const [suggestedHorizon, setSuggestedHorizon] = React.useState<{ horizon: string; rationale: string } | null>(seed.suggestedHorizon);
   const [continuingStep1, setContinuingStep1] = React.useState(false);
 
   const persist = (patch: Partial<typeof store.onboarding>) => {
@@ -137,7 +149,14 @@ export default function OnboardingPage() {
           <Icons.Logo size={26} />
           <span className="text-sm font-semibold">Scenaric.ai</span>
         </div>
-        <div className="ml-auto font-mono text-[13px] text-muted-foreground">
+        <button
+          type="button"
+          onClick={() => navigate("/projects")}
+          className="ml-auto mr-4 border-0 bg-transparent text-[13px] text-muted-foreground hover:text-brand-dark"
+        >
+          Cancel
+        </button>
+        <div className="font-mono text-[13px] text-muted-foreground">
           Step {step} of {TOTAL_STEPS}
         </div>
       </div>

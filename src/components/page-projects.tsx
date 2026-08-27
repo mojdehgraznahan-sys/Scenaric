@@ -40,7 +40,6 @@ export function PageProjects() {
   const navigate = useNavigate();
   const allProjects = store.projects || [];
   const [showArchived, setShowArchived] = React.useState(false);
-  const [createOpen, setCreateOpen] = React.useState(false);
   const [menuFor, setMenuFor] = React.useState<string | null>(null);
   const [renaming, setRenaming] = React.useState<string | null>(null);
   const [renameValue, setRenameValue] = React.useState("");
@@ -90,18 +89,15 @@ export function PageProjects() {
     setRenaming(null);
   };
 
-  // Name-only create — the rest (focal question, time horizon, industry, plus the AI-assisted
-  // "Ask AI about this project" panel) lives on the fuller Settings/Project page, so we land
-  // there instead of /home once the project row exists.
-  const createProject = async (name: string) => {
-    try {
-      const proj = await store.createProject({ name: name.trim() });
-      setCreateOpen(false);
-      store.setActiveProjectId(proj.id);
-      navigate("/settings");
-    } catch (err) {
-      console.error("[page-projects] create failed", err);
-    }
+  // "+ New Project" routes into the same rich multi-block AI interview every signup already
+  // goes through (/onboarding) instead of the old name-only quick-create modal. store.onboarding
+  // is a single global blob (not scoped per attempt) — reset it first only if the persisted
+  // state is from an already-launched attempt (`complete: true`); otherwise leave it alone so
+  // a genuinely in-progress, not-yet-finished attempt (e.g. the user clicked Cancel mid-way
+  // last time) resumes instead of being wiped.
+  const startNewProject = () => {
+    if (store.onboarding.complete) store.resetOnboarding();
+    navigate("/onboarding");
   };
 
   return (
@@ -118,13 +114,13 @@ export function PageProjects() {
               {userName} · C-Suite Executive · {companyLabel}
             </div>
           </div>
-          <Button variant="primary" size="sm" className="flex-shrink-0" onClick={() => setCreateOpen(true)}>
+          <Button variant="primary" size="sm" className="flex-shrink-0" onClick={startNewProject}>
             <Icons.Plus size={13} /> New Project
           </Button>
         </div>
 
         {active.length === 0 ? (
-          <ProjectsEmptyState onCreate={() => setCreateOpen(true)} />
+          <ProjectsEmptyState onCreate={startNewProject} />
         ) : (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-3.5">
             {active.map((proj) => (
@@ -201,8 +197,6 @@ export function PageProjects() {
           </div>
         )}
       </div>
-
-      {createOpen && <NewProjectModal onClose={() => setCreateOpen(false)} onCreate={createProject} />}
     </div>
   );
 }
@@ -401,81 +395,3 @@ function ProjectsEmptyState({ onCreate }: { onCreate: () => void }) {
   );
 }
 
-/* ─────────────────────────── New project modal ─────────────────────────── */
-
-function NewProjectModal({ onClose, onCreate }: { onClose: () => void; onCreate: (name: string) => void }) {
-  const [name, setName] = React.useState("");
-
-  React.useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prev;
-    };
-  }, [onClose]);
-
-  const canSubmit = name.trim().length > 0;
-
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="New project"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-      className="fade-in fixed inset-0 z-[1000] flex items-center justify-center bg-[rgba(30,27,46,0.40)] p-6 backdrop-blur-[4px]"
-    >
-      <div
-        onMouseDown={(e) => e.stopPropagation()}
-        className="slide-up relative w-full max-w-[480px] rounded-[14px] bg-white p-6 shadow-[0_30px_80px_rgba(15,23,42,0.25),0_8px_24px_rgba(15,23,42,0.12)]"
-      >
-        <button
-          onClick={onClose}
-          aria-label="Close"
-          className="absolute right-4 top-4 flex h-[30px] w-[30px] items-center justify-center rounded-md border-0 bg-transparent text-muted-foreground hover:bg-[#F5F5F5]"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-            <line x1="6" y1="6" x2="18" y2="18" />
-            <line x1="6" y1="18" x2="18" y2="6" />
-          </svg>
-        </button>
-
-        <h2 className="text-[19px] font-semibold tracking-[-0.01em] text-brand-dark">New project</h2>
-        <div className="mb-[18px] mt-1 text-[13px] text-muted-foreground">
-          Name it — you&apos;ll set the focal question, time horizon, and industry next.
-        </div>
-
-        <label className="mb-5 block">
-          <span className="mb-[5px] block text-xs font-medium text-brand-dark">
-            Project name<span className="text-brand-orange"> *</span>
-          </span>
-          <Input
-            autoFocus
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && canSubmit) onCreate(name);
-            }}
-            placeholder="e.g. AI Regulation Outlook"
-            className="w-full"
-          />
-        </label>
-
-        <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="border-0 bg-transparent px-1.5 py-2 text-[13.5px] font-medium text-muted-foreground">
-            Cancel
-          </button>
-          <Button variant="primary" size="sm" disabled={!canSubmit} onClick={() => onCreate(name)}>
-            Create project
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}

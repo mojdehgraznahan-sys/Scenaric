@@ -170,6 +170,30 @@ interface OnboardingState {
   suggestedHorizon: { horizon: string; rationale: string } | null;
 }
 
+export const DEFAULT_ONBOARDING_STATE: OnboardingState = {
+  step: 1,
+  companyName: "",
+  industry: "Technology",
+  companySubmitted: false,
+  research: { status: "idle", data: null, error: null },
+  blockStatus: { A: "active", B: "pending", C: "pending", D: "pending" },
+  activeBlock: "A",
+  blockA: { keepsAwake: "", decision5to10yr: "", ownerAndDeadline: "", ifWrongBreaks: "" },
+  blockB: { oracleQ1: "", oracleQ2: "", oracleQ3: "" },
+  blockC: { bestCaseAndPath: "", worstCaseAndPivots: "", turningPoints: "" },
+  blockD: { inevitable: "", genuinelyUncertain: "", dependencies: "" },
+  candidates: null,
+  candidatesGap: null,
+  pickedFocal: null,
+  focal: "",
+  refined: null,
+  horizon: "5-10 years",
+  name: "",
+  summary: "",
+  complete: false,
+  suggestedHorizon: null,
+};
+
 function toProjectSummary(row: ProjectRow): ProjectSummary {
   return {
     id: row.id,
@@ -243,6 +267,10 @@ export interface Store {
   user: User;
   onboarding: OnboardingState;
   setOnboarding: (v: OnboardingState) => void;
+  // Resets to DEFAULT_ONBOARDING_STATE — called before starting a genuinely new attempt (a
+  // prior one's `complete: true`) rather than resuming an in-progress one. See
+  // onboarding/page.tsx's mount-time self-heal and page-projects.tsx's "+ New Project".
+  resetOnboarding: () => void;
   project: Project;
   setProject: (v: Project) => void;
   projects: ProjectSummary[];
@@ -468,29 +496,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   // e.g. onboarding.blockA.keepsAwake off an object that never had a blockA key. Renaming the
   // key orphans old data harmlessly rather than needing real migration logic for what's
   // inherently short-lived, in-progress-wizard scratch state.
-  const [onboarding, setOnboarding] = usePersistentState<OnboardingState>("fm.onb.v2", {
-    step: 1,
-    companyName: "",
-    industry: "Technology",
-    companySubmitted: false,
-    research: { status: "idle", data: null, error: null },
-    blockStatus: { A: "active", B: "pending", C: "pending", D: "pending" },
-    activeBlock: "A",
-    blockA: { keepsAwake: "", decision5to10yr: "", ownerAndDeadline: "", ifWrongBreaks: "" },
-    blockB: { oracleQ1: "", oracleQ2: "", oracleQ3: "" },
-    blockC: { bestCaseAndPath: "", worstCaseAndPivots: "", turningPoints: "" },
-    blockD: { inevitable: "", genuinelyUncertain: "", dependencies: "" },
-    candidates: null,
-    candidatesGap: null,
-    pickedFocal: null,
-    focal: "",
-    refined: null,
-    horizon: "5-10 years",
-    name: "",
-    summary: "",
-    complete: false,
-    suggestedHorizon: null,
-  });
+  //
+  // DEFAULT_ONBOARDING_STATE is also resetOnboarding()'s target — "+ New Project"
+  // (page-projects.tsx) and onboarding/page.tsx's own mount-time self-heal both reset back to
+  // this exact shape once a prior attempt's `complete: true` blob is stale, now that
+  // /onboarding is reachable repeatedly (not just once, right after signup).
+  const [onboarding, setOnboarding] = usePersistentState<OnboardingState>("fm.onb.v2", DEFAULT_ONBOARDING_STATE);
+  const resetOnboarding = useCallback(() => setOnboarding(DEFAULT_ONBOARDING_STATE), [setOnboarding]);
 
   // ---- Projects (real, Supabase) ----
   const [projects, setProjectsState] = useState<ProjectSummary[]>([]);
@@ -853,6 +865,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     user,
     onboarding,
     setOnboarding,
+    resetOnboarding,
     project,
     setProject,
     projects,
