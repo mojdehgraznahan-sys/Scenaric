@@ -15,7 +15,39 @@ import { Chip } from "@/components/chip";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 import { askSignalsChat, type SignalsChatResult } from "@/lib/actions/ai-signals";
-import { runMacroTrendSweep } from "@/lib/actions/ai-research-suggestions";
+import {
+  runMacroTrendSweep,
+  runFindScan,
+  runFindOracleQuestions,
+  runFindActorProfile,
+  runFindWorstCaseBackcast,
+  runFindBlindSpotSweep,
+  type RunScanResult,
+} from "@/lib/actions/ai-research-suggestions";
+import {
+  runRankImpact,
+  runRankUncertainty,
+  runRankCriticalUncertainties,
+  runRankPredetermined,
+  type RunRankCriticalUncertaintiesResult,
+  type RunRankPredeterminedResult,
+} from "@/lib/actions/ai-signals-rank";
+import {
+  runSharpenForceOrEvent,
+  runSharpenSplitCompound,
+  runSharpenDedupe,
+  type SharpenForceOrEventResult,
+  type SharpenSplitCompoundResult,
+  type SharpenDedupeResult,
+} from "@/lib/actions/ai-signals-sharpen";
+import {
+  runTestSkeptic,
+  runTestCoverage,
+  runTestWildcards,
+  type TestSkepticResult,
+  type TestCoverageResult,
+  type TestWildcardsResult,
+} from "@/lib/actions/ai-signals-test";
 import { AIGenerationFailedError } from "@/lib/ai/errors";
 import type {
   ValidatePlausibilityResult,
@@ -201,21 +233,74 @@ interface KnowledgeResultEntry {
   summary?: string;
 }
 
-type SignalsTaskId = "suggest_signals" | "scan_driving_forces";
+type SignalsTaskId =
+  | "suggest_signals"
+  | "scan_driving_forces"
+  | "find_scan"
+  | "find_oracle"
+  | "find_actors"
+  | "find_worst_case"
+  | "find_blind_spot"
+  | "rank_impact"
+  | "rank_uncertainty"
+  | "rank_critical_uncertainties"
+  | "rank_predetermined"
+  | "sharpen_force_or_event"
+  | "sharpen_split_compound"
+  | "sharpen_dedupe"
+  | "test_skeptic"
+  | "test_coverage"
+  | "test_wildcards";
 
-const SIGNALS_TASKS: { id: SignalsTaskId; label: string }[] = [
-  { id: "suggest_signals", label: "Suggest signals" },
-  { id: "scan_driving_forces", label: "Scan for driving forces (web)" },
+// `group: null` renders under the plain "TASKS" heading (today's two pre-existing tools).
+// `group: "find"` are SIGNALS_ASK_AI_PROMPTS.md's Group 1 — research-mode-on, land as
+// unconfirmed research_suggestions (step:'find'), reviewed on the Signals page's Suggestions
+// tab, same as "Scan for driving forces (web)" above. `group: "rank"` is Group 3 — closed-book,
+// temp=0; rank_impact/rank_uncertainty stage into signal_score_proposals (reviewed on the
+// Signals page's Scores tab), rank_critical_uncertainties/rank_predetermined are read-only
+// analysis rendered straight into this drawer. `group: "sharpen"`/`group: "test"` are Groups
+// 2/4 — closed-book, advisory-only, rendered straight into this drawer, zero DB writes.
+// Sharpen/Rank/Test all need at least one existing signal (spec's empty-state rule) — Find
+// doesn't, since finding signals is the point when the project has none yet.
+const SIGNALS_TASKS: { id: SignalsTaskId; label: string; group: "find" | "rank" | "sharpen" | "test" | null; requiresSignals?: boolean }[] = [
+  { id: "suggest_signals", label: "Suggest signals", group: null },
+  { id: "scan_driving_forces", label: "Scan for driving forces (web)", group: null },
+  { id: "find_scan", label: "Scan for missing forces", group: "find" },
+  { id: "find_oracle", label: "From my open questions", group: "find" },
+  { id: "find_actors", label: "Profile my dependencies", group: "find" },
+  { id: "find_worst_case", label: "Work back from my worst case", group: "find" },
+  { id: "find_blind_spot", label: "Blind-spot sweep", group: "find" },
+  { id: "sharpen_force_or_event", label: "Force or event?", group: "sharpen", requiresSignals: true },
+  { id: "sharpen_split_compound", label: "Split compound signals", group: "sharpen", requiresSignals: true },
+  { id: "sharpen_dedupe", label: "De-duplicate", group: "sharpen", requiresSignals: true },
+  { id: "rank_impact", label: "Score impact", group: "rank", requiresSignals: true },
+  { id: "rank_uncertainty", label: "Score uncertainty", group: "rank", requiresSignals: true },
+  { id: "rank_critical_uncertainties", label: "Find critical uncertainties", group: "rank", requiresSignals: true },
+  { id: "rank_predetermined", label: "Check predetermineds", group: "rank", requiresSignals: true },
+  { id: "test_skeptic", label: "Sceptic's review", group: "test", requiresSignals: true },
+  { id: "test_coverage", label: "Cover my key concerns", group: "test", requiresSignals: true },
+  { id: "test_wildcards", label: "Wildcards", group: "test", requiresSignals: true },
 ];
 
-// Both tasks normalize to one shared summary shape, same convention KnowledgeResultEntry above
-// already uses — no per-task result union needed.
+// Most tasks normalize to one shared one-line summary (same convention KnowledgeResultEntry
+// already uses). The read-only analysis tasks (rank_critical_uncertainties/rank_predetermined
+// and every Sharpen/Test task) have real structured content to show, so they get their own
+// fields, rendered by their own branch below — same per-shape pattern MatrixResultEntry
+// already uses.
 interface SignalsResultEntry {
   task: SignalsTaskId;
   ts: number;
   ok: boolean;
   error?: string;
   summary?: string;
+  criticalUncertainties?: RunRankCriticalUncertaintiesResult;
+  predetermined?: RunRankPredeterminedResult;
+  forceOrEvent?: SharpenForceOrEventResult;
+  splitCompound?: SharpenSplitCompoundResult;
+  dedupe?: SharpenDedupeResult;
+  skepticReview?: TestSkepticResult;
+  coverage?: TestCoverageResult;
+  wildcards?: TestWildcardsResult;
 }
 
 // Matrix mode — fixed task menu, never freeform, same shape as Storyline/Narrative (no
@@ -845,34 +930,86 @@ export function AskAI({
   const [signalsResults, setSignalsResults] = React.useState<SignalsResultEntry[]>([]);
   const [runningSignalsTask, setRunningSignalsTask] = React.useState<SignalsTaskId | null>(null);
 
+  // Shared by "Scan for driving forces (web)" and all 5 Group 1 "Find" prompts — every one of
+  // them stages results into research_suggestions (never writes signals directly) and reports
+  // back the same { sufficientEvidence, gap, suggestionsCreated } shape.
+  const FIND_RUNNERS: Partial<Record<SignalsTaskId, (projectId: string) => Promise<RunScanResult>>> = {
+    scan_driving_forces: runMacroTrendSweep,
+    find_scan: runFindScan,
+    find_oracle: runFindOracleQuestions,
+    find_actors: runFindActorProfile,
+    find_worst_case: runFindWorstCaseBackcast,
+    find_blind_spot: runFindBlindSpotSweep,
+  };
+
   const runSignalsTask = async (taskId: SignalsTaskId) => {
     const projectId = store.activeProjectId;
     if (!projectId) return;
     setRunningSignalsTask(taskId);
     try {
-      let summary: string;
+      const findRunner = FIND_RUNNERS[taskId];
+      let entry: SignalsResultEntry;
       if (taskId === "suggest_signals") {
         // Same combined suggest-then-score logic page-signals.tsx's old onSuggestSignals had —
         // store.suggestSignals/scoreUnscoredSignals both call refreshSignals internally, so
         // store.signals (and every page reading it) updates with no extra event needed.
         const suggestion = await store.suggestSignals(projectId);
+        let summary: string;
         if (suggestion.created === 0) {
           summary = "No new signals to suggest right now.";
         } else {
           const scoring = await store.scoreUnscoredSignals(projectId);
           summary = `Suggested ${suggestion.created} signal(s), scored ${scoring.scored}.`;
         }
-      } else {
-        const result = await runMacroTrendSweep(projectId);
-        summary = result.sufficientEvidence
-          ? `Found ${result.suggestionsCreated} driving force(s) to review below.`
-          : result.gap || "No new driving forces found.";
-        // Step 3 research_suggestions live in page-signals.tsx's own local state, not the
+        entry = { task: taskId, ts: Date.now(), ok: true, summary };
+      } else if (findRunner) {
+        const result = await findRunner(projectId);
+        const summary = result.sufficientEvidence
+          ? `Found ${result.suggestionsCreated} candidate(s) to review below.`
+          : result.gap || "Nothing new found.";
+        // Step 2/3 research_suggestions live in page-signals.tsx's own local state, not the
         // store — tell it to refetch (same fm:*-updated convention page-settings.tsx/
         // page-knowledge.tsx already use).
         window.dispatchEvent(new CustomEvent("fm:signals-updated", { detail: { projectId } }));
+        entry = { task: taskId, ts: Date.now(), ok: true, summary };
+      } else if (taskId === "rank_impact" || taskId === "rank_uncertainty") {
+        const result = await (taskId === "rank_impact" ? runRankImpact : runRankUncertainty)(projectId);
+        const summary =
+          result.proposalsCreated > 0
+            ? `Proposed ${result.proposalsCreated} score(s) — review on the Signals page's Scores tab.`
+            : "No signals to score right now.";
+        // signal_score_proposals review lives in page-signals.tsx's own local state — same
+        // fm:*-updated convention as the Find tasks above.
+        window.dispatchEvent(new CustomEvent("fm:signals-updated", { detail: { projectId } }));
+        entry = { task: taskId, ts: Date.now(), ok: true, summary };
+      } else if (taskId === "rank_critical_uncertainties") {
+        const result = await runRankCriticalUncertainties(projectId);
+        entry = { task: taskId, ts: Date.now(), ok: true, criticalUncertainties: result };
+      } else if (taskId === "rank_predetermined") {
+        const result = await runRankPredetermined(projectId);
+        entry = { task: taskId, ts: Date.now(), ok: true, predetermined: result };
+      } else if (taskId === "sharpen_force_or_event") {
+        const result = await runSharpenForceOrEvent(projectId);
+        entry = { task: taskId, ts: Date.now(), ok: true, forceOrEvent: result };
+      } else if (taskId === "sharpen_split_compound") {
+        const result = await runSharpenSplitCompound(projectId);
+        entry = { task: taskId, ts: Date.now(), ok: true, splitCompound: result };
+      } else if (taskId === "sharpen_dedupe") {
+        const result = await runSharpenDedupe(projectId);
+        entry = { task: taskId, ts: Date.now(), ok: true, dedupe: result };
+      } else if (taskId === "test_skeptic") {
+        const result = await runTestSkeptic(projectId);
+        entry = { task: taskId, ts: Date.now(), ok: true, skepticReview: result };
+      } else if (taskId === "test_coverage") {
+        const result = await runTestCoverage(projectId);
+        entry = { task: taskId, ts: Date.now(), ok: true, coverage: result };
+      } else if (taskId === "test_wildcards") {
+        const result = await runTestWildcards(projectId);
+        entry = { task: taskId, ts: Date.now(), ok: true, wildcards: result };
+      } else {
+        return;
       }
-      setSignalsResults((r) => [{ task: taskId, ts: Date.now(), ok: true, summary }, ...r]);
+      setSignalsResults((r) => [entry, ...r]);
     } catch (err) {
       console.error("[ask-ai] signals task failed", err);
       setSignalsResults((r) => [{ task: taskId, ts: Date.now(), ok: false, error: "Something went wrong running that task." }, ...r]);
@@ -1834,13 +1971,87 @@ export function AskAI({
               <div className="scroll-y flex flex-1 flex-col gap-2.5 p-4">
                 <div className="flex flex-col gap-1.5">
                   <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">TASKS</div>
-                  {SIGNALS_TASKS.map((t) => {
+                  {SIGNALS_TASKS.filter((t) => t.group === null).map((t) => {
                     const disabled = !!runningSignalsTask || !store.activeProjectId;
                     return (
                       <button
                         key={t.id}
                         onClick={() => runSignalsTask(t.id)}
                         disabled={disabled}
+                        className="rounded-[10px] border border-border bg-white px-3 py-2.5 text-left text-[12.5px] text-[#374151] transition-[border,background] duration-[120ms] hover:border-brand-orange100 hover:bg-brand-orangeLight disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {runningSignalsTask === t.id ? "Running…" : t.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">FIND — signals I&apos;ve missed</div>
+                  {SIGNALS_TASKS.filter((t) => t.group === "find").map((t) => {
+                    const disabled = !!runningSignalsTask || !store.activeProjectId;
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => runSignalsTask(t.id)}
+                        disabled={disabled}
+                        className="rounded-[10px] border border-border bg-white px-3 py-2.5 text-left text-[12.5px] text-[#374151] transition-[border,background] duration-[120ms] hover:border-brand-orange100 hover:bg-brand-orangeLight disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {runningSignalsTask === t.id ? "Running…" : t.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">RANK — score &amp; prioritize</div>
+                  {SIGNALS_TASKS.filter((t) => t.group === "rank").map((t) => {
+                    const noSignals = !!t.requiresSignals && store.signals.length === 0;
+                    const disabled = !!runningSignalsTask || !store.activeProjectId || noSignals;
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => runSignalsTask(t.id)}
+                        disabled={disabled}
+                        title={noSignals ? "Add signals first" : undefined}
+                        className="rounded-[10px] border border-border bg-white px-3 py-2.5 text-left text-[12.5px] text-[#374151] transition-[border,background] duration-[120ms] hover:border-brand-orange100 hover:bg-brand-orangeLight disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {runningSignalsTask === t.id ? "Running…" : t.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">SHARPEN — clean up what&apos;s here</div>
+                  {SIGNALS_TASKS.filter((t) => t.group === "sharpen").map((t) => {
+                    const noSignals = !!t.requiresSignals && store.signals.length === 0;
+                    const disabled = !!runningSignalsTask || !store.activeProjectId || noSignals;
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => runSignalsTask(t.id)}
+                        disabled={disabled}
+                        title={noSignals ? "Add signals first" : undefined}
+                        className="rounded-[10px] border border-border bg-white px-3 py-2.5 text-left text-[12.5px] text-[#374151] transition-[border,background] duration-[120ms] hover:border-brand-orange100 hover:bg-brand-orangeLight disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {runningSignalsTask === t.id ? "Running…" : t.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">TEST — pressure-test</div>
+                  {SIGNALS_TASKS.filter((t) => t.group === "test").map((t) => {
+                    const noSignals = !!t.requiresSignals && store.signals.length === 0;
+                    const disabled = !!runningSignalsTask || !store.activeProjectId || noSignals;
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => runSignalsTask(t.id)}
+                        disabled={disabled}
+                        title={noSignals ? "Add signals first" : undefined}
                         className="rounded-[10px] border border-border bg-white px-3 py-2.5 text-left text-[12.5px] text-[#374151] transition-[border,background] duration-[120ms] hover:border-brand-orange100 hover:bg-brand-orangeLight disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         {runningSignalsTask === t.id ? "Running…" : t.label}
@@ -1861,7 +2072,173 @@ export function AskAI({
                             <span className="font-mono text-[10px] text-text-3">{new Date(r.ts).toLocaleTimeString()}</span>
                           </div>
                           {!r.ok && <div className="text-[12.5px] text-[#EF4444]">{r.error}</div>}
-                          {r.ok && <p className="m-0 text-[12.5px] leading-[1.5] text-muted-foreground [text-wrap:pretty]">{r.summary}</p>}
+                          {r.ok && r.summary && <p className="m-0 text-[12.5px] leading-[1.5] text-muted-foreground [text-wrap:pretty]">{r.summary}</p>}
+                          {r.ok && r.criticalUncertainties && (
+                            <div className="flex flex-col gap-2 text-[12.5px] leading-[1.5]">
+                              {r.criticalUncertainties.gap && <p className="m-0 text-muted-foreground [text-wrap:pretty]">{r.criticalUncertainties.gap}</p>}
+                              {r.criticalUncertainties.recommendedPair && (
+                                <div>
+                                  <div className="font-semibold">Recommended axis pair</div>
+                                  <div className="text-muted-foreground">
+                                    {r.criticalUncertainties.recommendedPair.axisA.title} × {r.criticalUncertainties.recommendedPair.axisB.title}
+                                  </div>
+                                  <p className="m-0 mt-0.5 text-muted-foreground [text-wrap:pretty]">{r.criticalUncertainties.recommendedPair.reasoning}</p>
+                                </div>
+                              )}
+                              {r.criticalUncertainties.runnerUpPair && (
+                                <div>
+                                  <div className="font-semibold">Runner-up pair</div>
+                                  <div className="text-muted-foreground">
+                                    {r.criticalUncertainties.runnerUpPair.axisA.title} × {r.criticalUncertainties.runnerUpPair.axisB.title}
+                                  </div>
+                                  <p className="m-0 mt-0.5 text-muted-foreground [text-wrap:pretty]">{r.criticalUncertainties.runnerUpPair.reasoning}</p>
+                                </div>
+                              )}
+                              {r.criticalUncertainties.notes && <p className="m-0 text-muted-foreground [text-wrap:pretty]">{r.criticalUncertainties.notes}</p>}
+                            </div>
+                          )}
+                          {r.ok && r.predetermined && (
+                            <div className="flex flex-col gap-2 text-[12.5px] leading-[1.5]">
+                              {r.predetermined.elements.length === 0 && (
+                                <p className="m-0 text-muted-foreground">No low-uncertainty/high-impact signals yet.</p>
+                              )}
+                              {r.predetermined.elements.map((e) => (
+                                <div key={e.signalId}>
+                                  <div className="font-semibold">
+                                    {e.title}
+                                    {e.failsAllQuadrantsTest && <span className="ml-1.5 text-[#EF4444]">— fails 4-quadrant test</span>}
+                                  </div>
+                                  <div className="text-muted-foreground">
+                                    Evidence: {e.evidence} ({e.strength})
+                                  </div>
+                                  {e.failReason && <p className="m-0 mt-0.5 text-[#EF4444] [text-wrap:pretty]">{e.failReason}</p>}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {r.ok && r.forceOrEvent && (
+                            <div className="flex flex-col gap-2 text-[12.5px] leading-[1.5]">
+                              {r.forceOrEvent.flags.length === 0 && <p className="m-0 text-muted-foreground">No signals to review yet.</p>}
+                              {r.forceOrEvent.flags.map((f) => (
+                                <div key={f.signalId}>
+                                  <div className="font-semibold">
+                                    {f.title} <span className="font-normal text-muted-foreground">— {f.verdict}</span>
+                                  </div>
+                                  {f.underlyingForce && (
+                                    <div className="text-muted-foreground">
+                                      Evidence of: {f.underlyingForce}
+                                      {f.mergeRecommendation ? ` — ${f.mergeRecommendation}` : ""}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {r.ok && r.splitCompound && (
+                            <div className="flex flex-col gap-2 text-[12.5px] leading-[1.5]">
+                              {r.splitCompound.splits.length === 0 && <p className="m-0 text-muted-foreground">No compound signals found.</p>}
+                              {r.splitCompound.splits.map((s) => (
+                                <div key={s.signalId}>
+                                  <div className="font-semibold">{s.title}</div>
+                                  <div className="text-muted-foreground">
+                                    → {s.halves[0].title} + {s.halves[1].title} ({s.independent ? "independent" : "correlated"})
+                                  </div>
+                                  <p className="m-0 mt-0.5 text-muted-foreground [text-wrap:pretty]">{s.rationale}</p>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {r.ok && r.dedupe && (
+                            <div className="flex flex-col gap-2 text-[12.5px] leading-[1.5]">
+                              {r.dedupe.clusters.length === 0 && <p className="m-0 text-muted-foreground">No duplicates found.</p>}
+                              {r.dedupe.clusters.map((c, ci) => (
+                                <div key={ci}>
+                                  <div className="font-semibold">{c.mergedTitle}</div>
+                                  <div className="text-muted-foreground">Absorbs: {c.sourceTitles.join(", ")}</div>
+                                  <p className="m-0 mt-0.5 text-muted-foreground [text-wrap:pretty]">{c.mergedBody}</p>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {r.ok && r.skepticReview && (
+                            <div className="flex flex-col gap-2 text-[12.5px] leading-[1.5]">
+                              {r.skepticReview.conventionalWisdom.length > 0 && (
+                                <div>
+                                  <div className="font-semibold">Conventional-wisdom filler</div>
+                                  {r.skepticReview.conventionalWisdom.map((p, pi) => (
+                                    <p key={pi} className="m-0 text-muted-foreground [text-wrap:pretty]">
+                                      {p.signalTitle ? `${p.signalTitle} — ` : ""}
+                                      {p.point}
+                                    </p>
+                                  ))}
+                                </div>
+                              )}
+                              {r.skepticReview.easyToResearchBias.length > 0 && (
+                                <div>
+                                  <div className="font-semibold">Easy-to-research bias</div>
+                                  {r.skepticReview.easyToResearchBias.map((p, pi) => (
+                                    <p key={pi} className="m-0 text-muted-foreground [text-wrap:pretty]">
+                                      {p.signalTitle ? `${p.signalTitle} — ` : ""}
+                                      {p.point}
+                                    </p>
+                                  ))}
+                                </div>
+                              )}
+                              {r.skepticReview.blindSpot && (
+                                <div>
+                                  <div className="font-semibold">Blind spot</div>
+                                  <p className="m-0 text-muted-foreground [text-wrap:pretty]">{r.skepticReview.blindSpot}</p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {r.ok && r.coverage && (
+                            <div className="flex flex-col gap-2 text-[12.5px] leading-[1.5]">
+                              {!r.coverage.hasOnboardingData && (
+                                <p className="m-0 text-muted-foreground">
+                                  This project has no awake-at-night/best-case/worst-case answers from onboarding to audit against.
+                                </p>
+                              )}
+                              {(
+                                [
+                                  ["What keeps you awake", r.coverage.awake],
+                                  ["Best case", r.coverage.good],
+                                  ["Worst case", r.coverage.bad],
+                                ] as const
+                              ).map(([label2, item]) =>
+                                item ? (
+                                  <div key={label2}>
+                                    <div className="font-semibold">
+                                      {label2} — {item.covered ? "covered" : "gap"}
+                                    </div>
+                                    {item.covered ? (
+                                      <div className="text-muted-foreground">{item.coveringSignalTitles.join(", ")}</div>
+                                    ) : (
+                                      <p className="m-0 text-muted-foreground [text-wrap:pretty]">{item.gap}</p>
+                                    )}
+                                  </div>
+                                ) : null
+                              )}
+                              {r.coverage.mostImportantGap && (
+                                <div>
+                                  <div className="font-semibold">Most important gap</div>
+                                  <p className="m-0 text-muted-foreground [text-wrap:pretty]">{r.coverage.mostImportantGap}</p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {r.ok && r.wildcards && (
+                            <div className="flex flex-col gap-2 text-[12.5px] leading-[1.5]">
+                              {r.wildcards.items.length === 0 && <p className="m-0 text-muted-foreground">No wildcards identified.</p>}
+                              {r.wildcards.items.map((w, wi) => (
+                                <div key={wi}>
+                                  <div className="font-semibold">{w.title}</div>
+                                  <p className="m-0 text-muted-foreground [text-wrap:pretty]">{w.description}</p>
+                                  <div className="text-muted-foreground">Precursor: {w.precursor}</div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       );
                     })}

@@ -198,6 +198,8 @@ Rules:
   \`candidates\` — never invented, never the current pair, never a signal from any other bucket.
 - rationale must explain why this pairing could surface a more decision-relevant set of futures
   than the current pick for THIS focal question — not a generic "these are also important."
+  Refer to signals by their title only in rationale — signal_id is only ever for the pair
+  fields above, never mentioned in the prose itself.
 - If fewer than 2 usable alternates exist, or none form a genuinely better pairing, return
   sufficient_evidence:false, pair:null, rationale:null, and a gap explaining why.
 - This is a suggestion only — never imply it has been applied.

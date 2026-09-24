@@ -17,6 +17,7 @@ import {
   setProjectArchived,
   deleteProject as deleteProjectAction,
   type ProjectRow,
+  type OnboardingAnswersInput,
 } from "./actions/projects";
 import {
   listSignals,
@@ -282,6 +283,7 @@ export interface Store {
     horizon?: string;
     industry?: string;
     summary?: string;
+    onboardingAnswers?: OnboardingAnswersInput;
   }) => Promise<ProjectSummary>;
   renameProject: (id: string, name: string) => Promise<void>;
   duplicateProject: (id: string) => Promise<void>;
@@ -540,6 +542,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       horizon?: string;
       industry?: string;
       summary?: string;
+      onboardingAnswers?: OnboardingAnswersInput;
     }) => {
       const row = await createProjectAction(input);
       const summary = toProjectSummary(row);

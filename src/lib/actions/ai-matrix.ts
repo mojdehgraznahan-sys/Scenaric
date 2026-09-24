@@ -38,7 +38,9 @@ Decision procedure (must follow, do not skip steps):
 
 Every rationale bullet must reference axis_a/axis_b's actual content or
 a named library signal — never a generic statement like "these seem
-different."
+different." Refer to axes/signals by their title only — never by an id,
+real or invented; no id is given to you in this task's input, and none
+belongs in your output either.
 
 Output schema:
 { state: "independent"|"correlated"|"uncertain",

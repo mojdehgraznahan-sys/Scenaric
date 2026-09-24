@@ -29,6 +29,25 @@ async function currentOrgId(): Promise<string> {
   return data.org_id;
 }
 
+// Onboarding's Step 1 four-block interview answers (focal-interview-blocks.ts /
+// OnboardingState's blockA-D in store.tsx) — passed through from launch() so they survive
+// past the wizard instead of being dropped, per SIGNALS_ASK_AI_PROMPTS.md's need for this
+// data on the Signals page well after onboarding is over. All fields optional/nullable:
+// any block (or individual optional question within it) may have been skipped.
+export interface OnboardingAnswersInput {
+  companyName?: string | null;
+  blockA?: { keepsAwake?: string; decision5to10yr?: string; ownerAndDeadline?: string; ifWrongBreaks?: string };
+  blockB?: { oracleQ1?: string; oracleQ2?: string; oracleQ3?: string };
+  blockC?: { bestCaseAndPath?: string; worstCaseAndPivots?: string; turningPoints?: string };
+  blockD?: { inevitable?: string; genuinelyUncertain?: string; dependencies?: string };
+}
+
+// Blank onboarding answers (e.g. "" for a skipped question) are stored as null, not "" —
+// lets buildSignalsContext/per-chip gating tell "unanswered" apart from "answered blank".
+function blankToNull(v: string | undefined | null): string | null {
+  return v && v.trim() ? v : null;
+}
+
 export async function createProject(input: {
   name: string;
   focal_question?: string;
@@ -36,6 +55,7 @@ export async function createProject(input: {
   horizon?: string;
   industry?: string;
   summary?: string;
+  onboardingAnswers?: OnboardingAnswersInput;
 }): Promise<ProjectRow> {
   const supabase = createClient();
   const {
@@ -57,8 +77,75 @@ export async function createProject(input: {
     .select()
     .single();
   if (error) throw error;
+
+  const a = input.onboardingAnswers;
+  if (a) {
+    const { error: answersError } = await supabase.from("onboarding_answers").insert({
+      project_id: data.id,
+      company_name: blankToNull(a.companyName),
+      keeps_awake: blankToNull(a.blockA?.keepsAwake),
+      decision_5to10yr: blankToNull(a.blockA?.decision5to10yr),
+      owner_and_deadline: blankToNull(a.blockA?.ownerAndDeadline),
+      if_wrong_breaks: blankToNull(a.blockA?.ifWrongBreaks),
+      oracle_q1: blankToNull(a.blockB?.oracleQ1),
+      oracle_q2: blankToNull(a.blockB?.oracleQ2),
+      oracle_q3: blankToNull(a.blockB?.oracleQ3),
+      best_case_and_path: blankToNull(a.blockC?.bestCaseAndPath),
+      worst_case_and_pivots: blankToNull(a.blockC?.worstCaseAndPivots),
+      turning_points: blankToNull(a.blockC?.turningPoints),
+      inevitable: blankToNull(a.blockD?.inevitable),
+      genuinely_uncertain: blankToNull(a.blockD?.genuinelyUncertain),
+      dependencies: blankToNull(a.blockD?.dependencies),
+    });
+    if (answersError) throw answersError;
+  }
+
   revalidatePath("/projects");
   return data;
+}
+
+// Read-side counterpart to createProject's onboarding_answers insert above. Field names here
+// match SIGNALS_ASK_AI_PROMPTS.md's token names ({awake}, {o1}, {given}, {actors}, ...) rather
+// than the DB's blockA-D-derived column names, since this is the shape AI prompt builders
+// (buildSignalsContext, Phase 1+) actually want to interpolate from.
+export interface OnboardingAnswers {
+  companyName: string | null;
+  awake: string | null;
+  decision: string | null;
+  owner: string | null;
+  stakes: string | null;
+  o1: string | null;
+  o2: string | null;
+  o3: string | null;
+  good: string | null;
+  bad: string | null;
+  turns: string | null;
+  given: string | null;
+  open: string | null;
+  actors: string | null;
+}
+
+export async function getOnboardingAnswers(projectId: string): Promise<OnboardingAnswers | null> {
+  const supabase = createClient();
+  const { data, error } = await supabase.from("onboarding_answers").select("*").eq("project_id", projectId).maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return {
+    companyName: data.company_name,
+    awake: data.keeps_awake,
+    decision: data.decision_5to10yr,
+    owner: data.owner_and_deadline,
+    stakes: data.if_wrong_breaks,
+    o1: data.oracle_q1,
+    o2: data.oracle_q2,
+    o3: data.oracle_q3,
+    good: data.best_case_and_path,
+    bad: data.worst_case_and_pivots,
+    turns: data.turning_points,
+    given: data.inevitable,
+    open: data.genuinely_uncertain,
+    actors: data.dependencies,
+  };
 }
 
 export async function renameProject(id: string, name: string): Promise<ProjectRow> {

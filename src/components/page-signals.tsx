@@ -23,6 +23,14 @@ import {
   dismissResearchSuggestion,
   type ResearchSuggestionRow,
 } from "@/lib/actions/ai-research-suggestions";
+import {
+  listSignalScoreProposals,
+  confirmSignalScoreProposal,
+  dismissSignalScoreProposal,
+  confirmAllSignalScoreProposals,
+  dismissAllInBatch,
+  type SignalScoreProposalRow,
+} from "@/lib/actions/ai-signals-rank";
 import { AIGenerationFailedError } from "@/lib/ai/errors";
 import type { Signal, SteepCategory } from "@/lib/types";
 
@@ -102,7 +110,7 @@ export function PageSignals() {
   // Signals is the default/first tab (the page's primary content); Suggestions is the staging
   // area for pending research_suggestions. Plain component state, not URL-persisted — unlike
   // sortMode (a filter over what you're looking at), this doesn't need to be bookmarkable.
-  const [tab, setTab] = React.useState<"signals" | "suggestions">("signals");
+  const [tab, setTab] = React.useState<"signals" | "suggestions" | "scores">("signals");
   const [filter, setFilter] = React.useState<"All" | SteepCategory>("All");
   const [selected, setSelected] = React.useState<Signal | null>(null);
   const [addOpen, setAddOpen] = React.useState(false);
@@ -119,6 +127,11 @@ export function PageSignals() {
   const [suggestResult, setSuggestResult] = React.useState<string | null>(null);
   const [researchSuggestions, setResearchSuggestions] = React.useState<ResearchSuggestionRow[]>([]);
   const [workingSuggestionId, setWorkingSuggestionId] = React.useState<string | null>(null);
+  // Group 3 "Rank" (SIGNALS_ASK_AI_PROMPTS.md) score proposals — same staging/review pattern
+  // as researchSuggestions above, just a different source table (signal_score_proposals).
+  const [scoreProposals, setScoreProposals] = React.useState<SignalScoreProposalRow[]>([]);
+  const [workingProposalId, setWorkingProposalId] = React.useState<string | null>(null);
+  const [workingBatchId, setWorkingBatchId] = React.useState<string | null>(null);
   const [addingToMatrixId, setAddingToMatrixId] = React.useState<string | null>(null);
   const [addToMatrixError, setAddToMatrixError] = React.useState<{ id: string; message: string } | null>(null);
 
@@ -338,7 +351,7 @@ export function PageSignals() {
 
   const refreshResearchSuggestions = React.useCallback(async () => {
     if (!store.activeProjectId) return;
-    setResearchSuggestions(await listResearchSuggestions(store.activeProjectId, "driving_forces"));
+    setResearchSuggestions(await listResearchSuggestions(store.activeProjectId, ["driving_forces", "find"]));
   }, [store.activeProjectId]);
 
   React.useEffect(() => {
@@ -381,6 +394,79 @@ export function PageSignals() {
       console.error("[signals] failed to dismiss research suggestion", err);
     } finally {
       setWorkingSuggestionId(null);
+    }
+  };
+
+  const refreshScoreProposals = React.useCallback(async () => {
+    if (!store.activeProjectId) return;
+    setScoreProposals(await listSignalScoreProposals(store.activeProjectId));
+  }, [store.activeProjectId]);
+
+  React.useEffect(() => {
+    refreshScoreProposals();
+  }, [refreshScoreProposals]);
+
+  // Same fm:signals-updated convention as research suggestions above — Ask AI's "Score
+  // impact"/"Score uncertainty" tasks (ask-ai.tsx) dispatch it after writing new proposals.
+  React.useEffect(() => {
+    if (!store.activeProjectId) return;
+    const onUpdated = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.projectId === store.activeProjectId) refreshScoreProposals();
+    };
+    window.addEventListener("fm:signals-updated", onUpdated);
+    return () => window.removeEventListener("fm:signals-updated", onUpdated);
+  }, [store.activeProjectId, refreshScoreProposals]);
+
+  const onConfirmScoreProposal = async (id: string) => {
+    if (!store.activeProjectId) return;
+    setWorkingProposalId(id);
+    try {
+      await confirmSignalScoreProposal(store.activeProjectId, id);
+      await Promise.all([refreshScoreProposals(), store.refreshSignals(store.activeProjectId)]);
+    } catch (err) {
+      console.error("[signals] failed to confirm score proposal", err);
+    } finally {
+      setWorkingProposalId(null);
+    }
+  };
+
+  const onDismissScoreProposal = async (id: string) => {
+    if (!store.activeProjectId) return;
+    setWorkingProposalId(id);
+    try {
+      await dismissSignalScoreProposal(store.activeProjectId, id);
+      await refreshScoreProposals();
+    } catch (err) {
+      console.error("[signals] failed to dismiss score proposal", err);
+    } finally {
+      setWorkingProposalId(null);
+    }
+  };
+
+  const onConfirmAllInBatch = async (batchId: string) => {
+    if (!store.activeProjectId) return;
+    setWorkingBatchId(batchId);
+    try {
+      await confirmAllSignalScoreProposals(store.activeProjectId, batchId);
+      await Promise.all([refreshScoreProposals(), store.refreshSignals(store.activeProjectId)]);
+    } catch (err) {
+      console.error("[signals] failed to confirm score proposal batch", err);
+    } finally {
+      setWorkingBatchId(null);
+    }
+  };
+
+  const onDismissAllInBatch = async (batchId: string) => {
+    if (!store.activeProjectId) return;
+    setWorkingBatchId(batchId);
+    try {
+      await dismissAllInBatch(store.activeProjectId, batchId);
+      await refreshScoreProposals();
+    } catch (err) {
+      console.error("[signals] failed to dismiss score proposal batch", err);
+    } finally {
+      setWorkingBatchId(null);
     }
   };
 
@@ -466,6 +552,7 @@ export function PageSignals() {
             [
               { id: "signals", label: "Signals" },
               { id: "suggestions", label: "Suggestions" },
+              { id: "scores", label: "Scores" },
             ] as const
           ).map((t) => (
             <button
@@ -482,14 +569,93 @@ export function PageSignals() {
                   {researchSuggestions.length}
                 </span>
               )}
+              {t.id === "scores" && scoreProposals.length > 0 && (
+                <span className="inline-flex items-center rounded bg-brand-orangeLight px-[6px] py-0.5 text-[10px] font-semibold text-brand-orange700">
+                  {scoreProposals.length}
+                </span>
+              )}
             </button>
           ))}
         </div>
 
-        {tab === "suggestions" ? (
+        {tab === "scores" ? (
+          scoreProposals.length === 0 ? (
+            <div className="rounded-[10px] border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
+              No pending score proposals — run &quot;Score impact&quot; or &quot;Score uncertainty&quot; from Ask AI (⌘I) to generate some.
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3.5">
+              {Object.entries(
+                scoreProposals.reduce<Record<string, SignalScoreProposalRow[]>>((acc, p) => {
+                  (acc[p.batch_id] ??= []).push(p);
+                  return acc;
+                }, {})
+              ).map(([batchId, rows]) => (
+                <div key={batchId} className="flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">
+                      {rows[0].dimension === "impact" ? "Impact" : "Uncertainty"} proposals · {rows.length}
+                    </span>
+                    <div className="flex gap-1.5">
+                      <Button variant="ghost" size="sm" onClick={() => onDismissAllInBatch(batchId)} disabled={workingBatchId === batchId}>
+                        Dismiss all
+                      </Button>
+                      <Button variant="primary" size="sm" onClick={() => onConfirmAllInBatch(batchId)} disabled={workingBatchId === batchId}>
+                        Confirm all
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    {rows.map((p) => {
+                      const signal = signals.find((s) => s.id === p.signal_id);
+                      return (
+                        <div
+                          key={p.id}
+                          className={cn(
+                            "rounded-[9px] border px-3 py-2 text-xs",
+                            p.low_confidence || p.disagrees_with_user_classification
+                              ? "border-[#FDE68A] bg-[#FFFBEB]"
+                              : "border-border bg-white"
+                          )}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5">
+                                <span className="truncate text-[13px] font-semibold text-brand-dark">{signal?.title ?? "Unknown signal"}</span>
+                                <span className={cn(BADGE_BASE, "bg-[#F3F4F6] text-text-2")}>
+                                  {p.dimension === "impact" ? `Impact ${p.proposed_impact}` : p.proposed_uncertainty}
+                                </span>
+                                {p.low_confidence && <span className={cn(BADGE_BASE, "bg-brand-orangeLight text-brand-orange700")}>Low confidence</span>}
+                                {p.disagrees_with_user_classification && (
+                                  <span className={cn(BADGE_BASE, "bg-brand-orangeLight text-brand-orange700")}>Disagrees with you</span>
+                                )}
+                              </div>
+                              <p className="mt-1 text-muted-foreground">{p.rationale}</p>
+                              {p.disagrees_with_user_classification && (
+                                <p className="mt-0.5 text-brand-orange700">{p.disagrees_with_user_classification}</p>
+                              )}
+                            </div>
+                            <div className="flex flex-shrink-0 gap-1.5">
+                              <Button variant="ghost" size="sm" onClick={() => onDismissScoreProposal(p.id)} disabled={workingProposalId === p.id}>
+                                Dismiss
+                              </Button>
+                              <Button variant="primary" size="sm" onClick={() => onConfirmScoreProposal(p.id)} disabled={workingProposalId === p.id}>
+                                Confirm
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        ) : tab === "suggestions" ? (
           researchSuggestions.length === 0 ? (
             <div className="rounded-[10px] border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
-              No pending suggestions yet — run &quot;Scan for driving forces (web)&quot; from Ask AI (⌘I) to find some.
+              No pending suggestions yet — run one of the &quot;Find&quot; prompts from Ask AI (⌘I) to find some.
             </div>
           ) : (
             <div className="flex flex-col gap-2">
@@ -498,7 +664,10 @@ export function PageSignals() {
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
                       <div className="text-[13px] font-semibold text-brand-dark">{s.title}</div>
-                      <div className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.04em] text-text-3">{s.category}</div>
+                      <div className="mt-0.5 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.04em] text-text-3">
+                        <span className="rounded bg-white px-1.5 py-0.5 font-medium text-text-2">{s.category ? "Driving force" : "Key force"}</span>
+                        <span>{s.category ?? s.actor_type}</span>
+                      </div>
                       <div className="mt-1 text-xs text-muted-foreground">{s.body}</div>
                       {s.citation_url && (
                         <a href={s.citation_url} target="_blank" rel="noreferrer" className="mt-1 block truncate text-[11px] text-brand-orange">

@@ -853,11 +853,113 @@ export interface Database {
         };
         Relationships: [];
       };
+      onboarding_answers: {
+        Row: {
+          project_id: string;
+          company_name: string | null;
+          keeps_awake: string | null;
+          decision_5to10yr: string | null;
+          owner_and_deadline: string | null;
+          if_wrong_breaks: string | null;
+          oracle_q1: string | null;
+          oracle_q2: string | null;
+          oracle_q3: string | null;
+          best_case_and_path: string | null;
+          worst_case_and_pivots: string | null;
+          turning_points: string | null;
+          inevitable: string | null;
+          genuinely_uncertain: string | null;
+          dependencies: string | null;
+          created_at: string;
+        };
+        Insert: {
+          project_id: string;
+          company_name?: string | null;
+          keeps_awake?: string | null;
+          decision_5to10yr?: string | null;
+          owner_and_deadline?: string | null;
+          if_wrong_breaks?: string | null;
+          oracle_q1?: string | null;
+          oracle_q2?: string | null;
+          oracle_q3?: string | null;
+          best_case_and_path?: string | null;
+          worst_case_and_pivots?: string | null;
+          turning_points?: string | null;
+          inevitable?: string | null;
+          genuinely_uncertain?: string | null;
+          dependencies?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          project_id?: string;
+          company_name?: string | null;
+          keeps_awake?: string | null;
+          decision_5to10yr?: string | null;
+          owner_and_deadline?: string | null;
+          if_wrong_breaks?: string | null;
+          oracle_q1?: string | null;
+          oracle_q2?: string | null;
+          oracle_q3?: string | null;
+          best_case_and_path?: string | null;
+          worst_case_and_pivots?: string | null;
+          turning_points?: string | null;
+          inevitable?: string | null;
+          genuinely_uncertain?: string | null;
+          dependencies?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      signal_score_proposals: {
+        Row: {
+          id: string;
+          project_id: string;
+          signal_id: string;
+          dimension: "impact" | "uncertainty";
+          proposed_impact: number | null;
+          proposed_uncertainty: "Low" | "Medium" | "High" | null;
+          rationale: string;
+          low_confidence: boolean;
+          disagrees_with_user_classification: string | null;
+          status: "proposed" | "confirmed" | "dismissed";
+          batch_id: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          signal_id: string;
+          dimension: "impact" | "uncertainty";
+          proposed_impact?: number | null;
+          proposed_uncertainty?: "Low" | "Medium" | "High" | null;
+          rationale: string;
+          low_confidence?: boolean;
+          disagrees_with_user_classification?: string | null;
+          status?: "proposed" | "confirmed" | "dismissed";
+          batch_id: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          signal_id?: string;
+          dimension?: "impact" | "uncertainty";
+          proposed_impact?: number | null;
+          proposed_uncertainty?: "Low" | "Medium" | "High" | null;
+          rationale?: string;
+          low_confidence?: boolean;
+          disagrees_with_user_classification?: string | null;
+          status?: "proposed" | "confirmed" | "dismissed";
+          batch_id?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       research_suggestions: {
         Row: {
           id: string;
           project_id: string;
-          step: "key_forces" | "driving_forces";
+          step: "key_forces" | "driving_forces" | "find";
           status: "suggested" | "confirmed" | "dismissed";
           source: string;
           title: string;
@@ -873,7 +975,7 @@ export interface Database {
         Insert: {
           id?: string;
           project_id: string;
-          step: "key_forces" | "driving_forces";
+          step: "key_forces" | "driving_forces" | "find";
           status?: "suggested" | "confirmed" | "dismissed";
           source?: string;
           title: string;
@@ -889,7 +991,7 @@ export interface Database {
         Update: {
           id?: string;
           project_id?: string;
-          step?: "key_forces" | "driving_forces";
+          step?: "key_forces" | "driving_forces" | "find";
           status?: "suggested" | "confirmed" | "dismissed";
           source?: string;
           title?: string;

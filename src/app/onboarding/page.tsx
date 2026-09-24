@@ -132,6 +132,13 @@ export default function OnboardingPage() {
         horizon,
         industry,
         summary,
+        onboardingAnswers: {
+          companyName: store.onboarding.companyName,
+          blockA: store.onboarding.blockA,
+          blockB: store.onboarding.blockB,
+          blockC: store.onboarding.blockC,
+          blockD: store.onboarding.blockD,
+        },
       });
       store.setActiveProjectId(proj.id);
       navigate("/home");

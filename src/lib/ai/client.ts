@@ -25,6 +25,14 @@ const MODEL = "claude-opus-4-8";
 export const RESEARCH_MODE_ALLOWED_STEPS: readonly string[] = [
   "signals.local_force_scan", // Step 2 — Key forces exploratory scan (ai-research-suggestions.ts)
   "signals.macro_trend_sweep", // Step 3 — Driving forces exploratory scan (ai-research-suggestions.ts)
+  // Signals page "Ask AI" Group 1 "Find" prompts (SIGNALS_ASK_AI_PROMPTS.md) — same steps
+  // 2/3 exploratory-research carve-out as the two above, staged into research_suggestions
+  // under step:'find' (0035_research_suggestions_find_step.sql), never written directly.
+  "signals.find.scan", // 1.1 Scan for forces I haven't captured
+  "signals.find.oracle", // 1.2 Turn my oracle questions into forces
+  "signals.find.actors", // 1.3 Profile the actors I don't control
+  "signals.find.worst_case", // 1.4 What would make my worst case happen?
+  "signals.find.blind_spot", // 1.5 Blind-spot sweep
   "news_feed.pull", // Step 8 — daily ingestion job (ai-news-feed.ts's searchNewsItems), also
   // reused by Knowledge Base's manual "Pull recent news" button and the Dashboard's News Feed
   // pull (both pre-existing, same underlying call)
@@ -70,7 +78,15 @@ Rules (violating any of these is a failure):
 5. Never break the 2-axis / 4-quadrant structure, the 5-phase storyline
    structure, or the STEEP taxonomy (Social, Technological, Economic,
    Ecological, Political) — these are fixed by the method, not creative
-   choices.`;
+   choices.
+6. In any free-text/prose field (rationale, gap, description, summary,
+   body, notes, and the like), refer to a signal/source/node by its
+   title or name only — never by its id. IDs belong only in fields the
+   schema explicitly types as an id or id array (signal_id, source_id,
+   node_id, grounded_in, cites, and the like) — those are for the app's
+   internal use, never for a human reader. If you're given both an id
+   and a title/name for the same item, the id is not something to
+   mention in prose under any circumstance.`;
 
 interface RunStructuredOptions<T extends z.ZodTypeAny> {
   step: string;
