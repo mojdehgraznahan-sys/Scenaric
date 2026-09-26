@@ -25,6 +25,7 @@ import { searchNewsItems } from "./ai-news-feed";
 import { extractInsightsForProject } from "./ai-insights";
 import { createSignal } from "./signals";
 import { scoreOneSignal } from "./ai-signals";
+import { promoteEventToObserved } from "./events";
 import { getProjectAiSettingsMap } from "./project-ai-settings";
 import { getConnectedRssFeedUrl } from "./project-integrations";
 import type { Database } from "@/lib/supabase/types";
@@ -33,6 +34,9 @@ type SteepCategory = "Social" | "Technology" | "Economic" | "Ecological" | "Poli
 
 export type NewsItemRow = Database["public"]["Tables"]["news_items"]["Row"];
 type SignalRow = Database["public"]["Tables"]["signals"]["Row"];
+type EventRow = Database["public"]["Tables"]["events"]["Row"];
+
+export type AddNewsItemResult = { kind: "signal"; signal: SignalRow } | { kind: "event"; event: EventRow };
 
 const NewsImpactSchema = z.object({
   items: z
@@ -317,9 +321,89 @@ export async function runNewsFeedForAllProjects(): Promise<NewsFeedSummary> {
   return { batchId, projectsProcessed, projectsSkipped, errors };
 }
 
+// Signals page "Events" view — matches an accepted news item against the project's currently
+// possible (not yet observed) events before falling back to today's create-a-new-signal path.
+// Closed-book (no webSearch — this is a semantic comparison over data already in hand, not
+// research), same "temp=0"/effort:"low" convention as this codebase's other classification-
+// style prompts (e.g. ai-news-items.ts's own scoreNewsImpact above).
+const MatchEventSchema = z.object({
+  match: z.boolean(),
+  event_id: z.string().nullable(),
+  confidence: z.enum(["high", "medium", "low"]),
+  rationale: z.string(),
+});
+
+const MATCH_EVENT_TASK_PROMPT = `Task: Decide whether this news item is evidence that one of the
+project's already-tracked POSSIBLE events has now happened — i.e. the news item and the event
+describe the same real-world occurrence, not just a related topic.
+
+Input: { news_item: { title: string, summary: string },
+         possible_events: [{ id: string, title: string, body: string }] }
+
+Rules:
+- Only match if the news item and a possible_events entry describe the SAME underlying
+  occurrence — check semantic overlap, not just topical similarity. A news item merely related
+  to the same force is NOT a match.
+- event_id MUST be a real id copied verbatim from possible_events, or null if match:false.
+- If genuinely uncertain, prefer match:false over a low-confidence guess — a missed match just
+  means a new signal gets created instead, which is the safe default.
+- rationale is one sentence explaining the match or why nothing qualified.
+
+Output schema:
+{ match: boolean, event_id: string | null, confidence: "high"|"medium"|"low", rationale: string }`;
+
+export interface MatchEventResult {
+  matched: boolean;
+  eventId: string | null;
+  confidence: "high" | "medium" | "low";
+  rationale: string;
+}
+
+export async function findMatchingPossibleEvent(
+  projectId: string,
+  newsItem: { title: string; summary: string }
+): Promise<MatchEventResult> {
+  const supabase = createClient();
+  const { data: candidates, error } = await supabase
+    .from("events")
+    .select("id, title, description")
+    .eq("project_id", projectId)
+    .eq("status", "possible");
+  if (error) throw error;
+
+  if (candidates.length === 0) {
+    return { matched: false, eventId: null, confidence: "low", rationale: "No possible events exist in this project yet." };
+  }
+
+  const output = await runStructured({
+    step: "news_items.match_event",
+    projectId,
+    taskPrompt: MATCH_EVENT_TASK_PROMPT,
+    input: {
+      news_item: { title: newsItem.title, summary: newsItem.summary },
+      possible_events: candidates.map((c) => ({ id: c.id, title: c.title, body: c.description ?? "" })),
+    },
+    schema: MatchEventSchema,
+    effort: "low",
+    thinking: false,
+  });
+
+  if (!output.match || !output.event_id) {
+    return { matched: false, eventId: null, confidence: output.confidence, rationale: output.rationale };
+  }
+  // Defensive: never trust a model-proposed id blindly (same discipline as
+  // ai-matrix-tasks.ts's suggestAlternateAxisPair) — if it doesn't resolve to a real candidate,
+  // treat it as no match rather than promoting the wrong (or a nonexistent) event.
+  if (!candidates.some((c) => c.id === output.event_id)) {
+    return { matched: false, eventId: null, confidence: "low", rationale: "Model proposed an event outside the possible-events candidate list." };
+  }
+  return { matched: true, eventId: output.event_id, confidence: output.confidence, rationale: output.rationale };
+}
+
 // POST /projects/:id/news/:newsId/add-to-signals — "+ Add to Signals" button on the
-// dashboard's News Feed card.
-export async function addNewsItemToSignals(projectId: string, newsItemId: string): Promise<SignalRow> {
+// dashboard's News Feed card. Despite the route's name, this now resolves to EITHER a new
+// signal OR a promoted event — see findMatchingPossibleEvent above.
+export async function addNewsItemToSignals(projectId: string, newsItemId: string): Promise<AddNewsItemResult> {
   const supabase = createClient();
 
   const { data: newsItem, error: newsItemError } = await supabase
@@ -331,11 +415,31 @@ export async function addNewsItemToSignals(projectId: string, newsItemId: string
   if (newsItemError) throw newsItemError;
   if (!newsItem) throw new NotFoundError(`News item ${newsItemId} could not be found in project ${projectId}.`);
 
-  // Idempotent re-click: already promoted, return the existing signal rather than duplicating.
+  // Idempotent re-click: already promoted (either path), return the existing result rather
+  // than duplicating.
   if (newsItem.added_to_signals && newsItem.signal_id) {
     const { data: existingSignal, error: existingSignalError } = await supabase.from("signals").select("*").eq("id", newsItem.signal_id).single();
     if (existingSignalError) throw existingSignalError;
-    return existingSignal;
+    return { kind: "signal", signal: existingSignal };
+  }
+  if (newsItem.event_id) {
+    const { data: existingEvent, error: existingEventError } = await supabase.from("events").select("*").eq("id", newsItem.event_id).single();
+    if (existingEventError) throw existingEventError;
+    return { kind: "event", event: existingEvent };
+  }
+
+  const match = await findMatchingPossibleEvent(projectId, { title: newsItem.title, summary: newsItem.summary });
+  if (match.matched && match.eventId) {
+    const promoted = await promoteEventToObserved(match.eventId, {
+      occurredOn: newsItem.published_at ? newsItem.published_at.slice(0, 10) : new Date().toISOString().slice(0, 10),
+      source: newsItem.source,
+    });
+    await supabase.from("news_items").update({ event_id: promoted.id }).eq("id", newsItemId);
+    revalidatePath("/signals");
+    // The client-side fm:events-updated dispatch (so the Signals page's store refreshes
+    // without a reload) happens in the caller — page-dashboard.tsx — since server actions have
+    // no window to dispatch a CustomEvent from.
+    return { kind: "event", event: promoted };
   }
 
   // One sources row for this specific item — identical shape to what pullNewsFeed already
@@ -390,5 +494,5 @@ export async function addNewsItemToSignals(projectId: string, newsItemId: string
   await supabase.from("news_items").update({ added_to_signals: true, signal_id: signal.id }).eq("id", newsItemId);
 
   revalidatePath("/home");
-  return scoredSignal;
+  return { kind: "signal", signal: scoredSignal };
 }

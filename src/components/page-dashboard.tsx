@@ -84,7 +84,13 @@ export function PageDashboard() {
       try {
         const res = await fetch(`/api/projects/${projectId}/news/${newsItemId}/add-to-signals`, { method: "POST" });
         if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+        const result: { kind: "signal" | "event" } = await res.json();
         setNews((prev) => prev.map((n) => (n.id === newsItemId ? { ...n, added_to_signals: true } : n)));
+        // Server actions have no window to dispatch from — this is the fm:*-updated push so the
+        // Signals page's store (events or signals) refreshes without a reload. See
+        // ai-news-items.ts's findMatchingPossibleEvent: a news item now resolves to either an
+        // existing possible event flipping to observed, or a brand-new signal.
+        window.dispatchEvent(new CustomEvent(result.kind === "event" ? "fm:events-updated" : "fm:signals-updated", { detail: { projectId } }));
       } catch (err) {
         console.error("[dashboard] failed to add news item to signals", err);
       } finally {

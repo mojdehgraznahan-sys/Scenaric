@@ -223,6 +223,87 @@ export interface Database {
         };
         Relationships: [];
       };
+      events: {
+        Row: {
+          id: string;
+          project_id: string;
+          title: string;
+          description: string | null;
+          category: "Social" | "Technology" | "Economic" | "Ecological" | "Political" | null;
+          status: "observed" | "possible";
+          is_wildcard: boolean;
+          occurred_on: string | null;
+          window_label: string | null;
+          impact: number | null;
+          likelihood: "Low" | "Medium" | "High" | null;
+          precursor: string | null;
+          source: string | null;
+          created_via: "manual" | "news_match" | "ai";
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          title: string;
+          description?: string | null;
+          category?: "Social" | "Technology" | "Economic" | "Ecological" | "Political" | null;
+          status: "observed" | "possible";
+          is_wildcard?: boolean;
+          occurred_on?: string | null;
+          window_label?: string | null;
+          impact?: number | null;
+          likelihood?: "Low" | "Medium" | "High" | null;
+          precursor?: string | null;
+          source?: string | null;
+          created_via?: "manual" | "news_match" | "ai";
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          title?: string;
+          description?: string | null;
+          category?: "Social" | "Technology" | "Economic" | "Ecological" | "Political" | null;
+          status?: "observed" | "possible";
+          is_wildcard?: boolean;
+          occurred_on?: string | null;
+          window_label?: string | null;
+          impact?: number | null;
+          likelihood?: "Low" | "Medium" | "High" | null;
+          precursor?: string | null;
+          source?: string | null;
+          created_via?: "manual" | "news_match" | "ai";
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      event_signal_links: {
+        Row: {
+          id: string;
+          project_id: string;
+          event_id: string;
+          signal_id: string;
+          toward: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          event_id: string;
+          signal_id: string;
+          toward: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          event_id?: string;
+          signal_id?: string;
+          toward?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       matrix_dots: {
         Row: {
           id: string;
@@ -481,6 +562,7 @@ export interface Database {
           created_via: "ai" | "manual";
           last_checked: string | null;
           created_at: string;
+          event_id: string | null;
         };
         Insert: {
           id?: string;
@@ -496,6 +578,7 @@ export interface Database {
           created_via?: "ai" | "manual";
           last_checked?: string | null;
           created_at?: string;
+          event_id?: string | null;
         };
         Update: {
           id?: string;
@@ -511,6 +594,7 @@ export interface Database {
           created_via?: "ai" | "manual";
           last_checked?: string | null;
           created_at?: string;
+          event_id?: string | null;
         };
         Relationships: [];
       };
@@ -1021,6 +1105,7 @@ export interface Database {
           added_to_signals: boolean;
           source_id: string | null;
           signal_id: string | null;
+          event_id: string | null;
           created_at: string;
         };
         Insert: {
@@ -1037,6 +1122,7 @@ export interface Database {
           added_to_signals?: boolean;
           source_id?: string | null;
           signal_id?: string | null;
+          event_id?: string | null;
           created_at?: string;
         };
         Update: {
@@ -1053,6 +1139,7 @@ export interface Database {
           added_to_signals?: boolean;
           source_id?: string | null;
           signal_id?: string | null;
+          event_id?: string | null;
           created_at?: string;
         };
         Relationships: [];

@@ -32,7 +32,12 @@ import {
   type SignalScoreProposalRow,
 } from "@/lib/actions/ai-signals-rank";
 import { AIGenerationFailedError } from "@/lib/ai/errors";
-import type { Signal, SteepCategory } from "@/lib/types";
+import type { Signal, SteepCategory, EventItem } from "@/lib/types";
+import { FlipCard, FlipHint } from "@/components/signals/flip-card";
+import { EventCard, EventCount, eventCategory } from "@/components/signals/event-card";
+import { SignalCardBack } from "@/components/signals/signal-card-back";
+import { SignalEventTimeline } from "@/components/signals/signal-event-timeline";
+import { AddSignalModal } from "@/components/signals/add-signal-modal";
 
 const STEEP_CATEGORIES: SteepCategory[] = ["Social", "Technology", "Economic", "Ecological", "Political"];
 
@@ -107,16 +112,54 @@ export function PageSignals() {
   const navigate = useNavigate();
   const router = useRouter();
   const searchParams = useSearchParams();
-  // Signals is the default/first tab (the page's primary content); Suggestions is the staging
-  // area for pending research_suggestions. Plain component state, not URL-persisted — unlike
-  // sortMode (a filter over what you're looking at), this doesn't need to be bookmarkable.
-  const [tab, setTab] = React.useState<"signals" | "suggestions" | "scores">("signals");
+  // Signals is the default/first tab (the page's primary content); Events sits next to it as
+  // its own tab (scenaric.pdf); Suggestions is the staging area for pending research_suggestions.
+  // Plain component state, not URL-persisted — unlike sortMode (a filter over what you're
+  // looking at), this doesn't need to be bookmarkable.
+  const [tab, setTab] = React.useState<"signals" | "events" | "suggestions" | "scores">("signals");
   const [filter, setFilter] = React.useState<"All" | SteepCategory>("All");
   const [selected, setSelected] = React.useState<Signal | null>(null);
+  const [detailTab, setDetailTab] = React.useState<"overview" | "timeline">("overview");
   const [addOpen, setAddOpen] = React.useState(false);
-  const [form, setForm] = React.useState<NewSignalForm>(EMPTY_FORM);
-  const [formError, setFormError] = React.useState<string | null>(null);
-  const [submitting, setSubmitting] = React.useState(false);
+  // Signals page "Events" view (scenaric.pdf). `flipped`/`focusKey` are keyed by
+  // "sig:<id>"/"evt:<id>" so the two id spaces can't collide; `jump()` is the cross-view
+  // navigation used by both card backs (still named forces/events externally — only the tab
+  // value they map to changed).
+  const [statusFilter, setStatusFilter] = React.useState<"All" | "Observed" | "Possible" | "Wildcards">("All");
+  const [flipped, setFlipped] = React.useState<Record<string, boolean>>({});
+  const [focusKey, setFocusKey] = React.useState<string | null>(null);
+  const scrollContainerRef = React.useRef<HTMLDivElement>(null);
+  const events = store.events;
+
+  const toggleFlip = React.useCallback((key: string) => {
+    setFlipped((f) => ({ ...f, [key]: !f[key] }));
+  }, []);
+
+  const jump = React.useCallback((toView: "forces" | "events", key: string) => {
+    setTab(toView === "forces" ? "signals" : "events");
+    setFilter("All");
+    if (toView === "events") setStatusFilter("All");
+    setFlipped((f) => ({ ...f, [key]: false }));
+    setFocusKey(key);
+  }, []);
+
+  React.useEffect(() => {
+    if (!focusKey) return;
+    const raf = requestAnimationFrame(() => {
+      const container = scrollContainerRef.current;
+      const card = container?.querySelector<HTMLElement>(`[data-card-id="${focusKey}"]`);
+      if (!container || !card) return;
+      const containerRect = container.getBoundingClientRect();
+      const cardRect = card.getBoundingClientRect();
+      const offset = cardRect.top - containerRect.top + container.scrollTop;
+      container.scrollTo({ top: Math.max(offset - 80, 0), behavior: "smooth" });
+    });
+    const timeout = setTimeout(() => setFocusKey(null), 2600);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timeout);
+    };
+  }, [focusKey]);
   // "Suggest signals" and "Scan for driving forces (web)" now live in the Ask AI panel
   // (ask-ai.tsx's context="signals" TASKS) rather than this toolbar — see
   // SCHWARTZ_METHODOLOGY_SKILL.md's research-mode policy for why the scan itself stages
@@ -313,35 +356,33 @@ export function PageSignals() {
     }
   };
 
-  const onSubmitSignal = async () => {
-    if (!form.title.trim()) {
-      setFormError("Title is required.");
-      return;
-    }
-    if (!store.activeProjectId) {
-      setFormError("No active project.");
-      return;
-    }
-    setSubmitting(true);
-    setFormError(null);
-    try {
-      await store.createSignal({
-        projectId: store.activeProjectId,
-        category: form.category,
-        source: form.source.trim() || "Manual entry",
-        title: form.title.trim(),
-        body: form.body.trim(),
-        impact: form.impact > 0 ? form.impact : null,
-        uncertainty: form.uncertainty || null,
-      });
-      setAddOpen(false);
-      setForm(EMPTY_FORM);
-    } catch (err) {
-      console.error("[signals] failed to create signal", err);
-      setFormError("Couldn't create the signal — try again.");
-    } finally {
-      setSubmitting(false);
-    }
+  const onAddSignal = async (input: { category: SteepCategory; source: string; title: string; body: string }) => {
+    if (!store.activeProjectId) throw new Error("No active project.");
+    await store.createSignal({ projectId: store.activeProjectId, ...input });
+  };
+
+  // Manual "Add as event" — no date/impact collection in the modal (matches the design
+  // prototype's own minimal AddSignalModal), so observed defaults to today and possible gets a
+  // placeholder window label; impact defaults to a neutral 3 same as the prototype hardcodes.
+  const onAddEvent = async (input: {
+    title: string;
+    status: "observed" | "possible";
+    targetSignalId: string;
+    toward: string;
+    likelihood?: "Low" | "Medium" | "High";
+  }) => {
+    if (!store.activeProjectId) throw new Error("No active project.");
+    const created = await store.createEvent({
+      projectId: store.activeProjectId,
+      title: input.title,
+      status: input.status,
+      occurredOn: input.status === "observed" ? new Date().toISOString().slice(0, 10) : null,
+      windowLabel: input.status === "possible" ? "Future" : null,
+      impact: 3,
+      likelihood: input.likelihood ?? null,
+      links: [{ signalId: input.targetSignalId, toward: input.toward }],
+    });
+    jump("events", `evt:${created.id}`);
   };
 
   const onDeleteSignal = async (id: string) => {
@@ -512,16 +553,16 @@ export function PageSignals() {
   };
 
   return (
-    <div className="scroll-y flex-1 overflow-y-auto p-5">
+    <div ref={scrollContainerRef} className="scroll-y flex-1 overflow-y-auto p-5">
       <div className="rounded-xl border border-border bg-card p-[18px] shadow-card">
-        <div className="mb-3.5 flex items-center justify-between">
+        <div className="mb-3.5 flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="text-lg font-semibold">Signals Library</h2>
             <div className="mt-0.5 text-[13px] text-muted-foreground">
-              STEEP forces. Rank by impact and uncertainty to find scenario axes.
+              Forces that could shape your focal question. Specific events, past or future, attach to a force. Click any card to flip it.
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-nowrap items-center gap-2">
             {/* Sort only affects the signal grid, so it only shows on that tab. Trigger always
                 shows the static "Sort" label (matches the handoff design) — the dropdown itself
                 keeps its full 4-mode behavior via sortMode/onSortChange. */}
@@ -551,6 +592,7 @@ export function PageSignals() {
           {(
             [
               { id: "signals", label: "Signals" },
+              { id: "events", label: "Events" },
               { id: "suggestions", label: "Suggestions" },
               { id: "scores", label: "Scores" },
             ] as const
@@ -688,7 +730,7 @@ export function PageSignals() {
               ))}
             </div>
           )
-        ) : (
+        ) : tab === "signals" || tab === "events" ? (
           <>
             {suggestResult && (
               <div className="mb-3.5 rounded-[10px] border border-border bg-[#F9FAFB] px-3 py-2 text-xs text-muted-foreground">
@@ -696,7 +738,8 @@ export function PageSignals() {
               </div>
             )}
 
-            {/* Filter pills */}
+            {/* STEEP filter pills — apply to both the Signals and Events tabs; Events filters by
+                eventCategory()'s fallback-to-first-linked-signal when an event has no category. */}
             <div className="mb-[18px] flex flex-wrap gap-2">
               {CATEGORIES.map((c) => {
                 const active = filter === c;
@@ -712,35 +755,140 @@ export function PageSignals() {
               })}
             </div>
 
-            {/* Cards */}
-            {store.signalsLoading && signals.length === 0 && (
-              <div className="mb-3 text-center text-xs text-muted-foreground">Loading signals…</div>
-            )}
-            {!store.signalsLoading && unscoredCount > 0 && (
-              <div className="mb-3.5 flex items-center justify-between rounded-[10px] border border-border bg-[#F9FAFB] px-3.5 py-2.5">
-                <span className="text-xs text-muted-foreground">
-                  {unscoredCount} signal{unscoredCount === 1 ? "" : "s"} not yet scored.
-                </span>
-                <Button variant="ghost" size="sm" onClick={onScoreUnscored} disabled={suggesting}>
-                  {suggesting ? "Scoring…" : "Score now"}
-                </Button>
+            {tab === "events" && (
+              <div className="mb-[18px] flex flex-wrap gap-2">
+                {(["All", "Observed", "Possible", "Wildcards"] as const).map((s) => {
+                  const active = statusFilter === s;
+                  return (
+                    <button
+                      key={s}
+                      onClick={() => setStatusFilter(s)}
+                      className={cn(
+                        "rounded-full border px-3 py-[5px] text-xs font-medium",
+                        active ? "border-brand-dark bg-brand-dark text-white" : "border-border bg-white text-muted-foreground"
+                      )}
+                    >
+                      {s}
+                    </button>
+                  );
+                })}
               </div>
             )}
-            <div className="grid grid-cols-3 gap-3">
-              {sortedFiltered.map((s) => (
-                <SignalCard
-                  key={s.id}
-                  s={s}
-                  onOpen={() => setSelected(s)}
-                  onAddToMatrix={() => onAddToMatrix(s)}
-                  addingToMatrix={addingToMatrixId === s.id}
-                  addToMatrixError={addToMatrixError && addToMatrixError.id === s.id ? addToMatrixError.message : null}
-                  onDelete={() => onDeleteSignal(s.id)}
-                />
-              ))}
-            </div>
+
+            {tab === "signals" ? (
+              <>
+                {store.signalsLoading && signals.length === 0 && (
+                  <div className="mb-3 text-center text-xs text-muted-foreground">Loading signals…</div>
+                )}
+                {!store.signalsLoading && unscoredCount > 0 && (
+                  <div className="mb-3.5 flex items-center justify-between rounded-[10px] border border-border bg-[#F9FAFB] px-3.5 py-2.5">
+                    <span className="text-xs text-muted-foreground">
+                      {unscoredCount} signal{unscoredCount === 1 ? "" : "s"} not yet scored.
+                    </span>
+                    <Button variant="ghost" size="sm" onClick={onScoreUnscored} disabled={suggesting}>
+                      {suggesting ? "Scoring…" : "Score now"}
+                    </Button>
+                  </div>
+                )}
+                <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))" }}>
+                  {sortedFiltered.map((s) => {
+                    const key = `sig:${s.id}`;
+                    return (
+                      <FlipCard
+                        key={s.id}
+                        id={key}
+                        flipped={!!flipped[key]}
+                        focused={focusKey === key}
+                        onFlip={() => toggleFlip(key)}
+                        front={
+                          <SignalCard
+                            s={s}
+                            events={events}
+                            onFlip={() => toggleFlip(key)}
+                            onAddToMatrix={() => onAddToMatrix(s)}
+                            addingToMatrix={addingToMatrixId === s.id}
+                            addToMatrixError={addToMatrixError && addToMatrixError.id === s.id ? addToMatrixError.message : null}
+                            onDelete={() => onDeleteSignal(s.id)}
+                          />
+                        }
+                        back={
+                          <SignalCardBack
+                            sig={s}
+                            events={events}
+                            onFlip={() => toggleFlip(key)}
+                            onJump={(eventId) => jump("events", `evt:${eventId}`)}
+                            onDetails={() => {
+                              setSelected(s);
+                              setDetailTab("timeline");
+                            }}
+                          />
+                        }
+                      />
+                    );
+                  })}
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-col gap-6">
+                {store.eventsLoading && events.length === 0 && (
+                  <div className="text-center text-xs text-muted-foreground">Loading events…</div>
+                )}
+                {(
+                  [
+                    { key: "Observed" as const, label: "Observed", subtitle: "Evidence that a force is moving" },
+                    {
+                      key: "Possible" as const,
+                      label: "Possible",
+                      subtitle: "Future events to watch — likelihood is per event, never per scenario",
+                    },
+                    { key: "Wildcards" as const, label: "Wildcards", subtitle: "Low-likelihood, high-impact — kept off the matrix" },
+                  ] as const
+                )
+                  .filter((group) => statusFilter === "All" || statusFilter === group.key)
+                  .map((group) => {
+                    const filteredByCategory = filter === "All" ? events : events.filter((e) => eventCategory(e, signals) === filter);
+                    const items =
+                      group.key === "Wildcards"
+                        ? filteredByCategory.filter((e) => e.wildcard)
+                        : filteredByCategory.filter((e) => !e.wildcard && e.status === group.key.toLowerCase());
+                    return (
+                      <div key={group.key}>
+                        <div className="mb-0.5 flex items-baseline gap-2">
+                          <span className="whitespace-nowrap text-[13.5px] font-semibold text-brand-dark">
+                            {group.label} · {items.length}
+                          </span>
+                          <span className="text-xs text-muted-foreground">{group.subtitle}</span>
+                        </div>
+                        <div className="mb-3 border-b border-border" />
+                        {items.length === 0 ? (
+                          <div className="rounded-[10px] border border-dashed border-border p-4 text-center text-xs text-muted-foreground">
+                            No {group.label.toLowerCase()} events in this filter.
+                          </div>
+                        ) : (
+                          <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))" }}>
+                            {items.map((ev) => {
+                              const key = `evt:${ev.id}`;
+                              return (
+                                <EventCard
+                                  key={ev.id}
+                                  ev={ev}
+                                  signals={signals}
+                                  flipped={!!flipped[key]}
+                                  focused={focusKey === key}
+                                  onFlip={() => toggleFlip(key)}
+                                  onJump={(signalId) => jump("forces", `sig:${signalId}`)}
+                                />
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
           </>
-        )}
+        ) : null}
       </div>
 
       {/* Detail modal */}
@@ -750,6 +898,7 @@ export function PageSignals() {
           if (!o) {
             setSelected(null);
             setEditOpen(false);
+            setDetailTab("overview");
           }
         }}
       >
@@ -762,46 +911,71 @@ export function PageSignals() {
               </Button>
             </div>
             <DialogTitle className="mb-1.5 text-xl font-semibold tracking-[-0.01em]">{selected.title}</DialogTitle>
-            <div className="mb-3.5 font-mono text-[11.5px] text-text-3">SOURCE · {selected.source.toUpperCase()}</div>
-            <p className="mb-[18px] text-sm leading-[1.6] text-[#374151]">{selected.body}</p>
-            {selected.impact != null && selected.uncertainty != null ? (
-              <div className="mb-[18px] grid grid-cols-2 gap-3">
-                <div className="rounded-[10px] border border-border p-3">
-                  <div className="font-mono text-[10.5px] tracking-[0.06em] text-text-3">IMPACT</div>
-                  <div className="mt-1.5 flex items-center gap-1">
-                    <Stars value={selected.impact} size={14} />
-                    <span className="ml-1 text-[13px] font-semibold">{selected.impact}/5</span>
-                  </div>
-                </div>
-                <div className="rounded-[10px] border border-border p-3">
-                  <div className="font-mono text-[10.5px] tracking-[0.06em] text-text-3">UNCERTAINTY</div>
-                  <div className="mt-1.5">
-                    <span className={cn(BADGE_BASE, "text-[11px]", uncertaintyBadge(selected.uncertainty))}>
-                      {selected.uncertainty}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="mb-[18px] rounded-[10px] border border-border p-3">
-                <span className={cn(BADGE_BASE, "bg-[#F3F4F6] text-[#4B5563]")}>Not yet scored</span>
-              </div>
-            )}
-            <div className="flex gap-2">
-              <Button
-                variant="primary"
-                className="flex-1"
-                onClick={() => {
-                  setSelected(null);
-                  navigate("/matrix");
-                }}
-              >
-                Place on matrix →
-              </Button>
-              <Button variant="ghost" onClick={() => setSelected(null)}>
-                Close
-              </Button>
+            <div className="mb-3 flex gap-1 rounded-md bg-[#F3F4F6] p-0.5">
+              {(["overview", "timeline"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setDetailTab(t)}
+                  className={cn(
+                    "flex-1 rounded-md px-2 py-1.5 text-xs font-medium capitalize",
+                    detailTab === t ? "bg-white text-brand-dark shadow-[0_1px_2px_rgba(15,23,42,0.08)]" : "text-muted-foreground"
+                  )}
+                >
+                  {t}
+                </button>
+              ))}
             </div>
+            {detailTab === "timeline" ? (
+              <>
+                <div className="mb-[18px]">
+                  <SignalEventTimeline sigId={selected.id} events={events} signals={signals} />
+                </div>
+                <Button variant="ghost" className="w-full" onClick={() => setSelected(null)}>
+                  Close
+                </Button>
+              </>
+            ) : (
+              <>
+                <div className="mb-3.5 font-mono text-[11.5px] text-text-3">SOURCE · {selected.source.toUpperCase()}</div>
+                <p className="mb-[18px] text-sm leading-[1.6] text-[#374151]">{selected.body}</p>
+                {selected.impact != null && selected.uncertainty != null ? (
+                  <div className="mb-[18px] grid grid-cols-2 gap-3">
+                    <div className="rounded-[10px] border border-border p-3">
+                      <div className="font-mono text-[10.5px] tracking-[0.06em] text-text-3">IMPACT</div>
+                      <div className="mt-1.5 flex items-center gap-1">
+                        <Stars value={selected.impact} size={14} />
+                        <span className="ml-1 text-[13px] font-semibold">{selected.impact}/5</span>
+                      </div>
+                    </div>
+                    <div className="rounded-[10px] border border-border p-3">
+                      <div className="font-mono text-[10.5px] tracking-[0.06em] text-text-3">UNCERTAINTY</div>
+                      <div className="mt-1.5">
+                        <span className={cn(BADGE_BASE, "text-[11px]", uncertaintyBadge(selected.uncertainty))}>{selected.uncertainty}</span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mb-[18px] rounded-[10px] border border-border p-3">
+                    <span className={cn(BADGE_BASE, "bg-[#F3F4F6] text-[#4B5563]")}>Not yet scored</span>
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <Button
+                    variant="primary"
+                    className="flex-1"
+                    onClick={() => {
+                      setSelected(null);
+                      navigate("/matrix");
+                    }}
+                  >
+                    Place on matrix →
+                  </Button>
+                  <Button variant="ghost" onClick={() => setSelected(null)}>
+                    Close
+                  </Button>
+                </div>
+              </>
+            )}
           </DialogContent>
         )}
 
@@ -891,93 +1065,7 @@ export function PageSignals() {
         )}
       </Dialog>
 
-      {/* Add Signal modal */}
-      <Dialog
-        open={addOpen}
-        onOpenChange={(o) => {
-          setAddOpen(o);
-          if (!o) {
-            setForm(EMPTY_FORM);
-            setFormError(null);
-          }
-        }}
-      >
-        <DialogContent className="max-w-[480px] rounded-2xl p-6">
-          <DialogTitle className="mb-4 text-lg font-semibold tracking-[-0.01em]">Add signal</DialogTitle>
-          <div className="flex flex-col gap-3.5">
-            <div>
-              <Label htmlFor="signal-title" className="mb-1.5 block text-xs">
-                Title
-              </Label>
-              <Input
-                id="signal-title"
-                autoFocus
-                value={form.title}
-                onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-                placeholder="e.g. ASEAN ratifies the digital trade pact"
-              />
-            </div>
-            <div>
-              <Label htmlFor="signal-body" className="mb-1.5 block text-xs">
-                Description
-              </Label>
-              <Textarea
-                id="signal-body"
-                rows={3}
-                value={form.body}
-                onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))}
-                placeholder="What happens. Why it matters. (1–2 sentences)"
-                className="min-h-[70px]"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="mb-1.5 block text-xs">STEEP category</Label>
-                <Select value={form.category} onValueChange={(v) => setForm((f) => ({ ...f, category: v as SteepCategory }))}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {STEEP_CATEGORIES.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {c}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="signal-source" className="mb-1.5 block text-xs">
-                  Source
-                </Label>
-                <Input
-                  id="signal-source"
-                  value={form.source}
-                  onChange={(e) => setForm((f) => ({ ...f, source: e.target.value }))}
-                  placeholder="Internal research, …"
-                />
-              </div>
-            </div>
-            {formError && (
-              <div className="rounded-[7px] border border-[#FECACA] bg-[#FEF2F2] px-[11px] py-2 text-[12.5px] text-[#EF4444]">
-                {formError}
-              </div>
-            )}
-            <div className="mt-1 flex gap-2">
-              <Button variant="primary" className="flex-1" onClick={onSubmitSignal} disabled={submitting}>
-                {submitting ? "Adding…" : "Add signal"}
-              </Button>
-              <Button variant="ghost" onClick={() => setAddOpen(false)}>
-                Cancel
-              </Button>
-            </div>
-            <div className="text-center text-[11.5px] text-muted-foreground">
-              Impact and uncertainty are scored by AI after adding — use{" "}
-              <span className="font-medium text-brand-dark">Score now</span> once it appears unscored.
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <AddSignalModal open={addOpen} onOpenChange={setAddOpen} signals={signals} onAddSignal={onAddSignal} onAddEvent={onAddEvent} />
 
       {/* Merge into Signal modal */}
       <Dialog
@@ -1141,14 +1229,16 @@ export function PageSignals() {
 // relocated behind the menu instead of an always-visible trash icon.
 function SignalCard({
   s,
-  onOpen,
+  events,
+  onFlip,
   onAddToMatrix,
   addingToMatrix,
   addToMatrixError,
   onDelete,
 }: {
   s: Signal;
-  onOpen: () => void;
+  events: EventItem[];
+  onFlip: () => void;
   onAddToMatrix: () => void;
   addingToMatrix: boolean;
   addToMatrixError: string | null;
@@ -1168,7 +1258,7 @@ function SignalCard({
 
   return (
     <div
-      onClick={onOpen}
+      onClick={onFlip}
       className="flex cursor-pointer flex-col gap-2 rounded-[10px] border border-border bg-white p-3.5 transition-[border,transform] duration-[120ms] hover:border-border-strong"
     >
       <div className="flex items-center justify-between">
@@ -1188,7 +1278,11 @@ function SignalCard({
           <span className={cn(BADGE_BASE, "bg-[#F3F4F6] text-[#4B5563]")}>Not yet scored</span>
         </div>
       )}
-      <div className="mt-1 flex items-center gap-1.5">
+      <div className="flex items-center justify-between border-t border-[#F3F4F6] pt-2">
+        <EventCount sigId={s.id} events={events} />
+        <FlipHint label="EVENTS" />
+      </div>
+      <div className="flex items-center gap-1.5">
         <Button
           variant="soft"
           size="sm"

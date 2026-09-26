@@ -34,6 +34,15 @@ import {
   type SuggestSignalsResult,
   type ScoreSignalsResult,
 } from "./actions/ai-signals";
+import {
+  listEventsWithLinks,
+  createEvent as createEventAction,
+  updateEvent as updateEventAction,
+  deleteEvent as deleteEventAction,
+  type EventWithLinks,
+  type EventRow,
+} from "./actions/events";
+import { listIndicatorsForProject } from "./actions/indicators";
 import { getMatrixData, updateMatrixDotPosition as updateMatrixDotPositionAction, type MatrixDotData } from "./actions/matrix";
 import { classifyMatrixBuckets, reclassifySignal } from "./actions/ai-matrix";
 import type { MatrixBucket } from "./matrix-mapping";
@@ -45,6 +54,8 @@ import type {
   ProjectSummary,
   Signal,
   SteepCategory,
+  EventItem,
+  EventLink,
   Quadrant,
   MatrixDot,
   Scenario,
@@ -223,6 +234,33 @@ function toSignal(row: SignalRow): Signal {
   };
 }
 
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// Fixed "Mon YYYY" format regardless of environment locale (occurred_on is a plain date
+// string like "2026-03-15" from Supabase) — matches the prototype's date display exactly.
+function formatOccurredOn(isoDate: string): string {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  return `${MONTH_ABBR[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
+function toEventItem(row: EventWithLinks, indicatorId: string | null): EventItem {
+  return {
+    id: row.id,
+    category: row.category,
+    body: row.description ?? "",
+    status: row.status,
+    wildcard: row.is_wildcard,
+    date: row.occurred_on ? formatOccurredOn(row.occurred_on) : (row.window_label ?? ""),
+    title: row.title,
+    impact: row.impact,
+    likelihood: row.likelihood,
+    source: row.source,
+    indicatorId,
+    precursor: row.precursor,
+    links: row.links,
+  };
+}
+
 function toMatrixDot(d: MatrixDotData): MatrixDot {
   return {
     id: d.signalId,
@@ -316,6 +354,39 @@ export interface Store {
     uncertainty?: "Low" | "Medium" | "High" | null;
   }) => Promise<Signal>;
   deleteSignal: (id: string) => Promise<void>;
+  events: EventItem[];
+  eventsLoading: boolean;
+  refreshEvents: (projectId: string) => Promise<void>;
+  createEvent: (input: {
+    projectId: string;
+    title: string;
+    description?: string;
+    category?: SteepCategory | null;
+    status: "observed" | "possible";
+    isWildcard?: boolean;
+    occurredOn?: string | null;
+    windowLabel?: string | null;
+    impact?: number | null;
+    likelihood?: "Low" | "Medium" | "High" | null;
+    precursor?: string | null;
+    source?: string | null;
+    links: EventLink[];
+  }) => Promise<EventItem>;
+  updateEvent: (input: {
+    id: string;
+    title?: string;
+    description?: string;
+    category?: SteepCategory | null;
+    status?: "observed" | "possible";
+    isWildcard?: boolean;
+    occurredOn?: string | null;
+    windowLabel?: string | null;
+    impact?: number | null;
+    likelihood?: "Low" | "Medium" | "High" | null;
+    precursor?: string | null;
+    source?: string | null;
+  }) => Promise<EventRow>;
+  deleteEvent: (id: string) => Promise<void>;
   suggestSignals: (projectId: string) => Promise<SuggestSignalsResult>;
   scoreUnscoredSignals: (projectId: string) => Promise<ScoreSignalsResult>;
   scoreSignal: (projectId: string, signalId: string) => Promise<void>;
@@ -727,6 +798,96 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [activeProjectId, refreshSignals]
   );
 
+  // ---- Events (real, Supabase) — Signals page "Events" view ----
+  const [events, setEventsState] = useState<EventItem[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(true);
+
+  const refreshEvents = useCallback(async (projectId: string) => {
+    const [rows, indicators] = await Promise.all([listEventsWithLinks(projectId), listIndicatorsForProject(projectId)]);
+    const indicatorIdByEvent = new Map<string, string>();
+    for (const indicator of indicators) {
+      if (indicator.event_id) indicatorIdByEvent.set(indicator.event_id, indicator.id);
+    }
+    setEventsState(rows.map((row) => toEventItem(row, indicatorIdByEvent.get(row.id) ?? null)));
+  }, []);
+
+  useEffect(() => {
+    if (!activeProjectId) {
+      setEventsState([]);
+      setEventsLoading(false);
+      return;
+    }
+    setEventsLoading(true);
+    refreshEvents(activeProjectId)
+      .catch((err) => console.error("[store] failed to load events", err))
+      .finally(() => setEventsLoading(false));
+  }, [activeProjectId, refreshEvents]);
+
+  // Same fm:*-updated convention as fm:signals-updated — Ask AI/news-match writes that touch
+  // events elsewhere (not through this store) dispatch this so the Signals page picks them up
+  // without a reload. See ai-news-items.ts's news-match-to-event promotion.
+  useEffect(() => {
+    const onUpdated = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.projectId && detail.projectId === activeProjectId) refreshEvents(detail.projectId);
+    };
+    window.addEventListener("fm:events-updated", onUpdated);
+    return () => window.removeEventListener("fm:events-updated", onUpdated);
+  }, [activeProjectId, refreshEvents]);
+
+  const createEvent = useCallback(
+    async (input: {
+      projectId: string;
+      title: string;
+      description?: string;
+      category?: SteepCategory | null;
+      status: "observed" | "possible";
+      isWildcard?: boolean;
+      occurredOn?: string | null;
+      windowLabel?: string | null;
+      impact?: number | null;
+      likelihood?: "Low" | "Medium" | "High" | null;
+      precursor?: string | null;
+      source?: string | null;
+      links: EventLink[];
+    }) => {
+      const row = await createEventAction(input);
+      await refreshEvents(input.projectId);
+      return toEventItem(row, null);
+    },
+    [refreshEvents]
+  );
+
+  const updateEvent = useCallback(
+    async (input: {
+      id: string;
+      title?: string;
+      description?: string;
+      category?: SteepCategory | null;
+      status?: "observed" | "possible";
+      isWildcard?: boolean;
+      occurredOn?: string | null;
+      windowLabel?: string | null;
+      impact?: number | null;
+      likelihood?: "Low" | "Medium" | "High" | null;
+      precursor?: string | null;
+      source?: string | null;
+    }) => {
+      const row = await updateEventAction(input);
+      if (activeProjectId) await refreshEvents(activeProjectId);
+      return row;
+    },
+    [activeProjectId, refreshEvents]
+  );
+
+  const deleteEvent = useCallback(
+    async (id: string) => {
+      await deleteEventAction(id);
+      if (activeProjectId) await refreshEvents(activeProjectId);
+    },
+    [activeProjectId, refreshEvents]
+  );
+
   const suggestSignals = useCallback(
     async (projectId: string) => {
       const result = await suggestSignalsAction(projectId);
@@ -888,6 +1049,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     createSignal,
     updateSignal,
     deleteSignal,
+    events,
+    eventsLoading,
+    refreshEvents,
+    createEvent,
+    updateEvent,
+    deleteEvent,
     suggestSignals,
     scoreUnscoredSignals,
     scoreSignal,

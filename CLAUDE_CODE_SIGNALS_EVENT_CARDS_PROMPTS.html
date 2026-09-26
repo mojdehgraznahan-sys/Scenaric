@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Claude Code — Signals page event cards + flip</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="doc-page.js"></script>
+<style>
+*{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+*{animation-delay:-99s !important;animation-duration:.001s !important;animation-iteration-count:1 !important;animation-fill-mode:both !important;animation-play-state:running !important;transition-duration:0s !important}
+body{font-family:"IBM Plex Sans",system-ui,sans-serif;color:#1E1B2E;font-size:10.5pt;line-height:1.55}
+a{color:#C2410C}a:hover{color:#9A3412}
+h1{font-size:21pt;line-height:1.2;letter-spacing:-0.01em;margin:0 0 14pt;font-weight:700;text-wrap:balance}
+h1::before{content:"SCENARIC · CLAUDE CODE PROMPTS";display:block;font:500 8pt "IBM Plex Mono",monospace;letter-spacing:.1em;color:#F97316;margin-bottom:8pt}
+h2{font-size:14pt;margin:4pt 0 8pt;font-weight:600;break-after:avoid;break-before:page}
+hr{display:none}
+h3{font-size:11.5pt;margin:14pt 0 6pt;font-weight:600;break-after:avoid}
+p{margin:0 0 8pt;text-wrap:pretty}
+ul,ol{margin:0 0 8pt;padding-left:18pt}
+li{margin:0 0 3pt}
+strong{font-weight:600}
+code{font-family:"IBM Plex Mono",monospace;font-size:.88em;background:#FFF7ED;color:#9A3412;padding:.5pt 3pt;border-radius:3px}
+pre{font-family:"IBM Plex Mono",monospace;font-size:8.5pt;line-height:1.5;background:#FAFAF9;border:1px solid #E7E5E4;border-radius:6px;padding:10pt 12pt;white-space:pre-wrap;word-break:break-word;margin:0 0 10pt;color:#292524}
+hr{border:none;border-top:1px solid #E5E7EB;margin:16pt 0}
+blockquote{margin:0 0 10pt;padding:8pt 12pt;background:#FFF7ED;border-radius:6px;color:#7C2D12}
+</style>
+</head>
+<body>
+<doc-page margin="0.75in">
+<h1>Claude Code — implementation prompts: Signals page event cards + flip</h1>
+<p>This replaces <strong>Prompt 4</strong> in <code>CLAUDE_CODE_EVENTS_PROMPTS.md</code>. Run Prompts 0–3 from that file first, because this assumes the <code>events</code> and <code>event_signal_links</code> tables exist.</p>
+<p><strong>Prototype reference (commit these so Claude Code can read them):</strong></p>
+<ul>
+<li><code>components/page-signals.jsx</code>: the page, view toggle, filters, flip state and jump-between-views logic</li>
+<li><code>components/events.jsx</code>: <code>FlipCard</code>, <code>EventCard</code>, <code>SignalCardBack</code>, <code>EventCount</code>, <code>FlipHint</code>, <code>LikelihoodPill</code>, <code>eventCategory</code>, <code>looksLikeEvent</code>, <code>AddSignalModal</code></li>
+<li><code>styles.css</code>: <code>.chip-*</code> STEEP colours and <code>.badge-high/mid/low</code></li>
+<li><code>data.js</code>: the <code>events</code> seed, showing the shape each card expects</li>
+</ul>
+<p>Paste one prompt per message.</p>
+<hr>
+<h2>Prompt A — Orient (read-only)</h2>
+<pre>Read, then report back before changing anything:
+- components/page-signals.jsx and components/events.jsx (the prototype of this feature, the source of truth for layout and behaviour)
+- styles.css (.chip-* and .badge-* classes)
+- data.js (the events seed)
+- the production Signals page component, its data hooks, and the events / event_signal_links schema from the previous migration
+
+Answer, no code changes:
+1. Where does the production Signals page get signals from, and what's the cleanest place to also load events + event_signal_links in the same fetch?
+2. Does the events table have `category` and `description` columns? The event cards need both.
+3. Is there an existing Stars component and chip/badge classes in production that match the prototype's, or do they need porting?
+4. How does the production app handle scroll containers on this page? (Jump-to-card scrolls the page's own scroll container, never window, and never uses scrollIntoView.)</pre>
+<hr>
+<h2>Prompt B — Schema top-up</h2>
+<pre>The event cards need a STEEP category and a description on each event. Write one new migration and do not edit existing ones.
+
+- If missing, add `events.category text` with check in ('Social','Technology','Economic','Ecological','Political').
+- If missing, add `events.description text` (the prototype calls it `body`; use `description` in the DB and map it in the client).
+- Backfill category for existing events from the category of their first linked signal (lowest created_at on event_signal_links). Leave it null if the event has no links.
+- Do not make category NOT NULL yet. The client falls back to the first linked signal's category when it's null, exactly like `eventCategory()` in components/events.jsx.
+
+RLS is unchanged. Confirm the existing events policies still apply to the new columns.</pre>
+<hr>
+<h2>Prompt C — Data layer</h2>
+<pre>Add a hook `useSignalsWithEvents(projectId)` that returns { signals, events, links, loading, error, refetch }.
+
+- One round-trip where possible: signals, events and event_signal_links for the project, all under RLS through the Supabase client.
+- Return events in the shape the prototype components expect:
+  { id, category, body, status: 'observed'|'possible', date, title, impact, likelihood, source, indicatorId, wildcard, precursor, links: [{ sigId, toward }] }
+  Map from DB columns:
+  - description -&gt; body
+  - occurred_on (formatted 'Mon YYYY') or window_label -&gt; date
+  - is_wildcard -&gt; wildcard
+  - likelihood lowercase -&gt; Title Case
+  - indicators.event_id reverse lookup -&gt; indicatorId
+- Subscribe to realtime changes on events and event_signal_links for the project so a news-match acceptance elsewhere updates the cards without a reload.
+- No N+1 queries. No client-side joins over unbounded lists; paginate if the project has more than 500 events.</pre>
+<hr>
+<h2>Prompt D — Port the card components</h2>
+<pre>Port these components from components/events.jsx into the production codebase, matching the repo's file and styling conventions. Keep the visual output identical to the prototype.
+
+1. FlipCard({ id, flipped, front, back, focused })
+   - Both faces share a single CSS grid cell (grid-area: 1/1) so the card height = the taller face. Do not use absolute positioning.
+   - rotateY(180deg) with perspective 1200px, 0.45s cubic-bezier(.2,.7,.2,1), backface-visibility hidden on both faces.
+   - CRITICAL: set pointer-events: none on the hidden face, and aria-hidden on it. Without this, clicks on a flipped card hit buttons on the back of the hidden face. This was a real bug in the prototype.
+   - Honour prefers-reduced-motion: swap instantly with no rotation.
+   - `focused` renders a 2px #F97316 ring with a soft outer halo, used after a cross-view jump.
+   - Put data-card-id={id} on the root for scroll targeting.
+
+2. EventCard: front face must match the signal card exactly (same border #E5E7EB, radius 10, padding 14, fonts, sizes):
+   - Row 1: colour-coded STEEP chip (className chip chip-&lt;category&gt;) on the left. On the right, mono 10.5px "&lt;STATUS&gt; · &lt;date&gt;" in #9CA3AF, or #7C3AED for wildcards.
+   - Title 14px/600, description 12.5px #6B7280.
+   - Wildcards only: "EARLY SIGN &lt;precursor&gt;".
+   - IMPACT row: mono label (fixed 78px width) + Stars. Observed events show their source right-aligned on this row.
+   - LIKELIHOOD row, ALWAYS shown:
+     - possible/wildcard: a 3-segment bar (orange for filled segments) plus a badge-high/mid/low pill reading High / Medium / Low, or "Not set".
+     - observed: a neutral "Occurred" pill. Likelihood never applies once something has happened.
+   - Footer divider: "N linked force(s)", an INDICATOR tag if an indicator references the event, and a "FORCES ↻" flip hint.
+   Back face: "LINKED FORCES", then each linked signal as a button showing its STEEP chip, title, and "pushes toward &lt;pole&gt; →". Clicking one jumps to that signal in the Forces view.
+
+3. SignalCardBack: "LINKED EVENTS", the signal title, then its events (observed first, then possible), each as a button with:
+   - title
+   - date (observed) or likelihood pill (possible)
+   - "→ &lt;pole&gt;"
+   - a solid border for observed events, dashed for possible (orange #FDBA74), dashed purple (#C4B5FD) for wildcards
+
+   Clicking an event jumps to it in the Events view. Footer: a "Timeline &amp; details" button that opens the existing signal detail modal, plus a "FORCE ↻" hint.
+
+4. EventCount: "● N evidence" (solid dot) and "◌ N ahead" (dashed dot), shown on the signal card front footer next to an "EVENTS ↻" flip hint.
+
+Every inner button inside a face must stopPropagation so it doesn't also flip the card.</pre>
+<hr>
+<h2>Prompt E — Rebuild the Signals page</h2>
+<pre>Update the production Signals page to match components/page-signals.jsx.
+
+Header:
+- Title "Signals Library".
+- Subtitle "Forces that could shape your focal question. Specific events, past or future, attach to a force. Click any card to flip it."
+- Right side: segmented toggle "Forces · N" / "Events · N" (labels nowrap), Sort, and "+ Add Signal". The header row wraps on narrow widths.
+
+Filters:
+- The STEEP filter pills (All, Social, Technology, Economic, Ecological, Political) apply to BOTH views. Events filter by their category, falling back to the first linked signal's category.
+- In the Events view only, a second row of status filters: All / Observed / Possible / Wildcards.
+
+Forces view: the existing signal card grid (repeat(auto-fill, minmax(250px,1fr)), gap 12), each card wrapped in FlipCard. Front = the existing signal card plus the EventCount footer. Back = SignalCardBack. "+ Add to Matrix" and the "⋯" details button stay on the front.
+
+Events view: three groups (Observed, Possible, Wildcards), each with a header "&lt;Label&gt; · &lt;count&gt;" (nowrap) and a subtitle:
+- Observed: "Evidence that a force is moving"
+- Possible: "Future events to watch — likelihood is per event, never per scenario"
+- Wildcards: "Low-likelihood, high-impact — kept off the matrix"
+Each group is the same card grid of EventCards. Show an empty-state line when a group has no events in the current filter.
+
+Flip state: a single map keyed by card id, held in page state. Flipping one card doesn't affect others.
+
+Cross-view jump, jump(toView, id):
+1. switch the view
+2. reset the STEEP filter (and the status filter when going to Events) so the target can't be hidden
+3. un-flip the target card
+4. set focusId
+5. after layout, scroll the PAGE'S scroll container so the card sits about 80px from the top. Use container.scrollTo with a computed offset, never scrollIntoView.
+6. clear focusId after about 2.6s
+
+Add Signal: keep AddSignalModal and looksLikeEvent from the prototype.
+- When the title reads like an event, default to "Add as event". Require a target force and a "pushes toward" pole, offer a likelihood for possible events, and set the event's category from the target force.
+- After adding an event, jump to it in the Events view.
+- The regex must match both past tense ("added") and present-tense headline verbs ("adds").
+
+Reuse existing styles. Do not restyle anything outside what the prototype changes.</pre>
+<hr>
+<h2>Prompt F — Verify</h2>
+<pre>Verify without changing behaviour. Fix only what's broken, and report results.
+
+1. Hidden-face clicks: flip a signal card, then click where "+ Add to Matrix" sits on the front. Assert no navigation happens. Repeat for event cards.
+2. Card height: a card with a long back face (a signal with 5+ events) grows to fit. Nothing is clipped or overlaps the next row.
+3. Likelihood: every possible and wildcard card shows the LIKELIHOOD row with a bar and a pill. Every observed card shows "Occurred". No observed card shows High/Medium/Low.
+4. STEEP chips: every event card shows a coloured category chip, including events whose category column is null (fallback to the linked signal).
+5. Jumps: signal back → event lands in the Events view with the card highlighted and scrolled into position, even when a STEEP filter was active that would have hidden it. Same for event back → signal.
+6. Filters: the STEEP filter applies in both views, and the status filter only appears in Events.
+7. Realtime: accept a news-match proposal in another tab, then assert the event card moves from Possible to Observed and its likelihood row changes to "Occurred", with no reload.
+8. Reduced motion: with prefers-reduced-motion, flips are instant.
+9. Keyboard: cards are focusable. Enter or Space flips a card. Inner buttons are reachable only on the visible face.
+10. Heuristic: "US adds 14 firms to Entity List" and "Tariff hike in Q3 2027" trigger the event nudge. "Direction of SEA foreign-ownership regulation" does not.</pre>
+<hr>
+<h3>Hold the implementer to</h3>
+<ul>
+<li><strong>The prototype is the spec.</strong> Card anatomy, colours and copy come from <code>components/events.jsx</code> and <code>components/page-signals.jsx</code>. Don't reinterpret them.</li>
+<li><strong>Hidden faces must not be clickable.</strong> It's the one non-obvious bug in a flip UI, and it silently triggers the wrong action.</li>
+<li><strong>Likelihood is per event only.</strong> It shows on event cards and nowhere on scenarios.</li>
+</ul>
+</doc-page>
+</body>
+</html>

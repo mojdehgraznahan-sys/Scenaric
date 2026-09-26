@@ -76,6 +76,31 @@ export interface Signal {
   createdAt: string;
 }
 
+// Signals page "Events" view — a specific occurrence (observed=past, possible=future),
+// optionally flagged wildcard, linked to one or more signals ("forces") it pushes toward a pole.
+export interface EventLink {
+  signalId: string;
+  toward: string;
+}
+
+export interface EventItem {
+  id: string;
+  // null falls back to the first linked signal's category at render time (eventCategory()).
+  category: SteepCategory | null;
+  body: string;
+  status: "observed" | "possible";
+  wildcard: boolean;
+  // Formatted display date: occurred_on ("Mon YYYY") when observed, else window_label ("Q3 2027").
+  date: string;
+  title: string;
+  impact: number | null;
+  likelihood: "Low" | "Medium" | "High" | null;
+  source: string | null;
+  indicatorId: string | null;
+  precursor: string | null;
+  links: EventLink[];
+}
+
 export interface Scenario {
   id: string;
   name: string;
