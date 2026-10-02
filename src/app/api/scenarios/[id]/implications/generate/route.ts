@@ -7,9 +7,12 @@ import { errorResponse } from "@/lib/api/error-response";
 // as narrative/expand — no status-polling table needed.
 export const maxDuration = 120;
 
-export async function POST(_request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, { params }: { params: { id: string } }) {
   try {
-    return NextResponse.json(await generateImplicationsForScenario(params.id));
+    // ?allowCache=1 is only ever sent by page-narrative.tsx's automatic "no implications yet"
+    // effect — the explicit "Regenerate" button omits it, so it always gets a fresh call.
+    const allowCache = new URL(request.url).searchParams.get("allowCache") === "1";
+    return NextResponse.json(await generateImplicationsForScenario(params.id, { allowCache }));
   } catch (err) {
     return errorResponse(err);
   }

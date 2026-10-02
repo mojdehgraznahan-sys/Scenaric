@@ -110,12 +110,12 @@ export function PageNarrative() {
     }
   };
 
-  const runExpand = async () => {
+  const runExpand = async (opts?: { allowCache?: boolean }) => {
     if (!current) return;
     setExpanding(true);
     setExpandGap(null);
     try {
-      const res = await fetch(`/api/scenarios/${current.id}/narrative/expand`, { method: "POST" });
+      const res = await fetch(`/api/scenarios/${current.id}/narrative/expand${opts?.allowCache ? "?allowCache=1" : ""}`, { method: "POST" });
       if (!res.ok) throw new Error(`Expand failed (${res.status}).`);
       const result: ExpandNarrativeResponse = await res.json();
       if (!result.sufficientEvidence) {
@@ -150,16 +150,20 @@ export function PageNarrative() {
   // guard below stops firing for that scenario.
   React.useEffect(() => {
     if (current && !current.narrative) {
-      runExpand();
+      // allowCache: true — this is the ONLY call site allowed to get a cached result (same
+      // storyline chain as last time -> same narrative is correct, not stale). The explicit
+      // "Expand with AI"/"Overwrite and regenerate" buttons (runExpand() with no opts) always
+      // bypass the cache.
+      runExpand({ allowCache: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id]);
 
-  const runGenerateImplications = async (scenarioId: string) => {
+  const runGenerateImplications = async (scenarioId: string, opts?: { allowCache?: boolean }) => {
     setGeneratingImplications(true);
     setImplicationsGap(null);
     try {
-      const res = await fetch(`/api/scenarios/${scenarioId}/implications/generate`, { method: "POST" });
+      const res = await fetch(`/api/scenarios/${scenarioId}/implications/generate${opts?.allowCache ? "?allowCache=1" : ""}`, { method: "POST" });
       if (!res.ok) throw new Error(`Generate failed (${res.status}).`);
       const result: GenerateImplicationsResponse = await res.json();
       if (!result.sufficientEvidence) {
@@ -191,7 +195,10 @@ export function PageNarrative() {
         setImplications(rows);
         setImplicationsLoading(false);
         if (rows.length === 0 && current.narrative) {
-          runGenerateImplications(current.id);
+          // allowCache: true, same reasoning as the auto-expand effect above — only this
+          // automatic call site may get a cached result. The explicit "Regenerate" button
+          // (runGenerateImplications(id) with no opts) always bypasses the cache.
+          runGenerateImplications(current.id, { allowCache: true });
         }
       })
       .catch((err) => {

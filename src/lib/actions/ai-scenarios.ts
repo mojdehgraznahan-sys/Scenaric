@@ -106,29 +106,40 @@ async function generateScenarioLogics(
   if (projectError) throw projectError;
   const focalQuestion = project.refined_focal_question ?? project.focal_question;
 
-  // Predetermined + Wildcard buckets — predetermined holds true in every scenario (fixed
-  // context, not a variable); wildcard signals are surfaced as optional shock disruptors the
-  // model may reference in narrative texture but must never fold into the axis logic (§8).
-  // Bucket is read from the persisted matrix_dots column (AI-classified, ai-matrix.ts's
-  // classifyMatrixBuckets) — no client/deterministic recomputation, per §7.
+  // Predetermined forces hold true in every scenario (fixed context, not a variable) — read
+  // from matrix_placements_v's derived quadrant (Matrix v2,
+  // 0040_matrix_v2_placement_and_axis_functions.sql), never recomputed here. Wildcards are
+  // surfaced as optional shock disruptors the model may reference in narrative texture but must
+  // never fold into the axis logic (§8) — under Matrix v2 a wildcard is a property of an EVENT
+  // (events.is_wildcard), not a force/signal bucket as it was pre-rebuild, so these now come
+  // from the Signals Library's wildcard events rather than a signal classification.
   const { data: signals, error: signalsError } = await supabase
     .from("signals")
     .select("id, title, body, category")
     .eq("project_id", projectId);
   if (signalsError) throw signalsError;
 
-  const { data: dots, error: dotsError } = await supabase
-    .from("matrix_dots")
-    .select("signal_id, bucket")
+  const { data: placements, error: placementsError } = await supabase
+    .from("matrix_placements_v")
+    .select("signal_id, quadrant")
     .eq("project_id", projectId);
-  if (dotsError) throw dotsError;
-  const bucketBySignalId = new Map(dots.map((d) => [d.signal_id, d.bucket]));
+  if (placementsError) throw placementsError;
+  const quadrantBySignalId = new Map(placements.map((p) => [p.signal_id, p.quadrant]));
 
-  const signalsInBucket = (bucket: string) =>
-    signals.filter((s) => bucketBySignalId.get(s.id) === bucket).map((s) => ({ title: s.title, body: s.body, category: s.category }));
+  const predeterminedSignals = signals
+    .filter((s) => quadrantBySignalId.get(s.id) === "predetermined")
+    .map((s) => ({ title: s.title, body: s.body, category: s.category }));
 
-  const predeterminedSignals = signalsInBucket("predetermined");
-  const wildcardSignals = signalsInBucket("wildcard");
+  const { data: wildcardEvents, error: wildcardEventsError } = await supabase
+    .from("events")
+    .select("title, description, category")
+    .eq("project_id", projectId)
+    .eq("is_wildcard", true);
+  if (wildcardEventsError) throw wildcardEventsError;
+  // Last-resort category default, matching pole.ts's eventCategory() — a wildcard with no
+  // category and no linked signal to borrow one from is rare enough not to warrant a second
+  // query here; this is an AI-prompt label, not something rendered in the UI.
+  const wildcardSignals = wildcardEvents.map((e) => ({ title: e.title, body: e.description ?? "", category: e.category ?? "Political" }));
 
   const output = await runStructured({
     step,

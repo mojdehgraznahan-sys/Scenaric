@@ -205,6 +205,11 @@ export async function getDashboardRecommendations(projectId: string): Promise<{ 
     schema: RecommendationsSchema,
     effort: "low",
     thinking: false,
+    // No "regenerate" button exists for this card — the input already captures everything
+    // that should change the recommendation (focal question, next-step gate, monitor alert
+    // counts), so an unchanged input means an unchanged recommendation is correct, not stale.
+    // Was previously an unconditional model call on every single Home page view.
+    cache: true,
   });
 
   const actions: RecommendationAction[] = [];

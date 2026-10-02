@@ -231,25 +231,25 @@ async function runAutoSuggestStoryline(
     .eq("project_id", scenario.project_id);
   if (signalsError) throw signalsError;
 
-  const { data: dots, error: dotsError } = await supabase
-    .from("matrix_dots")
-    .select("signal_id, bucket")
+  const { data: placements, error: placementsError } = await supabase
+    .from("matrix_placements_v")
+    .select("signal_id, quadrant")
     .eq("project_id", scenario.project_id);
-  if (dotsError) throw dotsError;
-  const bucketBySignalId = new Map(dots.map((d) => [d.signal_id, d.bucket]));
+  if (placementsError) throw placementsError;
+  const quadrantBySignalId = new Map(placements.map((p) => [p.signal_id, p.quadrant]));
   const signalById = new Map(signals.map((s) => [s.id, s]));
 
-  // Wildcards are context-only, never part of the mainline causal argument (§8) — excluded
-  // from both pools, matching the Build Plan's storyline prompt input, which has no
-  // wildcard_signals slot at all (unlike predetermined_signals). The axis signals are
-  // ALSO excluded here (SCHWARTZ_METHODOLOGY_SKILL.md's Storyline section): the axes define
-  // the quadrant itself — Storyline's job is explaining how you plausibly get there using
-  // the *rest* of the library, not re-narrating the axes.
+  // The axis signals are excluded here (SCHWARTZ_METHODOLOGY_SKILL.md's Storyline section):
+  // the axes define the quadrant itself — Storyline's job is explaining how you plausibly get
+  // there using the *rest* of the library, not re-narrating the axes. Under Matrix v2 there is
+  // no longer a wildcard SIGNAL bucket to also exclude — wildcards are events now
+  // (events.is_wildcard), never a force's own classification — so every non-axis signal is a
+  // legitimate library candidate.
   const axisSignalIds = new Set([axisA.signal_id, axisB.signal_id].filter((id): id is string => id != null));
-  const nonWildcard = signals.filter((s) => bucketBySignalId.get(s.id) !== "wildcard" && !axisSignalIds.has(s.id));
-  const librarySignals = nonWildcard.map((s) => ({ id: s.id, title: s.title, body: s.body, category: s.category }));
-  const predeterminedSignals = nonWildcard
-    .filter((s) => bucketBySignalId.get(s.id) === "predetermined")
+  const nonAxisSignals = signals.filter((s) => !axisSignalIds.has(s.id));
+  const librarySignals = nonAxisSignals.map((s) => ({ id: s.id, title: s.title, body: s.body, category: s.category }));
+  const predeterminedSignals = nonAxisSignals
+    .filter((s) => quadrantBySignalId.get(s.id) === "predetermined")
     .map((s) => ({ id: s.id, title: s.title, body: s.body, category: s.category }));
   const candidateIds = new Set(librarySignals.map((s) => s.id));
 
@@ -469,21 +469,13 @@ export async function findSignalForGap(input: { scenarioId: string; phase: Phase
     .eq("project_id", scenario.project_id);
   if (signalsError) throw signalsError;
 
-  const { data: dots, error: dotsError } = await supabase
-    .from("matrix_dots")
-    .select("signal_id, bucket")
-    .eq("project_id", scenario.project_id);
-  if (dotsError) throw dotsError;
-  const bucketBySignalId = new Map(dots.map((d) => [d.signal_id, d.bucket]));
   const signalById = new Map(signals.map((s) => [s.id, s]));
 
-  // A gap-filler shouldn't re-suggest a signal already placed in this scenario's chain;
-  // wildcards stay excluded for the same "context-only" reason as auto-suggest; axis signals
-  // are excluded because they define the quadrant itself, not the path to it
-  // (SCHWARTZ_METHODOLOGY_SKILL.md's Storyline section).
-  const candidateSignals = signals.filter(
-    (s) => !usedSignalIds.has(s.id) && !axisSignalIds.has(s.id) && bucketBySignalId.get(s.id) !== "wildcard"
-  );
+  // A gap-filler shouldn't re-suggest a signal already placed in this scenario's chain; axis
+  // signals are excluded because they define the quadrant itself, not the path to it
+  // (SCHWARTZ_METHODOLOGY_SKILL.md's Storyline section). No wildcard-bucket exclusion needed
+  // under Matrix v2 — wildcards are events now, never a force's own classification.
+  const candidateSignals = signals.filter((s) => !usedSignalIds.has(s.id) && !axisSignalIds.has(s.id));
   if (candidateSignals.length === 0) {
     return { sufficientEvidence: false, gap: "No unused project signals are available to fill this gap.", candidates: [] };
   }

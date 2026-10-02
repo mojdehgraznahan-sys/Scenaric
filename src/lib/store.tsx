@@ -47,6 +47,15 @@ import {
 import { listIndicatorsForProject } from "./actions/indicators";
 import { getMatrixData, updateMatrixDotPosition as updateMatrixDotPositionAction, type MatrixDotData } from "./actions/matrix";
 import { classifyMatrixBuckets, reclassifySignal } from "./actions/ai-matrix";
+import {
+  getMatrixV2Data,
+  placeForce,
+  setScenarioAxes,
+  setAxisHeadline as setAxisHeadlineAction,
+  type MatrixPlacementRow,
+  type ImpactAnswer,
+  type Plausible,
+} from "./actions/matrix-v2";
 import type { MatrixBucket } from "./matrix-mapping";
 import { buildScenarios as buildScenariosAction, type AxisInput } from "./actions/ai-scenarios";
 import { getScenarios, setScenarioArchived, type ScenarioWithAxes } from "./actions/scenarios";
@@ -410,6 +419,22 @@ export interface Store {
   pendingScoringIds: string[];
   refreshMatrixData: (projectId: string) => Promise<void>;
   updateMatrixDotPosition: (projectId: string, signalId: string, x: number, y: number) => Promise<void>;
+  // Matrix v2 (design/handoff/2026-10-01/CLAUDE_CODE_MATRIX_V2_PROMPTS.md) — the two-question
+  // placement, server-computed by place_force (0040_matrix_v2_placement_and_axis_functions.sql).
+  // Separate from matrixDots/updateMatrixDotPosition above (the old drag model), kept alongside
+  // it until matrix_dots is dropped per the prompt file's own Prompt 6 gate.
+  matrixPlacements: MatrixPlacementRow[];
+  matrixPlacementsLoading: boolean;
+  // [x_signal_id, y_signal_id] (position-ordered, nulls filtered) from the project's active
+  // `axes` row — NOT a new table; see 0039/0040's comments for why Matrix v2 reuses `axes`
+  // instead of a separate scenario_axes table.
+  scenarioAxisIds: string[];
+  axisHeadlines: Record<string, string>;
+  setMatrixPlacement: (projectId: string, signalId: string, impactAns: ImpactAnswer, plausible: Plausible, assessedEventIds: string[]) => Promise<void>;
+  // Throws an Error with message AXES_LOCKED ("axes_locked") when the project already has
+  // scenarios — callers should catch that specific message and route to the re-axis flow.
+  setMatrixAxes: (projectId: string, ids: string[]) => Promise<void>;
+  setMatrixHeadline: (projectId: string, signalId: string, side: "a" | "b", eventId: string) => Promise<void>;
   selectedDot: string;
   setSelectedDot: (v: string) => void;
   // Storyline's Ask AI drawer (ask-ai.tsx, context="storyline") lives in AppShell, a sibling
@@ -731,6 +756,55 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       .finally(() => setMatrixDotsLoading(false));
   }, [activeProjectId, refreshMatrixData]);
 
+  // ---- Matrix v2 (real, Supabase) — two-question placement, alongside matrixDots above ----
+  const [matrixPlacements, setMatrixPlacements] = useState<MatrixPlacementRow[]>([]);
+  const [matrixPlacementsLoading, setMatrixPlacementsLoading] = useState(true);
+  const [scenarioAxisIds, setScenarioAxisIdsState] = useState<string[]>([]);
+  const [axisHeadlines, setAxisHeadlinesState] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!activeProjectId) {
+      setMatrixPlacements([]);
+      setScenarioAxisIdsState([]);
+      setAxisHeadlinesState({});
+      setMatrixPlacementsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setMatrixPlacementsLoading(true);
+    getMatrixV2Data(activeProjectId)
+      .then((result) => {
+        if (cancelled) return;
+        setMatrixPlacements(result.placements);
+        setScenarioAxisIdsState(result.axisIds);
+        setAxisHeadlinesState(result.headlines);
+      })
+      .catch((err) => console.error("[store] failed to load matrix v2 data", err))
+      .finally(() => {
+        if (!cancelled) setMatrixPlacementsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProjectId]);
+
+  // Updates local state from place_force's own return value rather than refetching the whole
+  // project's placements — the RPC already returns the single row that changed.
+  const setMatrixPlacement = useCallback(async (projectId: string, signalId: string, impactAns: ImpactAnswer, plausible: Plausible, assessedEventIds: string[]) => {
+    const row = await placeForce(projectId, signalId, impactAns, plausible, assessedEventIds);
+    setMatrixPlacements((prev) => (prev.some((p) => p.signalId === signalId) ? prev.map((p) => (p.signalId === signalId ? row : p)) : [...prev, row]));
+  }, []);
+
+  const setMatrixAxes = useCallback(async (projectId: string, ids: string[]) => {
+    const newIds = await setScenarioAxes(projectId, ids); // throws Error(AXES_LOCKED) — callers catch it
+    setScenarioAxisIdsState(newIds);
+  }, []);
+
+  const setMatrixHeadline = useCallback(async (projectId: string, signalId: string, side: "a" | "b", eventId: string) => {
+    await setAxisHeadlineAction(projectId, signalId, side, eventId);
+    setAxisHeadlinesState((h) => ({ ...h, [`${signalId}:${side}`]: eventId }));
+  }, []);
+
   // ---- Signals (real, Supabase) ----
   const [signals, setSignalsState] = useState<Signal[]>([]);
   const [signalsLoading, setSignalsLoading] = useState(true);
@@ -851,6 +925,49 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener("fm:events-updated", onUpdated);
     return () => window.removeEventListener("fm:events-updated", onUpdated);
   }, [activeProjectId, refreshEvents]);
+
+  // Matrix v2 realtime (design/handoff/2026-10-01/CLAUDE_CODE_MATRIX_V2_PROMPTS.md, Prompt 5) —
+  // the FIRST use of Supabase Realtime anywhere in this codebase. Every other "live update" here
+  // (fm:events-updated above, fm:signals-updated, fm:persist) is a same-tab window.dispatchEvent
+  // after a local mutation — it never crosses tabs or sessions. Prompt 6's own verify step 9
+  // ("adding an event on the Signals Library in tab 1 updates the Matrix event cards in tab 2")
+  // genuinely needs cross-client delivery, which only Postgres-level realtime provides — hence
+  // this, plus 0041_matrix_v2_realtime.sql adding these 5 tables to the supabase_realtime
+  // publication (a table emits no change events to any client until it's added there).
+  // On any change, refetch the affected slice wholesale rather than patching the payload in by
+  // hand — matches this store's existing refresh-on-signal convention and stays correct
+  // regardless of which columns a given change touched.
+  useEffect(() => {
+    if (!activeProjectId) return;
+    const projectId = activeProjectId;
+    const filter = `project_id=eq.${projectId}`;
+
+    const refreshMatrixV2 = () =>
+      getMatrixV2Data(projectId)
+        .then((result) => {
+          setMatrixPlacements(result.placements);
+          setScenarioAxisIdsState(result.axisIds);
+          setAxisHeadlinesState(result.headlines);
+        })
+        .catch((err) => console.error("[store] realtime refresh (matrix v2) failed", err));
+
+    const channel = supabase
+      .channel(`matrix-v2:${projectId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "matrix_placements", filter }, refreshMatrixV2)
+      .on("postgres_changes", { event: "*", schema: "public", table: "axes", filter }, refreshMatrixV2)
+      .on("postgres_changes", { event: "*", schema: "public", table: "axis_headlines", filter }, refreshMatrixV2)
+      .on("postgres_changes", { event: "*", schema: "public", table: "events", filter }, () => {
+        refreshEvents(projectId).catch((err) => console.error("[store] realtime refresh (events) failed", err));
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "event_signal_links", filter }, () => {
+        refreshEvents(projectId).catch((err) => console.error("[store] realtime refresh (event_signal_links) failed", err));
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeProjectId, supabase, refreshEvents]);
 
   const createEvent = useCallback(
     async (input: {
@@ -1106,6 +1223,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     pendingScoringIds,
     refreshMatrixData,
     updateMatrixDotPosition,
+    matrixPlacements,
+    matrixPlacementsLoading,
+    scenarioAxisIds,
+    axisHeadlines,
+    setMatrixPlacement,
+    setMatrixAxes,
+    setMatrixHeadline,
     selectedDot,
     setSelectedDot,
     storylineAskAiContext,

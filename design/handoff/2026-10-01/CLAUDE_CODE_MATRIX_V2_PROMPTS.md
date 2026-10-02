@@ -4,7 +4,7 @@ These prompts don't depend on any other prompt file. They build on the Signals L
 
 ## Before you start
 
-1. Copy **`Matrix Standalone.html`** into the repo at `design/matrix-v2/Matrix Standalone.html` and commit it. It is one file containing the final UI and demo data. Open it in a browser to see exactly what to build.
+1. Copy **`Matrix Standalone.html`** into the repo at `design/handoff-2026-10-01/Matrix Standalone.html` and commit it. It is one file containing the final UI and demo data. Open it in a browser to see exactly what to build.
 2. Claude Code **ports** the UI and does not redesign it. Its job:
    - copy the component code as-is
    - build the tables
@@ -26,7 +26,7 @@ These prompts don't depend on any other prompt file. They build on the Signals L
 ## Prompt 1 — Orient (read-only, no changes)
 
 ```
-Open design/matrix-v2/Matrix Standalone.html and read it end to end. It is the complete, final UI for the Matrix page:
+Open design/handoff-2026-10-01/Matrix Standalone.html and read it end to end. It is the complete, final UI for the Matrix page:
 - SEED is demo data in the exact shapes the UI expects
 - MatrixV2 and the MX* helpers are the component code, with CSS injected as MX_CSS
 - the HOST block is an in-memory `api` with three functions, each with a BACKEND comment
@@ -118,7 +118,7 @@ If scenarios already exist for the project, raise 'axes_locked' so the client ro
 ## Prompt 4 — Port the UI as-is
 
 ```
-Port the Matrix UI from design/matrix-v2/Matrix Standalone.html.
+Port the Matrix UI from design/handoff/2026-10-01/Matrix Standalone.html.
 
 1. Create one component module (e.g. components/matrix/MatrixV2.jsx, or .tsx to match the repo). Copy VERBATIM: MX_CAT, MX_CSS, mxUseCss, mxPole, mxSide, mxEvents, mxQuad, MX_Q, MX_IMPACT_Y, mxPlace, mxLabel, MXChip, MXEvDot, MXMeta, MXSeg, MXQBadge, MXHeadline, MXPlot, MXAssess, MXAxisCard, MXWorlds and MatrixV2.
    - Change only what the module system requires (imports/exports, types).

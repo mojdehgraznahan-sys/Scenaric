@@ -82,6 +82,12 @@ export async function checkAxisIndependence(input: {
     },
     schema: IndependenceSchema,
     effort: "medium",
+    // A judgment call, not a generative one — "are these two axes independent" shouldn't
+    // flip-flop between identical calls, and there's no "regenerate" button for it (the
+    // Matrix Ask AI "check_independence" task asks the same real question the automatic
+    // Build-Scenarios gate does). Was previously re-triggered on every realtime-driven
+    // placement tick while the Matrix page was open, not just on an actual axis-pair change.
+    cache: true,
   });
 
   return output;
@@ -149,6 +155,18 @@ async function classifySignalBucket(
     },
     schema: BucketClassificationSchema,
     effort: "low",
+    // Deterministic given fixed inputs — the same (title, body, category, impact, uncertainty)
+    // tuple should never classify differently, and nothing ever asks to "reclassify the same
+    // signal differently." Mainly helps a drag that lands in the same impact/uncertainty cell
+    // as before (reclassifySignal still fires, but hits cache instead of the model).
+    cache: true,
+    // This runs in StoreProvider on every page of the app (classifyMatrixBuckets queries
+    // every unbucketed signal on each load), not just the Matrix page — a signal that fails
+    // classification (e.g. a persistent schema-validation issue with its specific content)
+    // was otherwise getting a fresh model call on every single app load, forever, with the
+    // only visible symptom being a console.error. One hour bounds that to a periodic retry
+    // instead, without needing a user-facing "retry classification" action to exist yet.
+    failureCooldownMs: 60 * 60 * 1000,
   });
 
   const { error } = await supabase

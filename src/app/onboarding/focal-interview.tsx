@@ -400,7 +400,13 @@ export default function FocalInterview({
       })
       .catch((err) => {
         console.error("[onboarding] draft focal question candidates failed", err);
-        persist({ candidatesGap: "Something went wrong drafting your focal question — try going back and answering a bit more." });
+        // candidates: [] (not left null) matters twice over: CandidatePicker's `!candidates`
+        // check otherwise keeps rendering the "Drafting…" spinner forever instead of this
+        // error (the catch's own candidatesGap text was structurally unreachable), AND the
+        // effect's own guard (`candidates !== null`) is what stops it firing again — leaving
+        // candidates null here was turning a single failed attempt into an immediate,
+        // silent, unbounded retry loop on every render.
+        persist({ candidates: [], candidatesGap: "Something went wrong drafting your focal question — try going back and answering a bit more." });
       })
       .finally(() => setDraftingCandidates(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps

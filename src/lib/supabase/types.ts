@@ -502,6 +502,75 @@ export interface Database {
         };
         Relationships: [];
       };
+      // Matrix v2 (0039_matrix_v2_placements_and_headlines.sql) — the two-question placement
+      // replacing drag-to-position. No surrogate id: primary key is (project_id, signal_id).
+      matrix_placements: {
+        Row: {
+          project_id: string;
+          signal_id: string;
+          x: number;
+          y: number;
+          impact_answer: "no" | "somewhat" | "completely" | null;
+          plausible: "both" | "a" | "b" | null;
+          confirmed: boolean;
+          assessed_event_ids: string[] | null;
+          assessed_by: string | null;
+          assessed_at: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          project_id: string;
+          signal_id: string;
+          x: number;
+          y: number;
+          impact_answer?: "no" | "somewhat" | "completely" | null;
+          plausible?: "both" | "a" | "b" | null;
+          confirmed?: boolean;
+          assessed_event_ids?: string[] | null;
+          assessed_by?: string | null;
+          assessed_at?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          project_id?: string;
+          signal_id?: string;
+          x?: number;
+          y?: number;
+          impact_answer?: "no" | "somewhat" | "completely" | null;
+          plausible?: "both" | "a" | "b" | null;
+          confirmed?: boolean;
+          assessed_event_ids?: string[] | null;
+          assessed_by?: string | null;
+          assessed_at?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      // Primary key (project_id, signal_id, side) — see 0039's enforce_axis_headline_event trigger.
+      axis_headlines: {
+        Row: {
+          project_id: string;
+          signal_id: string;
+          side: "a" | "b";
+          event_id: string;
+          created_at: string;
+        };
+        Insert: {
+          project_id: string;
+          signal_id: string;
+          side: "a" | "b";
+          event_id: string;
+          created_at?: string;
+        };
+        Update: {
+          project_id?: string;
+          signal_id?: string;
+          side?: "a" | "b";
+          event_id?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       scenarios: {
         Row: {
           id: string;
@@ -1319,7 +1388,17 @@ export interface Database {
         Relationships: [];
       };
     };
-    Views: Record<string, never>;
+    Views: {
+      // Adds derived `quadrant`/`settled_pole` on top of matrix_placements — see 0040's
+      // `with (security_invoker = true)` comment for why this view is safe to query directly.
+      matrix_placements_v: {
+        Row: Database["public"]["Tables"]["matrix_placements"]["Row"] & {
+          quadrant: "critical" | "predetermined" | "monitor" | "background";
+          settled_pole: string | null;
+        };
+        Relationships: [];
+      };
+    };
     Functions: {
       list_projects_with_progress: {
         Args: Record<PropertyKey, never>;
@@ -1332,6 +1411,15 @@ export interface Database {
       set_primary_strategic_option: {
         Args: { p_project_id: string; p_option_id: string; p_is_primary: boolean };
         Returns: Database["public"]["Tables"]["strategic_options"]["Row"];
+      };
+      // Matrix v2 (0040_matrix_v2_placement_and_axis_functions.sql).
+      place_force: {
+        Args: { p_project: string; p_signal: string; p_impact: string; p_plausible: string; p_event_ids: string[] };
+        Returns: Database["public"]["Tables"]["matrix_placements"]["Row"];
+      };
+      set_axes: {
+        Args: { p_project: string; p_ids: string[] };
+        Returns: Database["public"]["Tables"]["axes"]["Row"];
       };
     };
     Enums: Record<string, never>;

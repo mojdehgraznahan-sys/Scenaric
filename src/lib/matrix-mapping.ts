@@ -128,3 +128,10 @@ export function resolveDotCollisions(
 // both server actions and client components, and a "use server" file may only export async
 // functions.
 export type MatrixBucket = "critical_uncertainty" | "predetermined" | "background" | "wildcard";
+
+// Matrix v2 (design/handoff/2026-10-01/CLAUDE_CODE_MATRIX_V2_PROMPTS.md) — the exact message
+// set_axes (0040_matrix_v2_placement_and_axis_functions.sql) raises when the project already has
+// scenarios. Kept here, not in actions/matrix-v2.ts, for the same reason as everything else in
+// this file: a "use server" file may only export async Server Actions, so this plain string
+// constant — shared by that file's throw and page-matrix.tsx's catch — can't live there.
+export const AXES_LOCKED = "axes_locked";

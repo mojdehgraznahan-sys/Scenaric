@@ -51,7 +51,7 @@ export interface ExpandNarrativeResult {
 }
 
 // POST .../scenarios/:id/narrative/expand
-export async function expandNarrativeWithAI(scenarioId: string): Promise<ExpandNarrativeResult> {
+export async function expandNarrativeWithAI(scenarioId: string, opts?: { allowCache?: boolean }): Promise<ExpandNarrativeResult> {
   const supabase = createClient();
 
   const { data: scenario, error: scenarioError } = await supabase
@@ -96,6 +96,12 @@ export async function expandNarrativeWithAI(scenarioId: string): Promise<ExpandN
     schema: NarrativeExpandSchema,
     effort: "medium",
     thinking: true,
+    // Caching is only safe for the automatic "first time this scenario has no narrative"
+    // call — opts.allowCache is true ONLY from that call site (page-narrative.tsx's mount
+    // effect). The explicit "Expand with AI"/"Overwrite and regenerate" buttons call this same
+    // function with no opts, so they always bypass the cache and get a genuinely fresh result,
+    // even when the storyline chain hasn't changed since the last call.
+    cache: opts?.allowCache ?? false,
   });
 
   if (!output.sufficient_evidence || !output.narrative) {

@@ -71,7 +71,7 @@ export interface GenerateImplicationsResult {
 }
 
 // POST .../scenarios/:id/implications/generate
-export async function generateImplicationsForScenario(scenarioId: string): Promise<GenerateImplicationsResult> {
+export async function generateImplicationsForScenario(scenarioId: string, opts?: { allowCache?: boolean }): Promise<GenerateImplicationsResult> {
   const supabase = createClient();
 
   const { data: scenario, error: scenarioError } = await supabase
@@ -108,6 +108,11 @@ export async function generateImplicationsForScenario(scenarioId: string): Promi
     schema: ImplicationsSchema,
     effort: "low",
     thinking: false,
+    // Same caching rule as expandNarrativeWithAI: only the automatic "no implications yet"
+    // call (page-narrative.tsx's mount effect) passes allowCache:true. The explicit
+    // "Regenerate" button and regenerateImplicationsTask (ai-narrative-tasks.ts) call this
+    // with no opts, so they always bypass the cache.
+    cache: opts?.allowCache ?? false,
   });
 
   if (!output.sufficient_evidence || output.implications.length === 0) {

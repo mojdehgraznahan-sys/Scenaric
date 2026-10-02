@@ -125,6 +125,76 @@ interface RunStructuredOptions<T extends z.ZodTypeAny> {
    *  be grouped by project_id the way every other step already can. Omitted by default —
    *  every existing caller is unaffected, the column just stays null. */
   page?: string;
+  /** Opt-in, content-addressed cache: before calling Anthropic, look up the most recent
+   *  successful ai_runs row for this exact (step, promptVersion, inputHash) and return it
+   *  instead of making a new call — same model, same prompt version, same input should mean
+   *  same answer, so there's nothing to regenerate. Off by default; every existing caller is
+   *  unaffected until a step explicitly turns this on.
+   *
+   *  Deliberately opt-in, not default-on: some callers (e.g. an explicit "Regenerate" button
+   *  that calls the exact same function an automatic effect does, like
+   *  ai-narrative-tasks.ts's regenerateImplicationsTask) need a genuinely fresh call even when
+   *  the input hasn't changed. Turning this on for a step is a promise that nothing reachable
+   *  for that step ever needs "same input, different answer." */
+  cache?: boolean;
+  /** Opt-in failure backoff: if this exact (step, promptVersion, inputHash) already failed
+   *  (logged with output_json: null) within the last `failureCooldownMs`, skip the Anthropic
+   *  call entirely and throw AIGenerationFailedError immediately (attempts: 0, signaling "we
+   *  didn't even try this time"). For a caller that runs automatically and silently on every
+   *  page load (e.g. ai-matrix.ts's classifyMatrixBuckets) with no user-visible retry button,
+   *  a final failure after 2 real attempts is rarely a transient blip worth re-trying on every
+   *  subsequent load — this bounds that to once per cooldown window instead of forever. */
+  failureCooldownMs?: number;
+}
+
+// Admin client — same reasoning as logRun below: a cache lookup shouldn't depend on the
+// acting user's own row permissions (it's a shared, content-addressed resource, not
+// per-user data), and this is the only way to look up a pre-project call (project_id: null).
+async function lookupCachedRun(args: { step: string; projectId: string | null; promptVersion: string; inputHash: string }): Promise<unknown | null> {
+  const supabase = createAdminClient();
+  let query = supabase
+    .from("ai_runs")
+    .select("output_json")
+    .eq("step", args.step)
+    .eq("prompt_version", args.promptVersion)
+    .eq("input_hash", args.inputHash)
+    .not("output_json", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  query = args.projectId ? query.eq("project_id", args.projectId) : query.is("project_id", null);
+  const { data, error } = await query.maybeSingle();
+  if (error) {
+    console.error("[ai/client] cache lookup failed", error);
+    return null;
+  }
+  return data ? data.output_json : null;
+}
+
+// Same admin-client reasoning as lookupCachedRun above. output_json is null exactly on the
+// final-failure logRun call at the bottom of runStructured (a schema-validation/refusal
+// failure after both retries) — never on a success, so this can't mistake a real answer for
+// a failure.
+async function lookupRecentFailure(args: { step: string; projectId: string | null; promptVersion: string; inputHash: string; withinMs: number }): Promise<boolean> {
+  const supabase = createAdminClient();
+  const sinceIso = new Date(Date.now() - args.withinMs).toISOString();
+  let query = supabase
+    .from("ai_runs")
+    .select("id")
+    .eq("step", args.step)
+    .eq("prompt_version", args.promptVersion)
+    .eq("input_hash", args.inputHash)
+    .is("output_json", null)
+    .gte("created_at", sinceIso)
+    .limit(1);
+  query = args.projectId ? query.eq("project_id", args.projectId) : query.is("project_id", null);
+  const { data, error } = await query.maybeSingle();
+  if (error) {
+    // Fail OPEN here, unlike a cache-lookup error — a lookup failure should never be the
+    // reason a classification that might otherwise succeed gets silently skipped.
+    console.error("[ai/client] failure-cooldown lookup failed", error);
+    return false;
+  }
+  return !!data;
 }
 
 function inputHashFor(input: unknown): string {
@@ -176,7 +246,21 @@ async function logRun(args: {
  * (success or final failure) is logged to ai_runs.
  */
 export async function runStructured<T extends z.ZodTypeAny>(opts: RunStructuredOptions<T>): Promise<z.infer<T>> {
-  const { step, projectId, taskPrompt, input, schema, effort = "medium", thinking = false, maxTokens = 4096, webSearch, batchId = null, page = null } = opts;
+  const {
+    step,
+    projectId,
+    taskPrompt,
+    input,
+    schema,
+    effort = "medium",
+    thinking = false,
+    maxTokens = 4096,
+    webSearch,
+    batchId = null,
+    page = null,
+    cache = false,
+    failureCooldownMs,
+  } = opts;
   const promptVersion = opts.promptVersion || "v1";
   const inputHash = inputHashFor(input);
 
@@ -185,6 +269,27 @@ export async function runStructured<T extends z.ZodTypeAny>(opts: RunStructuredO
   // research access even opportunistically. See RESEARCH_MODE_ALLOWED_STEPS above.
   if (webSearch && !RESEARCH_MODE_ALLOWED_STEPS.includes(step)) {
     throw new ResearchModeNotAllowedError(step);
+  }
+
+  if (cache) {
+    const cached = await lookupCachedRun({ step, projectId, promptVersion, inputHash });
+    if (cached !== null) {
+      try {
+        return schema.parse(cached);
+      } catch (err) {
+        // A stale row from before a schema change, most likely — fall through to a real call
+        // rather than surface a confusing validation error for what's meant to be a transparent
+        // optimization.
+        console.error(`[ai/client] cached ai_runs row for step "${step}" no longer matches its schema — calling the model instead`, err);
+      }
+    }
+  }
+
+  if (failureCooldownMs) {
+    const recentlyFailed = await lookupRecentFailure({ step, projectId, promptVersion, inputHash, withinMs: failureCooldownMs });
+    if (recentlyFailed) {
+      throw new AIGenerationFailedError(step, "schema_validation_failed", 0);
+    }
   }
 
   const attempt = async (correction?: string) => {
