@@ -210,6 +210,10 @@ export function SignalPickerModal({ open, onClose, scenarioId, nodes, phases, co
         category: form.category,
         source: form.source.trim() || "Internal research",
         title: form.title.trim(),
+        // This modal doesn't collect poles (it's Storyline's node-creation form, not the
+        // Signals Library) — same honest placeholder the 0038 migration backfills.
+        poleA: "Doesn't happen",
+        poleB: form.title.trim(),
         body: form.body.trim(),
         impact: form.impact,
         uncertainty: form.uncertainty,

@@ -39,6 +39,8 @@ import {
   createEvent as createEventAction,
   updateEvent as updateEventAction,
   deleteEvent as deleteEventAction,
+  linkEvent as linkEventAction,
+  unlinkEvent as unlinkEventAction,
   type EventWithLinks,
   type EventRow,
 } from "./actions/events";
@@ -227,6 +229,11 @@ function toSignal(row: SignalRow): Signal {
     category: row.category,
     source: row.source,
     title: row.title,
+    // Pre-migration rows haven't been visited yet — the migration backfills a placeholder
+    // (pole_a "Doesn't happen", pole_b = title), but a freshly-inserted row that skipped the
+    // Add Force form for some reason falls back the same honest way here rather than crashing.
+    poleA: row.pole_a ?? "Doesn't happen",
+    poleB: row.pole_b ?? row.title,
     body: row.body,
     impact: row.impact,
     uncertainty: row.uncertainty,
@@ -338,6 +345,8 @@ export interface Store {
     category: SteepCategory;
     source: string;
     title: string;
+    poleA: string;
+    poleB: string;
     body?: string;
     impact?: number | null;
     uncertainty?: "Low" | "Medium" | "High" | null;
@@ -350,6 +359,8 @@ export interface Store {
     body?: string;
     category?: SteepCategory;
     source?: string;
+    poleA?: string;
+    poleB?: string;
     impact?: number | null;
     uncertainty?: "Low" | "Medium" | "High" | null;
   }) => Promise<Signal>;
@@ -387,6 +398,8 @@ export interface Store {
     source?: string | null;
   }) => Promise<EventRow>;
   deleteEvent: (id: string) => Promise<void>;
+  linkEvent: (eventId: string, signalId: string, side: "a" | "b") => Promise<void>;
+  unlinkEvent: (eventId: string, signalId: string) => Promise<void>;
   suggestSignals: (projectId: string) => Promise<SuggestSignalsResult>;
   scoreUnscoredSignals: (projectId: string) => Promise<ScoreSignalsResult>;
   scoreSignal: (projectId: string, signalId: string) => Promise<void>;
@@ -746,6 +759,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       source: string;
       title: string;
       body?: string;
+      poleA: string;
+      poleB: string;
       impact?: number | null;
       uncertainty?: "Low" | "Medium" | "High" | null;
       origin?: SignalOrigin;
@@ -772,6 +787,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       body?: string;
       category?: SteepCategory;
       source?: string;
+      poleA?: string;
+      poleB?: string;
       impact?: number | null;
       uncertainty?: "Low" | "Medium" | "High" | null;
     }) => {
@@ -876,6 +893,28 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const row = await updateEventAction(input);
       if (activeProjectId) await refreshEvents(activeProjectId);
       return row;
+    },
+    [activeProjectId, refreshEvents]
+  );
+
+  // Signals Library v2 — the event drawer's "attach"/"switch side"/"unlink" actions, and the
+  // Inbox's "Group into forces" confirm flow (ai-forces.ts calls the raw action directly for
+  // its own server-side linking; this wrapper is for client-initiated links that need the
+  // store's cached `events` to refresh afterward).
+  const linkEvent = useCallback(
+    async (eventId: string, signalId: string, side: "a" | "b") => {
+      if (!activeProjectId) return;
+      await linkEventAction({ projectId: activeProjectId, eventId, signalId, side });
+      await refreshEvents(activeProjectId);
+    },
+    [activeProjectId, refreshEvents]
+  );
+
+  const unlinkEvent = useCallback(
+    async (eventId: string, signalId: string) => {
+      if (!activeProjectId) return;
+      await unlinkEventAction(eventId, signalId);
+      await refreshEvents(activeProjectId);
     },
     [activeProjectId, refreshEvents]
   );
@@ -1055,6 +1094,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     createEvent,
     updateEvent,
     deleteEvent,
+    linkEvent,
+    unlinkEvent,
     suggestSignals,
     scoreUnscoredSignals,
     scoreSignal,

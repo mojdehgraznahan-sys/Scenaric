@@ -41,6 +41,11 @@ export async function createSignal(input: {
   category: SteepCategory;
   source: string;
   title: string;
+  // A force can go two ways over the horizon — every new signal names both from creation
+  // (Signals Library v2's Add Force modal collects them; AI-proposed forces from "Group into
+  // forces" name them too). See src/lib/types.ts's Signal.poleA/poleB.
+  poleA: string;
+  poleB: string;
   body?: string;
   impact?: number | null;
   uncertainty?: "Low" | "Medium" | "High" | null;
@@ -59,6 +64,8 @@ export async function createSignal(input: {
       category: input.category,
       source: input.source,
       title: input.title,
+      pole_a: input.poleA,
+      pole_b: input.poleB,
       body: input.body ?? "",
       impact: input.impact ?? null,
       uncertainty: input.uncertainty ?? null,
@@ -85,12 +92,19 @@ export async function updateSignal(input: {
   body?: string;
   category?: SteepCategory;
   source?: string;
+  poleA?: string;
+  poleB?: string;
   impact?: number | null;
   uncertainty?: "Low" | "Medium" | "High" | null;
 }): Promise<SignalRow> {
   const supabase = createClient();
-  const { id, ...fields } = input;
-  const { data, error } = await supabase.from("signals").update(fields).eq("id", id).select().single();
+  const { id, poleA, poleB, ...fields } = input;
+  const { data, error } = await supabase
+    .from("signals")
+    .update({ ...fields, ...(poleA !== undefined ? { pole_a: poleA } : {}), ...(poleB !== undefined ? { pole_b: poleB } : {}) })
+    .eq("id", id)
+    .select()
+    .single();
   if (error) throw error;
   revalidatePath("/signals");
   return data;

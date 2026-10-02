@@ -39,6 +39,10 @@ export const RESEARCH_MODE_ALLOWED_STEPS: readonly string[] = [
   "grounding.generate", // Signpost (ai-grounding.ts) — a deliberate carve-out: live-web-cited
   // early-warning indicators, treated as step-8-adjacent rather than narrative/storyline
   // generation proper, which stays closed-book everywhere else
+  "events.generate_for_pole", // Signals Library v2 (ai-forces.ts) — per-pole "✦ Suggest":
+  // drafts grounded, cited events for one empty pole of an existing Signal into
+  // event_proposals; ordinary Steps-2/3-style research-allowed step, since nothing is
+  // written to `events` until the user explicitly confirms a draft.
   "settings.research_chat", // Settings "Ask AI" freeform box's explicit, user-invoked "Research"
   // send action (ai-settings-chat.ts's askSettingsChat with research:true) — NOT a general
   // loosening of Step 1's closed-book rule. Only fires when the user clicks "Research" instead

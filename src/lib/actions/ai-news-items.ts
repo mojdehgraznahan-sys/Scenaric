@@ -478,6 +478,10 @@ export async function addNewsItemToSignals(projectId: string, newsItemId: string
     category: newsItem.steep_category,
     source: newsItem.source,
     title: newsItem.title,
+    // A promoted news item doesn't come with poles — same honest placeholder the 0038
+    // migration backfills for pre-rebuild signals; the user can rename them later.
+    poleA: "Doesn't happen",
+    poleB: newsItem.title,
     body: newsItem.summary,
     origin: "insight",
     groundedInsightIds: insights.map((i) => i.id),

@@ -176,6 +176,8 @@ export interface Database {
           category: "Social" | "Technology" | "Economic" | "Ecological" | "Political";
           source: string;
           title: string;
+          pole_a: string | null;
+          pole_b: string | null;
           body: string;
           impact: number | null;
           uncertainty: "Low" | "Medium" | "High" | null;
@@ -193,6 +195,8 @@ export interface Database {
           category: "Social" | "Technology" | "Economic" | "Ecological" | "Political";
           source: string;
           title: string;
+          pole_a?: string | null;
+          pole_b?: string | null;
           body?: string;
           impact?: number | null;
           uncertainty?: "Low" | "Medium" | "High" | null;
@@ -210,6 +214,8 @@ export interface Database {
           category?: "Social" | "Technology" | "Economic" | "Ecological" | "Political";
           source?: string;
           title?: string;
+          pole_a?: string | null;
+          pole_b?: string | null;
           body?: string;
           impact?: number | null;
           uncertainty?: "Low" | "Medium" | "High" | null;
@@ -283,7 +289,8 @@ export interface Database {
           project_id: string;
           event_id: string;
           signal_id: string;
-          toward: string;
+          side: "a" | "b" | null;
+          toward: string | null;
           created_at: string;
         };
         Insert: {
@@ -291,7 +298,8 @@ export interface Database {
           project_id: string;
           event_id: string;
           signal_id: string;
-          toward: string;
+          side?: "a" | "b" | null;
+          toward?: string | null;
           created_at?: string;
         };
         Update: {
@@ -299,7 +307,119 @@ export interface Database {
           project_id?: string;
           event_id?: string;
           signal_id?: string;
-          toward?: string;
+          side?: "a" | "b" | null;
+          toward?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      force_proposals: {
+        Row: {
+          id: string;
+          project_id: string;
+          kind: "new_force" | "attach";
+          title: string;
+          category: "Social" | "Technology" | "Economic" | "Ecological" | "Political" | null;
+          pole_a: string | null;
+          pole_b: string | null;
+          member_links: { event_id: string; side: "a" | "b" }[];
+          event_id: string | null;
+          target_signal_id: string | null;
+          target_side: "a" | "b" | null;
+          rationale: string;
+          status: "proposed" | "confirmed" | "dismissed";
+          batch_id: string;
+          created_signal_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          kind: "new_force" | "attach";
+          title: string;
+          category?: "Social" | "Technology" | "Economic" | "Ecological" | "Political" | null;
+          pole_a?: string | null;
+          pole_b?: string | null;
+          member_links?: { event_id: string; side: "a" | "b" }[];
+          event_id?: string | null;
+          target_signal_id?: string | null;
+          target_side?: "a" | "b" | null;
+          rationale: string;
+          status?: "proposed" | "confirmed" | "dismissed";
+          batch_id: string;
+          created_signal_id?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          kind?: "new_force" | "attach";
+          title?: string;
+          category?: "Social" | "Technology" | "Economic" | "Ecological" | "Political" | null;
+          pole_a?: string | null;
+          pole_b?: string | null;
+          member_links?: { event_id: string; side: "a" | "b" }[];
+          event_id?: string | null;
+          target_signal_id?: string | null;
+          target_side?: "a" | "b" | null;
+          rationale?: string;
+          status?: "proposed" | "confirmed" | "dismissed";
+          batch_id?: string;
+          created_signal_id?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      event_proposals: {
+        Row: {
+          id: string;
+          project_id: string;
+          signal_id: string;
+          side: "a" | "b";
+          title: string;
+          body: string | null;
+          window_label: string | null;
+          likelihood: "Low" | "Medium" | "High" | null;
+          impact: number | null;
+          precursor: string | null;
+          citation_title: string | null;
+          citation_url: string | null;
+          status: "proposed" | "added" | "dismissed";
+          created_event_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          signal_id: string;
+          side: "a" | "b";
+          title: string;
+          body?: string | null;
+          window_label?: string | null;
+          likelihood?: "Low" | "Medium" | "High" | null;
+          impact?: number | null;
+          precursor?: string | null;
+          citation_title?: string | null;
+          citation_url?: string | null;
+          status?: "proposed" | "added" | "dismissed";
+          created_event_id?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          signal_id?: string;
+          side?: "a" | "b";
+          title?: string;
+          body?: string | null;
+          window_label?: string | null;
+          likelihood?: "Low" | "Medium" | "High" | null;
+          impact?: number | null;
+          precursor?: string | null;
+          citation_title?: string | null;
+          citation_url?: string | null;
+          status?: "proposed" | "added" | "dismissed";
+          created_event_id?: string | null;
           created_at?: string;
         };
         Relationships: [];

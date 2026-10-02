@@ -1068,6 +1068,10 @@ export function AskAI({
         category: suggestion.category,
         source: "Ask AI",
         title: suggestion.title,
+        // Ask AI's suggested_signal doesn't propose poles — same honest placeholder the
+        // 0038 migration backfills for pre-rebuild signals; the user can rename them later.
+        poleA: "Doesn't happen",
+        poleB: suggestion.title,
         body: suggestion.body,
         origin: suggestion.origin,
         groundedInsightIds: suggestion.groundedIn,

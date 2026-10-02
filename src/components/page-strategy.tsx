@@ -10,7 +10,11 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
+import { useNavigate } from "@/lib/use-navigate";
 import { listStrategicOptions, type StrategicOptionWithScores } from "@/lib/actions/strategy";
+import { Chip } from "@/components/chip";
+import { eventCategory } from "@/components/signals/pole";
+import { EventMeta } from "@/components/signals/spectrum";
 
 const BADGE_BASE = "inline-flex items-center rounded px-[7px] py-0.5 text-[10px] font-semibold uppercase tracking-[0.04em]";
 const GRID_COLS = "grid-cols-[minmax(260px,2fr)_repeat(4,1fr)_100px_90px]";
@@ -30,10 +34,26 @@ interface RecommendationState {
 
 export function PageStrategy() {
   const store = useStore();
+  const navigate = useNavigate();
   const projectId = store.activeProjectId;
   // Same "!archived" filter Canvas already uses (page-canvas.tsx) — re-axis migration is out
   // of scope for this build, so a superseded axes set's scenarios simply never un-archive.
   const scenarios = React.useMemo(() => store.scenarios.filter((s) => !s.archived), [store.scenarios]);
+
+  // Read-only "Watch list" — project-level situational awareness of upcoming events (Signals
+  // page "Events" view) while reviewing options. Not a per-option link: there's no schema
+  // connection between strategic_options/strategy_scenario_scores and signals/events today
+  // (strategy-risk.ts computes risk purely from robustCount across scenarios), so this
+  // surfaces the highest-impact events ahead in general rather than claiming a causal tie to
+  // any one option's score.
+  const watchListEvents = React.useMemo(
+    () =>
+      [...store.events]
+        .filter((e) => e.status === "possible")
+        .sort((a, b) => (b.impact ?? 0) - (a.impact ?? 0))
+        .slice(0, 4),
+    [store.events]
+  );
 
   const [options, setOptions] = React.useState<StrategicOptionWithScores[]>([]);
   const [optionsLoading, setOptionsLoading] = React.useState(false);
@@ -176,6 +196,26 @@ export function PageStrategy() {
 
         {generateNotice && (
           <div className="mb-3.5 rounded-[10px] border border-[#FDE68A] bg-[#FFFBEB] px-3.5 py-2.5 text-[12.5px] text-[#92400E]">{generateNotice}</div>
+        )}
+
+        {watchListEvents.length > 0 && (
+          <div className="mb-3.5 rounded-[10px] border border-border bg-[#F9FAFB] p-3.5">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">Watch list · highest-impact events ahead</span>
+              <Button variant="ghost" size="sm" onClick={() => navigate("/signals")}>
+                View in Signals →
+              </Button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {watchListEvents.map((ev) => (
+                <span key={ev.id} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-white py-1 pl-1 pr-2.5 text-[11.5px]">
+                  <Chip category={eventCategory(ev, store.signals)} />
+                  <span className="font-medium text-brand-dark">{ev.title}</span>
+                  <EventMeta ev={ev} />
+                </span>
+              ))}
+            </div>
+          </div>
         )}
 
         {/* Robustness grid */}

@@ -720,6 +720,10 @@ export async function confirmResearchSuggestion(projectId: string, id: string): 
       category: suggestion.category ?? "Social",
       source: suggestion.citation_title ?? "External research",
       title: suggestion.title,
+      // A research suggestion doesn't come with poles — same honest placeholder the 0038
+      // migration backfills for pre-rebuild signals; the user can rename them later.
+      poleA: "Doesn't happen",
+      poleB: suggestion.title,
       body: suggestion.body,
       origin: "external_research",
     });

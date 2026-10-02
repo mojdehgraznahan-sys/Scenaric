@@ -1,0 +1,1236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scenaric — Signals Library (standalone reference)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--font-sans:"Geist",ui-sans-serif,system-ui,sans-serif;--font-mono:"Geist Mono",ui-monospace,Menlo,monospace}
+*{box-sizing:border-box}html,body{margin:0}body{background:#F7F7F5;font-family:var(--font-sans);color:#1E1B2E}
+a{color:#C2410C}a:hover{color:#9A3412}
+code{font-family:var(--font-mono);font-size:.92em}
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+<script>
+// ─── SEED — demo project data in the exact shapes the UI expects.
+window.SEED = {
+ "signals": [
+  {
+   "id": "sg1",
+   "poles": [
+    "Tariffs soften",
+    "Tariffs bite harder"
+   ],
+   "category": "Political",
+   "source": "Reuters",
+   "title": "EU Carbon Border Adjustment Mechanism",
+   "impact": 5,
+   "uncertainty": "High",
+   "body": "New tariffs on carbon-intensive imports will reshape competitive dynamics across SEA supply chains by 2027."
+  },
+  {
+   "id": "sg2",
+   "poles": [
+    "Adoption stalls",
+    "Adoption accelerates"
+   ],
+   "category": "Technology",
+   "source": "Gartner",
+   "title": "Gen AI enterprise adoption accelerates",
+   "impact": 5,
+   "uncertainty": "Medium",
+   "body": "Enterprise AI deployment doubled YoY; productivity gains captured unevenly across sectors and geographies."
+  },
+  {
+   "id": "sg3",
+   "poles": [
+    "Expectations revert",
+    "Talent war intensifies"
+   ],
+   "category": "Social",
+   "source": "Deloitte",
+   "title": "Gen Z workforce expectations shift",
+   "impact": 4,
+   "uncertainty": "Medium",
+   "body": "Workers under 30 prioritise purpose over compensation; talent wars intensifying in tech hubs."
+  },
+  {
+   "id": "sg4",
+   "poles": [
+    "Decoupling reverses",
+    "Decoupling deepens"
+   ],
+   "category": "Political",
+   "source": "FT",
+   "title": "US-China decoupling deepens",
+   "impact": 5,
+   "uncertainty": "High",
+   "body": "Bifurcated technology stacks force multinationals to choose sides on cloud, semiconductors, and standards."
+  },
+  {
+   "id": "sg5",
+   "poles": [
+    "Growth stalls",
+    "Growth accelerates"
+   ],
+   "category": "Economic",
+   "source": "World Bank",
+   "title": "SEA middle-class doubles by 2030",
+   "impact": 4,
+   "uncertainty": "Low",
+   "body": "Rising disposable income across Indonesia, Vietnam, Philippines fuels premium consumer categories."
+  },
+  {
+   "id": "sg6",
+   "poles": [
+    "Costs contained",
+    "Costs surge"
+   ],
+   "category": "Ecological",
+   "source": "IPCC",
+   "title": "Climate adaptation costs surge",
+   "impact": 4,
+   "uncertainty": "High",
+   "body": "Physical risk premiums for coastal SEA operations rising; ESG reporting mandates tighten."
+  },
+  {
+   "id": "sg7",
+   "poles": [
+    "Channel fragments",
+    "Channel concentrates"
+   ],
+   "category": "Technology",
+   "source": "IDC",
+   "title": "Mobile-first commerce dominates",
+   "impact": 3,
+   "uncertainty": "Low",
+   "body": "Over 70% of SEA digital commerce flows through super-apps; web channels secondary."
+  },
+  {
+   "id": "sg8",
+   "poles": [
+    "Fragmentation",
+    "Openness"
+   ],
+   "poleAliases": {
+    "Harmonisation resumes": "b"
+   },
+   "category": "Political",
+   "source": "Nikkei",
+   "title": "ASEAN trade harmonisation stalls",
+   "impact": 4,
+   "uncertainty": "High",
+   "body": "Regional trade agreement implementation patchy; bilateral arrangements proliferate."
+  },
+  {
+   "id": "sg9",
+   "poles": [
+    "Volatility eases",
+    "Higher volatility"
+   ],
+   "category": "Economic",
+   "source": "Bloomberg",
+   "title": "Currency volatility regime",
+   "impact": 4,
+   "uncertainty": "High",
+   "body": "FX swings of 10-15% reshape unit economics for cross-border operations."
+  }
+ ],
+ "events": [
+  {
+   "id": "ev1",
+   "category": "Economic",
+   "body": "Foreign firms can now hold majority stakes in Indonesian e-commerce operators without a local partner.",
+   "status": "observed",
+   "date": "Feb 2026",
+   "title": "Indonesia raises e-commerce foreign-ownership cap to 67%",
+   "impact": 3,
+   "source": "Reuters",
+   "links": [
+    {
+     "sigId": "sg8",
+     "toward": "Openness"
+    }
+   ]
+  },
+  {
+   "id": "ev2",
+   "category": "Political",
+   "body": "Brussels locks the dates for full CBAM charges, removing the last ambiguity on when importers start paying.",
+   "status": "observed",
+   "date": "Mar 2026",
+   "title": "EU confirms CBAM definitive phase timetable",
+   "impact": 4,
+   "source": "Reuters",
+   "links": [
+    {
+     "sigId": "sg1",
+     "toward": "Tariffs bite harder"
+    }
+   ]
+  },
+  {
+   "id": "ev3",
+   "category": "Economic",
+   "body": "The central bank let the dong slip past its managed band for the first time since 2015.",
+   "status": "observed",
+   "date": "May 2026",
+   "title": "Vietnam dong breaks the 12% trading band",
+   "impact": 3,
+   "source": "Bloomberg",
+   "indicatorId": "in5",
+   "links": [
+    {
+     "sigId": "sg9",
+     "toward": "Higher volatility"
+    }
+   ]
+  },
+  {
+   "id": "ev4",
+   "category": "Political",
+   "body": "Export controls now reach SEA-registered subsidiaries, forcing supply-chain audits across the region.",
+   "status": "observed",
+   "date": "Jul 2026",
+   "title": "US adds 14 SEA-based firms to the Entity List",
+   "impact": 4,
+   "source": "FT",
+   "indicatorId": "in2",
+   "links": [
+    {
+     "sigId": "sg4",
+     "toward": "Decoupling deepens"
+    }
+   ]
+  },
+  {
+   "id": "ev5",
+   "category": "Political",
+   "body": "All ten member states complete ratification, enabling a single customs window across the bloc.",
+   "status": "possible",
+   "date": "2027",
+   "title": "ASEAN customs harmonisation clears final ratification",
+   "likelihood": "Medium",
+   "impact": 4,
+   "indicatorId": "in1",
+   "links": [
+    {
+     "sigId": "sg8",
+     "toward": "Harmonisation resumes"
+    }
+   ]
+  },
+  {
+   "id": "ev6",
+   "category": "Technology",
+   "body": "Regional enterprise AI spend crosses a scale where local talent and compute become the binding constraint.",
+   "status": "possible",
+   "date": "2027",
+   "title": "Enterprise AI capex in SEA passes $20B",
+   "likelihood": "Medium",
+   "impact": 3,
+   "indicatorId": "in4",
+   "links": [
+    {
+     "sigId": "sg2",
+     "toward": "Adoption accelerates"
+    }
+   ]
+  },
+  {
+   "id": "ev7",
+   "category": "Political",
+   "body": "Personal and transaction data must be stored and processed inside Indonesia, with no offshore mirror.",
+   "status": "possible",
+   "date": "2027–28",
+   "title": "Indonesia mandates in-country data residency",
+   "likelihood": "High",
+   "impact": 4,
+   "indicatorId": "in3",
+   "links": [
+    {
+     "sigId": "sg8",
+     "toward": "Fragmentation"
+    },
+    {
+     "sigId": "sg4",
+     "toward": "Decoupling deepens"
+    }
+   ]
+  },
+  {
+   "id": "ev8",
+   "category": "Political",
+   "body": "Washington and Beijing agree a phased rollback of tariffs imposed since 2018.",
+   "status": "possible",
+   "date": "2028",
+   "title": "US–China tariff climbdown",
+   "likelihood": "Low",
+   "impact": 5,
+   "links": [
+    {
+     "sigId": "sg4",
+     "toward": "Decoupling reverses"
+    }
+   ]
+  },
+  {
+   "id": "ev9",
+   "category": "Political",
+   "body": "A blockade cuts off leading-edge semiconductor supply for months, stalling hardware-dependent roadmaps.",
+   "status": "possible",
+   "wildcard": true,
+   "date": "Any time",
+   "title": "Taiwan Strait blockade halts advanced-chip supply",
+   "likelihood": "Low",
+   "impact": 5,
+   "precursor": "War-risk insurance premiums on strait shipping",
+   "links": [
+    {
+     "sigId": "sg4",
+     "toward": "Decoupling deepens"
+    },
+    {
+     "sigId": "sg2",
+     "toward": "Adoption stalls"
+    }
+   ]
+  },
+  {
+   "id": "ev10",
+   "category": "Ecological",
+   "body": "A single flood event disables Jakarta's port and data centres for weeks.",
+   "status": "possible",
+   "wildcard": true,
+   "date": "Any time",
+   "title": "Catastrophic Jakarta coastal flood",
+   "likelihood": "Low",
+   "impact": 5,
+   "precursor": "Reinsurers withdrawing coastal Java cover",
+   "links": [
+    {
+     "sigId": "sg6",
+     "toward": "Costs surge"
+    }
+   ]
+  },
+  {
+   "id": "ev11",
+   "category": "Technology",
+   "body": "A regulator forces a dominant super-app to separate payments, commerce and logistics.",
+   "status": "possible",
+   "wildcard": true,
+   "date": "Any time",
+   "title": "Regulator-ordered break-up of a dominant super-app",
+   "likelihood": "Low",
+   "impact": 4,
+   "precursor": "Competition authority opens a structural-remedy inquiry",
+   "links": [
+    {
+     "sigId": "sg7",
+     "toward": "Channel fragments"
+    }
+   ]
+  },
+  {
+   "id": "evi1",
+   "category": "Social",
+   "status": "observed",
+   "date": "Aug 2026",
+   "source": "Bangkok Post",
+   "title": "Thailand launches 10-year visas for foreign tech workers",
+   "body": "Long-stay visas with tax breaks, aimed at pulling regional tech talent to Bangkok.",
+   "impact": 3,
+   "links": []
+  },
+  {
+   "id": "evi2",
+   "category": "Political",
+   "status": "possible",
+   "date": "2027",
+   "likelihood": "Medium",
+   "title": "Malaysia caps foreign ownership of data centres at 49%",
+   "body": "Hyperscalers would need a local majority partner for any new capacity.",
+   "impact": 4,
+   "links": []
+  },
+  {
+   "id": "evi3",
+   "category": "Political",
+   "status": "observed",
+   "date": "Jun 2026",
+   "source": "Inquirer",
+   "title": "Philippines passes a digital-services tax on foreign platforms",
+   "body": "A 12% VAT now applies to foreign streaming, ads and marketplace fees.",
+   "impact": 3,
+   "links": []
+  },
+  {
+   "id": "evi4",
+   "category": "Technology",
+   "status": "possible",
+   "date": "2027–28",
+   "likelihood": "High",
+   "title": "Vietnam requires local hosting for platforms above 1M users",
+   "body": "Large platforms must keep user data and core services on in-country servers.",
+   "impact": 4,
+   "links": []
+  },
+  {
+   "id": "evi5",
+   "category": "Political",
+   "status": "possible",
+   "date": "2028",
+   "likelihood": "Low",
+   "title": "Singapore and Indonesia sign a cross-border data-flow pact",
+   "body": "Certified firms could move data freely between the two markets under shared rules.",
+   "impact": 4,
+   "links": []
+  }
+ ]
+};
+// Mock library for "✦ Suggest" (events-generate-for-pole). Keyed by force id; "toward" = pole label.
+window.FM_EVENT_PROPOSALS = {
+ "sg1": [
+  {
+   "title": "EU extends CBAM to downstream manufactured goods",
+   "body": "Scope widens beyond raw materials to finished products, pulling SEA assemblers into the regime.",
+   "toward": "Tariffs bite harder",
+   "likelihood": "Medium",
+   "impact": 5,
+   "date": "2027–28"
+  },
+  {
+   "title": "EU grants ASEAN a CBAM equivalence deal",
+   "body": "Regional carbon pricing is recognised as equivalent, exempting certified exporters.",
+   "toward": "Tariffs soften",
+   "likelihood": "Low",
+   "impact": 4,
+   "date": "2028"
+  }
+ ],
+ "sg2": [
+  {
+   "title": "A top-3 SEA bank replaces its contact centre with AI agents",
+   "body": "A flagship deployment resets what boards consider the baseline for AI adoption.",
+   "toward": "Adoption accelerates",
+   "likelihood": "High",
+   "impact": 4,
+   "date": "2027"
+  },
+  {
+   "title": "Major AI liability ruling in a SEA court",
+   "body": "A court holds a deployer liable for an AI decision, chilling enterprise rollouts.",
+   "toward": "Adoption stalls",
+   "likelihood": "Low",
+   "impact": 4,
+   "date": "2028"
+  }
+ ],
+ "sg3": [
+  {
+   "title": "Vietnam tech hubs report under-30 attrition above 30%",
+   "body": "Retention collapses as purpose-led employers outbid on culture rather than pay.",
+   "toward": "Talent war intensifies",
+   "likelihood": "Medium",
+   "impact": 3,
+   "date": "2027"
+  },
+  {
+   "title": "Regional downturn restores pay as the top hiring factor",
+   "body": "A recession flips priorities back to job security and compensation.",
+   "toward": "Expectations revert",
+   "likelihood": "Medium",
+   "impact": 3,
+   "date": "2028"
+  }
+ ],
+ "sg5": [
+  {
+   "title": "Indonesia household consumption growth falls below 3%",
+   "body": "Middle-class expansion stalls on credit tightening and informal-sector strain.",
+   "toward": "Growth stalls",
+   "likelihood": "Low",
+   "impact": 4,
+   "date": "2027"
+  },
+  {
+   "title": "Philippines premium retail sales grow 20% year on year",
+   "body": "Evidence the premium tier is widening beyond Manila into secondary cities.",
+   "toward": "Growth accelerates",
+   "likelihood": "Medium",
+   "impact": 3,
+   "date": "2027"
+  }
+ ],
+ "sg6": [
+  {
+   "title": "Singapore mandates physical-risk disclosure for regional assets",
+   "body": "Firms must publish flood and heat exposure for every SEA site they operate.",
+   "toward": "Costs surge",
+   "likelihood": "High",
+   "impact": 4,
+   "date": "2027"
+  },
+  {
+   "title": "Regional catastrophe-bond pool caps coastal premiums",
+   "body": "A public–private pool absorbs tail risk and stabilises insurance costs.",
+   "toward": "Costs contained",
+   "likelihood": "Low",
+   "impact": 3,
+   "date": "2028–29"
+  }
+ ],
+ "sg9": [
+  {
+   "title": "Bank Indonesia intervenes to defend the rupiah at 17,000",
+   "body": "A disorderly slide forces direct intervention and signals a new volatility regime.",
+   "toward": "Higher volatility",
+   "likelihood": "Medium",
+   "impact": 4,
+   "date": "2027"
+  },
+  {
+   "title": "ASEAN local-currency settlement passes 25% of intra-regional trade",
+   "body": "Reduced dollar dependence dampens cross-border FX swings.",
+   "toward": "Volatility eases",
+   "likelihood": "Low",
+   "impact": 3,
+   "date": "2029"
+  }
+ ],
+ "sg7": [
+  {
+   "title": "A super-app captures over 80% of Indonesian digital checkout",
+   "body": "Channel concentration makes platform terms the binding constraint on entry.",
+   "toward": "Channel concentrates",
+   "likelihood": "Medium",
+   "impact": 3,
+   "date": "2027"
+  }
+ ]
+};
+</script>
+<script type="text/babel" data-presets="react">
+// Signals Library v2 — event-first capture; forces shown as a tug-of-war between two poles.
+// Store-agnostic: the host passes { signals, events, api, onNavigate }. No global state, no view toggles, no flip.
+// Data contract
+//   force { id, title, body, category, impact 1-5, uncertainty 'Low'|'Medium'|'High', poles: [a, b], source?, poleAliases? }
+//   event { id, title, body, category, status 'observed'|'possible', date, likelihood? 'Low'|'Medium'|'High', impact 1-5,
+//           wildcard?, precursor?, source?, origin?, links: [{ sigId, side: 'a'|'b', toward }] }   links = [] → Inbox
+// api (all async): addEvent(e) → event · updateEvent(id, patch) · addForce(f) → force · linkEvent(eventId, force, side)
+//   unlinkEvent(eventId, sigId) · suggestForce({title, body}) → {sigId, side, rationale} | null
+//   groupInbox(eventIds) → { newForces, attach, leftover } · generateForPole(force, side) → drafts[]
+
+const SL_CAT = { Social: ["#F5F3FF", "#8B5CF6"], Technology: ["#EFF6FF", "#3B82F6"], Economic: ["#ECFDF5", "#10B981"], Ecological: ["#F0FDFA", "#14B8A6"], Political: ["#FEF2F2", "#EF4444"] };
+const SL_CATS = Object.keys(SL_CAT);
+
+const SL_CSS = `
+.sl-root{font-family:var(--font-sans,"Geist",ui-sans-serif,system-ui,sans-serif);color:#1E1B2E}
+.sl-root a{color:#C2410C}.sl-root a:hover{color:#9A3412}
+.sl-mono{font-family:var(--font-mono,"Geist Mono",ui-monospace,Menlo,monospace);letter-spacing:.06em}
+.sl-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:500;line-height:1;padding:9px 13px;cursor:pointer;border:1px solid transparent;white-space:nowrap}
+.sl-btn:disabled{opacity:.45;cursor:not-allowed}
+.sl-btn-sm{padding:6px 10px;font-size:12px}
+.sl-btn-primary{background:#F97316;color:#fff}.sl-btn-primary:hover:not(:disabled){background:#EA580C}
+.sl-btn-ghost{background:#fff;color:#374151;border-color:#E5E7EB}.sl-btn-ghost:hover:not(:disabled){background:#F9FAFB}
+.sl-btn-soft{background:#FFF7ED;color:#C2410C;border-color:#FED7AA}.sl-btn-soft:hover:not(:disabled){background:#FFEDD5}
+.sl-link{background:none;border:none;padding:0;color:#C2410C;font-family:inherit;font-size:12px;font-weight:500;cursor:pointer}
+.sl-link:hover{color:#9A3412;text-decoration:underline}
+.sl-input{width:100%;box-sizing:border-box;border:1px solid #E5E7EB;border-radius:8px;padding:9px 11px;font-family:inherit;font-size:14px;line-height:1.4;color:#1E1B2E;background:#fff;outline:none}
+.sl-input:focus{border-color:#F97316;box-shadow:0 0 0 3px rgba(249,115,22,.15)}
+.sl-badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:500;white-space:nowrap}
+.sl-badge-High{background:#FFF7ED;color:#C2410C}.sl-badge-Medium{background:#FFFBEB;color:#B45309}.sl-badge-Low{background:#ECFDF5;color:#065F46}
+.sl-row{display:flex;gap:8px;align-items:flex-start;width:100%;text-align:left;background:none;border:none;padding:6px;border-radius:7px;cursor:pointer;font-family:inherit;color:inherit}
+.sl-row:hover{background:#F9FAFB}
+.sl-seg{display:flex;padding:3px;background:#F3F4F6;border-radius:9px;gap:2px}
+.sl-seg button{flex:1;border:none;cursor:pointer;padding:6px 10px;border-radius:7px;font-family:inherit;font-size:12px;font-weight:500;background:transparent;color:#6B7280;white-space:nowrap}
+.sl-seg button[aria-pressed="true"]{background:#fff;color:#1E1B2E;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.sl-label{font-size:12px;color:#374151;font-weight:500;display:block;margin-bottom:5px}
+@keyframes sl-pulse{0%,100%{opacity:.35}50%{opacity:1}}
+.sl-pulse{animation:sl-pulse 1.2s ease-in-out infinite}
+@media (prefers-reduced-motion: reduce){.sl-pulse{animation:none}}
+`;
+
+function slUseCss() {
+  React.useEffect(() => {
+    if (document.getElementById("sl-css")) return;
+    const s = document.createElement("style");
+    s.id = "sl-css"; s.textContent = SL_CSS;
+    document.head.appendChild(s);
+  }, []);
+}
+
+function slSide(sig, link) {
+  if (!link) return null;
+  if (link.side) return link.side;
+  const p = sig.poles || [], t = (link.toward || "").toLowerCase();
+  if (p[0] && t === p[0].toLowerCase()) return "a";
+  if (p[1] && t === p[1].toLowerCase()) return "b";
+  if (sig.poleAliases && sig.poleAliases[link.toward]) return sig.poleAliases[link.toward];
+  return "b";
+}
+const slPole = (sig, side) => (sig.poles || ["", ""])[side === "a" ? 0 : 1];
+const slNowMonth = () => new Date().toLocaleString("en", { month: "short", year: "numeric" });
+
+function SLChip({ cat, small }) {
+  const c = SL_CAT[cat] || ["#F3F4F6", "#6B7280"];
+  return <span style={{ display: "inline-flex", alignItems: "center", padding: small ? "1px 7px" : "2px 9px", borderRadius: 999, background: c[0], color: c[1], border: `1px solid ${c[1]}40`, fontSize: small ? 10.5 : 11.5, fontWeight: 500, whiteSpace: "nowrap" }}>{cat}</span>;
+}
+
+function SLStars({ value, size = 11 }) {
+  return (
+    <span style={{ display: "inline-flex", gap: 1 }}>
+      {[1, 2, 3, 4, 5].map(i => (
+        <svg key={i} width={size} height={size} viewBox="0 0 24 24"><path d="M12 2l3 6.9 7.5.6-5.7 4.9 1.8 7.3L12 17.8 5.4 21.7l1.8-7.3L1.5 9.5 9 8.9z" fill={i <= value ? "#F97316" : "#E5E7EB"}></path></svg>
+      ))}
+    </span>
+  );
+}
+
+function SLDot({ ev, size = 10 }) {
+  const possible = ev.status === "possible";
+  const col = ev.wildcard ? "#8B5CF6" : "#F97316";
+  return <span style={{ display: "inline-block", width: size, height: size, borderRadius: 999, flexShrink: 0, boxSizing: "border-box", background: possible ? "#fff" : "#1E1B2E", border: possible ? `1.5px dashed ${col}` : "none" }}></span>;
+}
+
+function SLMeta({ ev }) {
+  const possible = ev.status === "possible";
+  return (
+    <span style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+      <span className="sl-mono" style={{ fontSize: 9.5, color: ev.wildcard ? "#7C3AED" : "#9CA3AF" }}>{ev.wildcard ? "WILDCARD · " : possible ? "COULD HAPPEN · " : "HAPPENED · "}{(ev.date || "").toUpperCase()}</span>
+      {possible && ev.likelihood && <span className={"sl-badge sl-badge-" + ev.likelihood} style={{ fontSize: 10, padding: "1px 6px" }}>{ev.likelihood}</span>}
+    </span>
+  );
+}
+
+function SLEventRow({ ev, onOpen }) {
+  return (
+    <button className="sl-row" onClick={() => onOpen(ev.id)}>
+      <span style={{ paddingTop: 4, display: "flex" }}><SLDot ev={ev}></SLDot></span>
+      <span style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }}>
+        <span style={{ fontSize: 12.5, lineHeight: 1.35, fontWeight: 500, textWrap: "pretty" }}>{ev.title}</span>
+        <SLMeta ev={ev}></SLMeta>
+      </span>
+    </button>
+  );
+}
+
+function SLDraftRow({ d, onAccept, onDismiss }) {
+  return (
+    <div style={{ border: "1px dashed #FDBA74", background: "#FFFBF5", borderRadius: 8, padding: "8px 9px", display: "flex", flexDirection: "column", gap: 5 }}>
+      <span className="sl-mono" style={{ fontSize: 9, color: "#C2410C" }}>AI SUGGESTION · {(d.date || "").toUpperCase()}</span>
+      <span style={{ fontSize: 12.5, fontWeight: 500, lineHeight: 1.35 }}>{d.title}</span>
+      <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        {d.likelihood && <span className={"sl-badge sl-badge-" + d.likelihood} style={{ fontSize: 10, padding: "1px 6px" }}>{d.likelihood}</span>}
+        <button className="sl-btn sl-btn-primary sl-btn-sm" style={{ marginLeft: "auto", padding: "5px 9px" }} onClick={onAccept}>Add</button>
+        <button className="sl-btn sl-btn-ghost sl-btn-sm" style={{ padding: "5px 8px" }} onClick={onDismiss} aria-label="Dismiss">✕</button>
+      </span>
+    </div>
+  );
+}
+
+// The tug-of-war track: events sit on the side of the pole they pull toward.
+function SLSpectrum({ sig, a, b, onOpen }) {
+  const pos = (i, n) => 5 + i * Math.min(11, 36 / Math.max(1, n));
+  const dots = [...a.map((e, i) => [e, pos(i, a.length)]), ...b.map((e, i) => [e, 100 - pos(i, b.length)])];
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12, fontWeight: 600, lineHeight: 1.3 }}>
+        <span style={{ display: "flex", gap: 4, minWidth: 0 }}><span style={{ color: "#9CA3AF" }}>←</span>{slPole(sig, "a")}</span>
+        <span style={{ display: "flex", gap: 4, minWidth: 0, textAlign: "right" }}>{slPole(sig, "b")}<span style={{ color: "#9CA3AF" }}>→</span></span>
+      </div>
+      <div style={{ position: "relative", height: 26 }}>
+        <div style={{ position: "absolute", left: 0, right: 0, top: 12, height: 2, borderRadius: 2, background: "#E5E7EB" }}></div>
+        <div style={{ position: "absolute", left: "50%", top: 6, width: 1, height: 14, background: "#D1D5DB" }}></div>
+        {dots.map(([e, x]) => (
+          <button key={e.id} title={e.title} onClick={() => onOpen(e.id)} style={{ position: "absolute", left: `calc(${x}% - 6px)`, top: 7, width: 12, height: 12, padding: 0, border: "none", background: "none", cursor: "pointer", display: "flex" }}><SLDot ev={e} size={12}></SLDot></button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SLForceCard({ sig, events, drafts, busySide, onOpen, onAdd, onGenerate, onAcceptDraft, onDismissDraft, onMatrix }) {
+  const [more, setMore] = React.useState(false);
+  const mine = events.filter(e => (e.links || []).some(l => l.sigId === sig.id));
+  const order = (x) => [...x.filter(e => e.status === "observed"), ...x.filter(e => e.status !== "observed")];
+  const bySide = (s) => order(mine.filter(e => slSide(sig, e.links.find(l => l.sigId === sig.id)) === s));
+  const sides = { a: bySide("a"), b: bySide("b") };
+  const hidden = Math.max(0, sides.a.length - 3) + Math.max(0, sides.b.length - 3);
+  const observed = mine.filter(e => e.status === "observed").length;
+  return (
+    <div data-force-id={sig.id} style={{ flex: 1, background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, padding: 14, display: "flex", flexDirection: "column", gap: 10, minWidth: 0 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <SLChip cat={sig.category}></SLChip>
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span className="sl-mono" style={{ fontSize: 10, color: "#9CA3AF" }}>IMPACT</span>
+          <SLStars value={sig.impact || 0}></SLStars>
+          {sig.uncertainty && <span className={"sl-badge " + (sig.uncertainty === "High" ? "sl-badge-High" : sig.uncertainty === "Medium" ? "sl-badge-Medium" : "sl-badge-Low")} title="Uncertainty">{sig.uncertainty}</span>}
+        </span>
+      </div>
+      <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.3, letterSpacing: "-0.01em", textWrap: "pretty" }} title={sig.body || ""}>{sig.title}</div>
+      <SLSpectrum sig={sig} a={sides.a} b={sides.b} onOpen={onOpen}></SLSpectrum>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 10 }}>
+        {["a", "b"].map(side => {
+          const list = sides[side], shown = more ? list : list.slice(0, 3);
+          const ds = (drafts || []).filter(d => d.side === side);
+          return (
+            <div key={side} style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
+              {shown.map(e => <SLEventRow key={e.id} ev={e} onOpen={onOpen}></SLEventRow>)}
+              {ds.map(d => <SLDraftRow key={d.key} d={d} onAccept={() => onAcceptDraft(d)} onDismiss={() => onDismissDraft(d)}></SLDraftRow>)}
+              {!list.length && !ds.length && (
+                <div style={{ border: "1px dashed #E5E7EB", borderRadius: 8, padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <span style={{ fontSize: 11.5, color: "#6B7280", lineHeight: 1.45 }}>Nothing pulling toward <b style={{ color: "#1E1B2E", fontWeight: 600 }}>{slPole(sig, side)}</b> yet.</span>
+                  <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <button className={"sl-btn sl-btn-soft sl-btn-sm" + (busySide === side ? " sl-pulse" : "")} disabled={busySide === side} onClick={() => onGenerate(side)}>{busySide === side ? "Thinking…" : "✦ Suggest"}</button>
+                    <button className="sl-btn sl-btn-ghost sl-btn-sm" onClick={() => onAdd(side)}>+ Add</button>
+                  </span>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {hidden > 0 && <button className="sl-link" style={{ alignSelf: "flex-start" }} onClick={() => setMore(m => !m)}>{more ? "Show fewer" : `Show ${hidden} more`}</button>}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, borderTop: "1px solid #F3F4F6", paddingTop: 10, marginTop: "auto", flexWrap: "wrap" }}>
+        <span style={{ fontSize: 11.5, color: "#6B7280" }}>{mine.length} {mine.length === 1 ? "event" : "events"}{observed ? ` · ${observed} happened` : ""}</span>
+        <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+          <button className="sl-btn sl-btn-ghost sl-btn-sm" onClick={() => onAdd(null)}>+ Add event</button>
+          {onMatrix && <button className="sl-link" onClick={onMatrix}>Place on matrix →</button>}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function SLInbox({ items, total, onOpen, onGroup, grouping, children }) {
+  return (
+    <section style={{ border: "1px solid #FED7AA", background: "#FFFBF5", borderRadius: 12, padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+          <span style={{ fontSize: 14, fontWeight: 600 }}>Inbox · {total}</span>
+          <span style={{ fontSize: 12, color: "#7C2D12" }}>Events not yet tied to a force. Group them and the forces behind them appear.</span>
+        </div>
+        <button className={"sl-btn sl-btn-primary sl-btn-sm" + (grouping ? " sl-pulse" : "")} style={{ marginLeft: "auto" }} disabled={!total || grouping} onClick={onGroup}>{grouping ? "Grouping…" : "✦ Group into forces"}</button>
+      </div>
+      {items.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 8 }}>
+          {items.map(e => (
+            <button key={e.id} onClick={() => onOpen(e.id)} style={{ textAlign: "left", background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, padding: 11, cursor: "pointer", display: "flex", flexDirection: "column", gap: 6, fontFamily: "inherit", color: "inherit" }}>
+              <span style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
+                <SLChip cat={e.category} small></SLChip>
+                <SLDot ev={e}></SLDot>
+              </span>
+              <span style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.35, textWrap: "pretty" }}>{e.title}</span>
+              <SLMeta ev={e}></SLMeta>
+            </button>
+          ))}
+        </div>
+      )}
+      {!total && <span style={{ fontSize: 12, color: "#9A3412" }}>Every event is tied to a force.</span>}
+      {children}
+    </section>
+  );
+}
+
+function SLProposals({ result, signals, events, onCreate, onAttach, onDismiss }) {
+  const evById = (id) => events.find(e => e.id === id);
+  const done = (p) => p.state !== "pending";
+  const stateLabel = (p, yes) => <span className="sl-mono" style={{ fontSize: 10, color: p.state === "dismissed" ? "#9CA3AF" : "#15803D" }}>{p.state === "dismissed" ? "DISMISSED" : "✓ " + yes}</span>;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10, borderTop: "1px solid #FED7AA", paddingTop: 12 }}>
+      {result.newForces.map(p => {
+        const one = p.members.every(m => m.side === p.members[0].side);
+        return (
+          <div key={p.key} style={{ background: "#fff", border: "1px solid #FED7AA", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 10, opacity: p.state === "dismissed" ? 0.55 : 1 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span className="sl-mono" style={{ fontSize: 10, color: "#C2410C" }}>PROPOSED FORCE</span>
+              <SLChip cat={p.category} small></SLChip>
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.3 }}>{p.title}</div>
+            <SLSpectrum sig={{ poles: p.poles }} a={p.members.filter(m => m.side === "a").map(m => evById(m.eventId)).filter(Boolean)} b={p.members.filter(m => m.side === "b").map(m => evById(m.eventId)).filter(Boolean)} onOpen={() => {}}></SLSpectrum>
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 10 }}>
+              {["a", "b"].map(side => (
+                <div key={side} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {p.members.filter(m => m.side === side).map(m => { const e = evById(m.eventId); return e ? <span key={m.eventId} style={{ display: "flex", gap: 7, fontSize: 12, lineHeight: 1.35 }}><span style={{ paddingTop: 3, display: "flex" }}><SLDot ev={e}></SLDot></span>{e.title}</span> : null; })}
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.5 }}>{p.rationale}</div>
+            {one && <div style={{ fontSize: 11.5, color: "#92400E" }}>These only pull one way. Once it's created, use ✦ Suggest on the empty side.</div>}
+            {done(p) ? stateLabel(p, "FORCE CREATED") : (
+              <div style={{ display: "flex", gap: 6 }}>
+                <button className="sl-btn sl-btn-primary sl-btn-sm" onClick={() => onCreate(p)}>Create force</button>
+                <button className="sl-btn sl-btn-ghost sl-btn-sm" onClick={() => onDismiss(p)}>Dismiss</button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {result.attach.map(p => {
+        const e = evById(p.eventId), s = signals.find(x => x.id === p.sigId);
+        if (!e || !s) return null;
+        return (
+          <div key={p.key} style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 8, opacity: p.state === "dismissed" ? 0.55 : 1 }}>
+            <span className="sl-mono" style={{ fontSize: 10, color: "#6B7280" }}>ATTACH TO EXISTING FORCE</span>
+            <span style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.35 }}>{e.title}</span>
+            <span style={{ fontSize: 12, color: "#6B7280" }}>pulls <b style={{ color: "#1E1B2E", fontWeight: 600 }}>{s.title}</b> toward <b style={{ color: "#1E1B2E", fontWeight: 600 }}>{slPole(s, p.side)}</b></span>
+            <span style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.5 }}>{p.rationale}</span>
+            {done(p) ? stateLabel(p, "ATTACHED") : (
+              <div style={{ display: "flex", gap: 6 }}>
+                <button className="sl-btn sl-btn-primary sl-btn-sm" onClick={() => onAttach(p)}>Attach</button>
+                <button className="sl-btn sl-btn-ghost sl-btn-sm" onClick={() => onDismiss(p)}>Dismiss</button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {result.leftover.length > 0 && (
+        <div style={{ fontSize: 12, color: "#7C2D12", lineHeight: 1.5 }}>Couldn't place: {result.leftover.map(id => (evById(id) || {}).title).filter(Boolean).join(" · ")}. Add a force for it, or leave it in the inbox.</div>
+      )}
+      {!result.newForces.length && !result.attach.length && !result.leftover.length && <div style={{ fontSize: 12, color: "#7C2D12" }}>Nothing to group.</div>}
+    </div>
+  );
+}
+
+function SLModal({ children, onClose, width = 540 }) {
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.4)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div onClick={e => e.stopPropagation()} className="sl-root" style={{ background: "#fff", borderRadius: 16, width: "100%", maxWidth: width, maxHeight: "calc(100vh - 40px)", overflowY: "auto", padding: 22, display: "flex", flexDirection: "column", gap: 14, boxShadow: "0 20px 50px rgba(15,23,42,.18)" }}>{children}</div>
+    </div>
+  );
+}
+
+function SLSeg({ value, options, onChange }) {
+  return (
+    <div className="sl-seg">
+      {options.map(([v, l]) => <button key={v} type="button" aria-pressed={value === v} onClick={() => onChange(v)}>{l}</button>)}
+    </div>
+  );
+}
+
+function SLAddEventModal({ signals, api, preset, onClose, onAdded }) {
+  const [title, setTitle] = React.useState("");
+  const [body, setBody] = React.useState("");
+  const [status, setStatus] = React.useState("possible");
+  const [date, setDate] = React.useState("");
+  const [source, setSource] = React.useState("");
+  const [likelihood, setLikelihood] = React.useState("Medium");
+  const [impact, setImpact] = React.useState(3);
+  const [category, setCategory] = React.useState("Political");
+  const [target, setTarget] = React.useState(preset && preset.sigId ? { sigId: preset.sigId, side: preset.side || "b" } : null);
+  const [touched, setTouched] = React.useState(!!(preset && preset.sigId));
+  const [suggestion, setSuggestion] = React.useState(null);
+  const [thinking, setThinking] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+
+  React.useEffect(() => {
+    if (touched || title.trim().length < 12) return;
+    let live = true;
+    const t = setTimeout(async () => {
+      setThinking(true);
+      try {
+        const s = await api.suggestForce({ title, body });
+        if (!live) return;
+        setSuggestion(s);
+        setTarget(s ? { sigId: s.sigId, side: s.side } : null);
+      } finally { if (live) setThinking(false); }
+    }, 550);
+    return () => { live = false; clearTimeout(t); };
+  }, [title, body, touched]);
+
+  const sig = target && signals.find(s => s.id === target.sigId);
+  const ok = title.trim().length >= 8 && !saving;
+  const submit = async () => {
+    if (!ok) return;
+    setSaving(true);
+    const ev = await api.addEvent({
+      title: title.trim(), body: body.trim(), category: sig ? sig.category : category, status,
+      date: date.trim() || (status === "observed" ? slNowMonth() : "Within horizon"),
+      likelihood: status === "possible" ? likelihood : undefined, impact, source: status === "observed" ? source.trim() || undefined : undefined, origin: "user",
+      links: sig ? [{ sigId: sig.id, side: target.side, toward: slPole(sig, target.side) }] : [],
+    });
+    onAdded(ev);
+    onClose();
+  };
+
+  return (
+    <SLModal onClose={onClose}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+        <div>
+          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Add an event</h3>
+          <div style={{ fontSize: 12.5, color: "#6B7280", marginTop: 3 }}>Something that happened, or could happen. One headline, one occurrence.</div>
+        </div>
+        <button onClick={onClose} aria-label="Close" style={{ border: "none", background: "none", cursor: "pointer", color: "#6B7280", fontSize: 16 }}>✕</button>
+      </div>
+      <label><span className="sl-label">Headline</span>
+        <input className="sl-input" autoFocus value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Malaysia caps foreign ownership of data centres at 49%"></input>
+      </label>
+      <SLSeg value={status} onChange={setStatus} options={[["observed", "It happened"], ["possible", "It could happen"]]}></SLSeg>
+      {status === "observed" ? (
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 10 }}>
+          <label><span className="sl-label">When</span><input className="sl-input" value={date} onChange={e => setDate(e.target.value)} placeholder={slNowMonth()}></input></label>
+          <label><span className="sl-label">Source</span><input className="sl-input" value={source} onChange={e => setSource(e.target.value)} placeholder="e.g. Reuters"></input></label>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1.3fr)", gap: 10, alignItems: "end" }}>
+          <label><span className="sl-label">By when</span><input className="sl-input" value={date} onChange={e => setDate(e.target.value)} placeholder="e.g. 2027–28"></input></label>
+          <div><span className="sl-label">How likely</span><SLSeg value={likelihood} onChange={setLikelihood} options={[["Low", "Low"], ["Medium", "Medium"], ["High", "High"]]}></SLSeg></div>
+        </div>
+      )}
+      <div><span className="sl-label">Impact on your decision</span><SLSeg value={impact} onChange={setImpact} options={[1, 2, 3, 4, 5].map(n => [n, String(n)])}></SLSeg></div>
+      <label><span className="sl-label">What it would mean <span style={{ color: "#9CA3AF", fontWeight: 400 }}>· optional</span></span>
+        <textarea className="sl-input" rows={2} value={body} onChange={e => setBody(e.target.value)} placeholder="Who is affected, and how"></textarea>
+      </label>
+
+      <div style={{ border: "1px solid #E5E7EB", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 10, background: "#FAFAF9" }}>
+        <span className="sl-mono" style={{ fontSize: 10, color: "#6B7280" }}>WHICH FORCE DOES IT PULL ON?</span>
+        {thinking && <span className="sl-pulse" style={{ fontSize: 12.5, color: "#C2410C" }}>✦ Finding the force this pulls on…</span>}
+        {!thinking && suggestion && !touched && sig && (
+          <span style={{ fontSize: 12.5, color: "#7C2D12", lineHeight: 1.5 }}>✦ Suggested: <b>{sig.title}</b>, toward <b>{slPole(sig, target.side)}</b>. {suggestion.rationale}</span>
+        )}
+        {!thinking && !suggestion && !touched && title.trim().length >= 12 && <span style={{ fontSize: 12, color: "#6B7280" }}>No clear match. Pick a force or leave it in the inbox to group later.</span>}
+        <select className="sl-input" value={target ? target.sigId : ""} onChange={e => { setTouched(true); setTarget(e.target.value ? { sigId: e.target.value, side: (target && target.side) || "b" } : null); }}>
+          <option value="">Leave in inbox — group it later</option>
+          {signals.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
+        </select>
+        {sig && <SLSeg value={target.side} onChange={v => { setTouched(true); setTarget({ ...target, side: v }); }} options={[["a", "← " + slPole(sig, "a")], ["b", slPole(sig, "b") + " →"]]}></SLSeg>}
+        {!sig && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {SL_CATS.map(c => <button key={c} type="button" onClick={() => setCategory(c)} style={{ border: "none", background: "none", padding: 0, cursor: "pointer", borderRadius: 999, outline: category === c ? "2px solid #1E1B2E" : "none", outlineOffset: 1 }}><SLChip cat={c}></SLChip></button>)}
+          </div>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <button className="sl-btn sl-btn-ghost" onClick={onClose}>Cancel</button>
+        <button className="sl-btn sl-btn-primary" disabled={!ok} onClick={submit}>{sig ? "Add event" : "Add to inbox"}</button>
+      </div>
+    </SLModal>
+  );
+}
+
+function SLAddForceModal({ api, onClose, onAdded }) {
+  const [title, setTitle] = React.useState("");
+  const [a, setA] = React.useState("");
+  const [b, setB] = React.useState("");
+  const [category, setCategory] = React.useState("Political");
+  const [body, setBody] = React.useState("");
+  const ok = title.trim().length >= 4 && a.trim() && b.trim();
+  const submit = async () => {
+    if (!ok) return;
+    const f = await api.addForce({ title: title.trim(), category, poles: [a.trim(), b.trim()], body: body.trim(), impact: 3, uncertainty: "Medium", origin: "user" });
+    onAdded(f); onClose();
+  };
+  return (
+    <SLModal onClose={onClose} width={500}>
+      <div>
+        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Add a force</h3>
+        <div style={{ fontSize: 12.5, color: "#6B7280", marginTop: 3 }}>A force can go two ways over your horizon. Name both, and events will pull toward one or the other.</div>
+      </div>
+      <label><span className="sl-label">Force</span><input className="sl-input" autoFocus value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Digital sovereignty across SEA"></input></label>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 10 }}>
+        <label><span className="sl-label">← One way</span><input className="sl-input" value={a} onChange={e => setA(e.target.value)} placeholder="e.g. Open data flows"></input></label>
+        <label><span className="sl-label">The other way →</span><input className="sl-input" value={b} onChange={e => setB(e.target.value)} placeholder="e.g. Digital walls"></input></label>
+      </div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {SL_CATS.map(c => <button key={c} type="button" onClick={() => setCategory(c)} style={{ border: "none", background: "none", padding: 0, cursor: "pointer", borderRadius: 999, outline: category === c ? "2px solid #1E1B2E" : "none", outlineOffset: 1 }}><SLChip cat={c}></SLChip></button>)}
+      </div>
+      <label><span className="sl-label">Why it matters <span style={{ color: "#9CA3AF", fontWeight: 400 }}>· optional</span></span><textarea className="sl-input" rows={2} value={body} onChange={e => setBody(e.target.value)}></textarea></label>
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <button className="sl-btn sl-btn-ghost" onClick={onClose}>Cancel</button>
+        <button className="sl-btn sl-btn-primary" disabled={!ok} onClick={submit}>Add force</button>
+      </div>
+    </SLModal>
+  );
+}
+
+function SLEventDrawer({ ev, signals, api, onClose }) {
+  const [attachTo, setAttachTo] = React.useState(signals[0] ? signals[0].id : "");
+  const [attachSide, setAttachSide] = React.useState("b");
+  const possible = ev.status === "possible";
+  const attachSig = signals.find(s => s.id === attachTo);
+  const lab = { fontSize: 10, color: "#9CA3AF" };
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.25)", zIndex: 150 }}>
+      <aside onClick={e => e.stopPropagation()} className="sl-root" style={{ position: "absolute", top: 0, right: 0, bottom: 0, width: "min(420px, 100%)", background: "#fff", boxShadow: "-12px 0 40px rgba(15,23,42,.14)", overflowY: "auto", padding: 22, display: "flex", flexDirection: "column", gap: 16, boxSizing: "border-box" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <SLChip cat={ev.category}></SLChip>
+          <button onClick={onClose} aria-label="Close" style={{ border: "none", background: "none", cursor: "pointer", color: "#6B7280", fontSize: 16 }}>✕</button>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <span className="sl-mono" style={{ fontSize: 10.5, color: ev.wildcard ? "#7C3AED" : "#9CA3AF" }}>{ev.wildcard ? "WILDCARD" : possible ? "COULD HAPPEN" : "HAPPENED"} · {(ev.date || "").toUpperCase()}{ev.source ? " · " + ev.source.toUpperCase() : ""}</span>
+          <h3 style={{ margin: 0, fontSize: 19, fontWeight: 600, lineHeight: 1.3, letterSpacing: "-0.01em", textWrap: "pretty" }}>{ev.title}</h3>
+          {ev.body && <p style={{ margin: 0, fontSize: 13.5, color: "#374151", lineHeight: 1.6 }}>{ev.body}</p>}
+          {ev.precursor && <p style={{ margin: 0, fontSize: 12.5, color: "#6B7280" }}><span className="sl-mono" style={lab}>EARLY SIGN </span>{ev.precursor}</p>}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div style={{ border: "1px solid #E5E7EB", borderRadius: 10, padding: 11, display: "flex", flexDirection: "column", gap: 6 }}>
+            <span className="sl-mono" style={lab}>IMPACT</span><SLStars value={ev.impact || 0} size={13}></SLStars>
+          </div>
+          <div style={{ border: "1px solid #E5E7EB", borderRadius: 10, padding: 11, display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
+            <span className="sl-mono" style={lab}>LIKELIHOOD</span>
+            {possible ? <span className={"sl-badge sl-badge-" + (ev.likelihood || "Low")}>{ev.likelihood || "Not set"}</span> : <span className="sl-badge" style={{ background: "#F3F4F6", color: "#374151" }}>Happened</span>}
+          </div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <span className="sl-mono" style={lab}>PULLS ON</span>
+          {(ev.links || []).map(l => {
+            const s = signals.find(x => x.id === l.sigId); if (!s) return null;
+            const side = slSide(s, l), other = side === "a" ? "b" : "a";
+            return (
+              <div key={l.sigId} style={{ border: "1px solid #E5E7EB", borderRadius: 10, padding: 11, display: "flex", flexDirection: "column", gap: 8 }}>
+                <span style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}><SLChip cat={s.category} small></SLChip><span style={{ fontSize: 13, fontWeight: 600 }}>{s.title}</span></span>
+                <span style={{ fontSize: 12.5, color: "#6B7280" }}>toward <b style={{ color: "#1E1B2E", fontWeight: 600 }}>{slPole(s, side)}</b></span>
+                <span style={{ display: "flex", gap: 12 }}>
+                  <button className="sl-link" onClick={() => api.linkEvent(ev.id, s, other)}>Switch to "{slPole(s, other)}"</button>
+                  <button className="sl-link" style={{ color: "#6B7280" }} onClick={() => api.unlinkEvent(ev.id, s.id)}>Unlink</button>
+                </span>
+              </div>
+            );
+          })}
+          {!(ev.links || []).length && <span style={{ fontSize: 12.5, color: "#6B7280" }}>In the inbox. Attach it to a force:</span>}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, border: "1px dashed #E5E7EB", borderRadius: 10, padding: 11 }}>
+            <select className="sl-input" value={attachTo} onChange={e => setAttachTo(e.target.value)}>
+              {signals.filter(s => !(ev.links || []).some(l => l.sigId === s.id)).map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
+            </select>
+            {attachSig && <SLSeg value={attachSide} onChange={setAttachSide} options={[["a", "← " + slPole(attachSig, "a")], ["b", slPole(attachSig, "b") + " →"]]}></SLSeg>}
+            <button className="sl-btn sl-btn-ghost sl-btn-sm" style={{ alignSelf: "flex-start" }} disabled={!attachSig} onClick={() => api.linkEvent(ev.id, attachSig, attachSide)}>{(ev.links || []).length ? "Also pulls on this force" : "Attach"}</button>
+          </div>
+        </div>
+        {possible && (
+          <button className="sl-btn sl-btn-soft" style={{ alignSelf: "flex-start" }} onClick={() => api.updateEvent(ev.id, { status: "observed", date: slNowMonth(), likelihood: undefined })}>Mark as happened</button>
+        )}
+      </aside>
+    </div>
+  );
+}
+
+function SignalsLibraryV2({ signals, events, api, onNavigate }) {
+  slUseCss();
+  const [filter, setFilter] = React.useState("All");
+  const [openId, setOpenId] = React.useState(null);
+  const [adding, setAdding] = React.useState(null);
+  const [addingForce, setAddingForce] = React.useState(false);
+  const [grouping, setGrouping] = React.useState(false);
+  const [groupResult, setGroupResult] = React.useState(null);
+  const [drafts, setDrafts] = React.useState({});
+  const [busy, setBusy] = React.useState({});
+  const [toast, setToast] = React.useState(null);
+  const [flash, setFlash] = React.useState(null);
+
+  React.useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 3800); return () => clearTimeout(t); }, [toast]);
+  React.useEffect(() => { if (!flash) return; const t = setTimeout(() => setFlash(null), 2400); return () => clearTimeout(t); }, [flash]);
+
+  const inbox = events.filter(e => !(e.links || []).length);
+  const catOk = x => filter === "All" || x.category === filter;
+  const forces = signals.filter(catOk);
+  const openEv = events.find(e => e.id === openId);
+
+  const markResult = (r) => ({
+    newForces: (r.newForces || []).map((p, i) => ({ key: "nf" + i + Date.now(), state: "pending", ...p })),
+    attach: (r.attach || []).map((p, i) => ({ key: "at" + i + Date.now(), state: "pending", ...p })),
+    leftover: r.leftover || [],
+  });
+  const setPState = (key, state) => setGroupResult(g => g && ({ ...g, newForces: g.newForces.map(p => p.key === key ? { ...p, state } : p), attach: g.attach.map(p => p.key === key ? { ...p, state } : p) }));
+
+  const group = async () => {
+    setGrouping(true); setGroupResult(null);
+    try { setGroupResult(markResult(await api.groupInbox(inbox.map(e => e.id)))); }
+    catch (e) { setToast("Couldn't group events. Try again."); }
+    setGrouping(false);
+  };
+  const createForce = async (p) => {
+    const f = await api.addForce({ title: p.title, category: p.category, poles: p.poles, body: p.rationale, impact: 3, uncertainty: "Medium", origin: "ai" });
+    for (const m of p.members) await api.linkEvent(m.eventId, f, m.side);
+    setPState(p.key, "accepted"); setFlash(f.id);
+  };
+  const attach = async (p) => {
+    const s = signals.find(x => x.id === p.sigId);
+    if (s) await api.linkEvent(p.eventId, s, p.side);
+    setPState(p.key, "accepted");
+  };
+  const generate = async (sig, side) => {
+    setBusy(b => ({ ...b, [sig.id]: side }));
+    try {
+      const ds = await api.generateForPole(sig, side);
+      if (!ds.length) setToast(`No credible event found toward "${slPole(sig, side)}" within your horizon.`);
+      setDrafts(d => ({ ...d, [sig.id]: [...(d[sig.id] || []), ...ds.map((x, i) => ({ ...x, side, key: sig.id + side + i + Date.now() }))] }));
+    } catch (e) { setToast("Couldn't suggest events. Try again."); }
+    setBusy(b => ({ ...b, [sig.id]: null }));
+  };
+  const dropDraft = (sig, d) => setDrafts(x => ({ ...x, [sig.id]: (x[sig.id] || []).filter(y => y.key !== d.key) }));
+  const acceptDraft = async (sig, d) => {
+    await api.addEvent({ title: d.title, body: d.body, category: d.category || sig.category, status: "possible", date: d.date, likelihood: d.likelihood, impact: d.impact, origin: "ai", links: [{ sigId: sig.id, side: d.side, toward: slPole(sig, d.side) }] });
+    dropDraft(sig, d);
+  };
+
+  return (
+    <div className="sl-root" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ minWidth: 0 }}>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Signals Library</h2>
+          <div style={{ fontSize: 13, color: "#6B7280", marginTop: 3, maxWidth: 620, textWrap: "pretty" }}>Add what's happening, or what could. Each event pulls on a force, and every force can go two ways.</div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="sl-btn sl-btn-ghost sl-btn-sm" onClick={() => setAddingForce(true)}>Add force</button>
+          <button className="sl-btn sl-btn-primary sl-btn-sm" onClick={() => setAdding({})}>+ Add event</button>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        {["All", ...SL_CATS].map(c => {
+          const on = filter === c, col = SL_CAT[c];
+          const st = c === "All" ? (on ? { background: "#F97316", color: "#fff", borderColor: "#F97316" } : { background: "#fff", color: "#6B7280", borderColor: "#E5E7EB" })
+            : (on ? { background: col[1], color: "#fff", borderColor: col[1] } : { background: col[0], color: col[1], borderColor: col[1] + "66" });
+          return <button key={c} onClick={() => setFilter(c)} style={{ padding: "5px 12px", borderRadius: 999, cursor: "pointer", fontSize: 12, fontWeight: 500, border: "1px solid", fontFamily: "inherit", ...st }}>{c}</button>;
+        })}
+        <span style={{ marginLeft: "auto", display: "flex", gap: 12, fontSize: 11.5, color: "#6B7280", flexWrap: "wrap" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><SLDot ev={{ status: "observed" }}></SLDot>Happened</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><SLDot ev={{ status: "possible" }}></SLDot>Could happen</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><SLDot ev={{ status: "possible", wildcard: true }}></SLDot>Wildcard</span>
+        </span>
+      </div>
+
+      <SLInbox items={inbox.filter(catOk)} total={inbox.length} onOpen={setOpenId} onGroup={group} grouping={grouping}>
+        {groupResult && <SLProposals result={groupResult} signals={signals} events={events} onCreate={createForce} onAttach={attach} onDismiss={p => setPState(p.key, "dismissed")}></SLProposals>}
+      </SLInbox>
+
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 14, fontWeight: 600, whiteSpace: "nowrap" }}>Forces · {forces.length}</span>
+        <span style={{ fontSize: 12, color: "#9CA3AF" }}>Each force can go two ways. Events show which way it's being pulled.</span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(340px,1fr))", gap: 12 }}>
+        {forces.map(s => (
+          <div key={s.id} style={{ borderRadius: 10, boxShadow: flash === s.id ? "0 0 0 2px #F97316, 0 0 0 6px rgba(249,115,22,.18)" : "none", transition: "box-shadow .2s", display: "flex", flexDirection: "column", minWidth: 0 }}>
+                  <SLForceCard sig={s} events={events} drafts={drafts[s.id]} busySide={busy[s.id]} onOpen={setOpenId}
+                    onAdd={(side) => setAdding({ sigId: s.id, side: side || "b" })}
+                    onGenerate={(side) => generate(s, side)}
+                    onAcceptDraft={(d) => acceptDraft(s, d)} onDismissDraft={(d) => dropDraft(s, d)}
+                    onMatrix={onNavigate ? () => onNavigate("/app/matrix") : null}></SLForceCard>
+          </div>
+        ))}
+      </div>
+      {!forces.length && <div style={{ fontSize: 12.5, color: "#9CA3AF" }}>No forces in this category yet.</div>}
+
+      {openEv && <SLEventDrawer ev={openEv} signals={signals} api={api} onClose={() => setOpenId(null)}></SLEventDrawer>}
+      {adding && <SLAddEventModal signals={signals} api={api} preset={adding} onClose={() => setAdding(null)} onAdded={(ev) => { if ((ev.links || [])[0]) setFlash(ev.links[0].sigId); setToast((ev.links || []).length ? "Event added." : "Added to the inbox."); }}></SLAddEventModal>}
+      {addingForce && <SLAddForceModal api={api} onClose={() => setAddingForce(false)} onAdded={(f) => setFlash(f.id)}></SLAddForceModal>}
+      {toast && <div role="status" style={{ position: "fixed", left: 20, bottom: 20, zIndex: 250, background: "#1E1B2E", color: "#fff", fontSize: 13, padding: "10px 14px", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,.2)", maxWidth: 420 }}>{toast}</div>}
+    </div>
+  );
+}
+
+// ─── MOCK AI — replace each function with its Edge Function (see backend prompts). Same signatures, same return shapes. ───
+const SL_STOP = new Set("the a an and or of to in on for with by from at as is are be its it this that into over under than more most new all any per via".split(" "));
+const slTokens = (t) => (t || "").toLowerCase().replace(/[^a-z0-9\s-]/g, " ").split(/\s+/).filter(w => w.length > 3 && !SL_STOP.has(w)).map(w => w.replace(/(ies|es|s)$/, ""));
+const SL_SYN = [["tariff", "cbam", "carbon", "duty", "border"], ["data", "residency", "hosting", "server", "digital", "platform", "localisation"], ["talent", "worker", "visa", "workforce", "hiring", "attrition"], ["currency", "rupiah", "dong", "peso", "exchange", "volatility"], ["china", "decoupling", "export", "entity", "sanction"], ["flood", "climate", "heat", "insurance", "coastal"], ["super-app", "checkout", "commerce", "marketplace"], ["asean", "customs", "harmonisation", "trade"]];
+const slExpand = (ws) => { const out = new Set(ws); ws.forEach(w => SL_SYN.forEach(g => { if (g.some(x => w.startsWith(x.slice(0, 5)))) g.forEach(x => out.add(x)); })); return out; };
+
+const SLMock = {
+  wait: (ms) => new Promise(r => setTimeout(r, ms)),
+  score(draft, sig) {
+    const a = slExpand(slTokens(draft.title + " " + (draft.body || "")));
+    const b = slExpand(slTokens(sig.title + " " + (sig.body || "") + " " + (sig.poles || []).join(" ")));
+    const hits = [...a].filter(w => b.has(w));
+    return { n: hits.length, hits };
+  },
+  pickSide(draft, sig) {
+    const d = slTokens(draft.title + " " + (draft.body || ""));
+    const tight = /\b(cap|caps|ban|bans|mandat|require|restrict|tax|halt|block|tighten|reverse|break|surge|hike|flood|intervene|sanction)/i.test(draft.title);
+    const pa = slTokens(slPole(sig, "a")), pb = slTokens(slPole(sig, "b"));
+    const oa = d.filter(w => pa.includes(w)).length, ob = d.filter(w => pb.includes(w)).length;
+    if (oa !== ob) return oa > ob ? "a" : "b";
+    const bIsTight = /harder|deepen|fragment|surge|intensif|higher|concentrat|wall/i.test(slPole(sig, "b"));
+    return tight === bIsTight ? "b" : "a";
+  },
+  async suggestForce(draft, signals) {
+    await SLMock.wait(700);
+    let best = null;
+    signals.forEach(s => { const r = SLMock.score(draft, s); if (r.n >= 2 && (!best || r.n > best.r.n)) best = { s, r }; });
+    if (!best) return null;
+    return { sigId: best.s.id, side: SLMock.pickSide(draft, best.s), rationale: `Shares "${best.r.hits.slice(0, 2).join('", "')}" with this force.` };
+  },
+  async groupInbox(ids, events, signals) {
+    await SLMock.wait(1300);
+    const known = {
+      newForces: [{ title: "Digital sovereignty across SEA", category: "Political", poles: ["Open data flows", "Digital walls"], members: [{ eventId: "evi2", side: "b" }, { eventId: "evi3", side: "b" }, { eventId: "evi4", side: "b" }, { eventId: "evi5", side: "a" }], rationale: "These are all about who controls data and platforms inside national borders. It's separate from ASEAN trade harmonisation, which is about goods and tariffs." }],
+      attach: [{ eventId: "evi1", sigId: "sg3", side: "b", rationale: "A government competing for tech workers pulls directly on the regional talent market." }],
+    };
+    const inSet = new Set(ids);
+    const newForces = known.newForces.map(f => ({ ...f, members: f.members.filter(m => inSet.has(m.eventId)) })).filter(f => f.members.length >= 2);
+    const used = new Set(newForces.flatMap(f => f.members.map(m => m.eventId)));
+    const attach = known.attach.filter(a => inSet.has(a.eventId) && signals.some(s => s.id === a.sigId));
+    attach.forEach(a => used.add(a.eventId));
+    const leftover = [];
+    ids.filter(id => !used.has(id)).forEach(id => {
+      const e = events.find(x => x.id === id); if (!e) return;
+      let best = null;
+      signals.forEach(s => { const r = SLMock.score(e, s); if (r.n >= 2 && (!best || r.n > best.r.n)) best = { s, r }; });
+      if (best) attach.push({ eventId: id, sigId: best.s.id, side: SLMock.pickSide(e, best.s), rationale: `Shares "${best.r.hits.slice(0, 2).join('", "')}" with this force.` });
+      else leftover.push(id);
+    });
+    return { newForces, attach, leftover };
+  },
+  async generateForPole(sig, side, events) {
+    await SLMock.wait(1100);
+    const pole = slPole(sig, side).toLowerCase();
+    const lib = (window.FM_EVENT_PROPOSALS || {})[sig.id] || [];
+    const have = new Set(events.map(e => e.title.toLowerCase()));
+    return lib.filter(p => (p.toward || "").toLowerCase() === pole && !have.has(p.title.toLowerCase())).map(p => ({ title: p.title, body: p.body, date: p.date, likelihood: p.likelihood, impact: p.impact, category: sig.category }));
+  },
+};
+
+Object.assign(window, { SignalsLibraryV2, SLMock, slSide, slPole });
+
+
+// ─── HOST — in-memory stand-in for the backend. Claude Code: replace ONLY this block with a Supabase-backed api.
+// Every function below maps 1:1 to a table write or an Edge Function. Keep the signatures and return shapes identical.
+function App() {
+  const [signals, setSignals] = React.useState(SEED.signals);
+  const [events, setEvents] = React.useState(SEED.events);
+  const sRef = React.useRef(signals), eRef = React.useRef(events);
+  sRef.current = signals; eRef.current = events;
+  const uid = (p) => p + Math.random().toString(36).slice(2, 10);
+  const patchEvent = (id, fn) => setEvents(prev => prev.map(e => e.id === id ? fn(e) : e));
+  const api = {
+    // BACKEND: insert into events (+ event_signal_links for each link) → return the new row in the event shape.
+    addEvent: async (e) => { const ev = { id: uid("ev_"), links: [], ...e }; setEvents(p => [...p, ev]); return ev; },
+    // BACKEND: update events set … where id = $1   (Mark as happened: status='observed', occurred_on, likelihood=null)
+    updateEvent: async (id, patch) => patchEvent(id, e => ({ ...e, ...patch })),
+    // BACKEND: insert into signals (title, category, pole_a, pole_b, description, impact, uncertainty, origin)
+    addForce: async (f) => { const s = { id: uid("sg_"), source: "Manual", ...f }; setSignals(p => [s, ...p]); return s; },
+    // BACKEND: upsert event_signal_links (event_id, signal_id, side) on conflict (event_id, signal_id) do update set side
+    linkEvent: async (eventId, sig, side) => patchEvent(eventId, e => ({ ...e, links: [...e.links.filter(l => l.sigId !== sig.id), { sigId: sig.id, side, toward: slPole(sig, side) }] })),
+    // BACKEND: delete from event_signal_links where event_id = $1 and signal_id = $2
+    unlinkEvent: async (eventId, sigId) => patchEvent(eventId, e => ({ ...e, links: e.links.filter(l => l.sigId !== sigId) })),
+    // BACKEND: Edge Function forces-suggest-for-event  → { sigId, side, rationale } | null   (closed-book)
+    suggestForce: (d) => SLMock.suggestForce(d, sRef.current),
+    // BACKEND: Edge Function forces-group-inbox        → { newForces, attach, leftover }  (writes force_proposals)
+    groupInbox: (ids) => SLMock.groupInbox(ids, eRef.current, sRef.current),
+    // BACKEND: Edge Function events-generate-for-pole  → drafts[]  (research allowed; writes event_proposals)
+    generateForPole: (sig, side) => SLMock.generateForPole(sig, side, eRef.current),
+  };
+  return (
+    <div style={{ maxWidth: 1240, margin: "0 auto", padding: "20px 20px 60px" }}>
+      <div className="sl-root" style={{ fontSize: 12, color: "#7C2D12", background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 10, padding: "9px 12px", marginBottom: 16, lineHeight: 1.5 }}>
+        <b>Reference build.</b> Mock data and mock AI, all in memory. The UI above the HOST block is final; the backend replaces the <code>api</code> object only.
+      </div>
+      <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 14, padding: 18 }}>
+        <SignalsLibraryV2 signals={signals} events={events} api={api} onNavigate={(p) => alert("Navigate to " + p)}></SignalsLibraryV2>
+      </div>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<App></App>);
+
+</script>
+</body>
+</html>

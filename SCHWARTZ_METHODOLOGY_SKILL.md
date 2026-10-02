@@ -83,7 +83,7 @@ the project's own already-grounded data.
 |---|---|---|
 | 1. Focal question | No, except one narrow onboarding exception* | Closed-book drafting/scoring from the user's own interview answers only; see exception below for the one live-research carve-out |
 | 2. Key forces (local) | **Yes — exploratory** | Scans for local-actor forces (customers/suppliers/competitors/regulators) the user hasn't uploaded anything about; lands as unconfirmed suggestions only |
-| 3. Driving forces (macro/STEEP) | **Yes — exploratory** | Broad macro-trend sweep across STEEP categories; same unconfirmed-suggestion path as step 2 |
+| 3. Driving forces (macro/STEEP) | **Yes — exploratory** | Broad macro-trend sweep across STEEP categories; same unconfirmed-suggestion path as step 2. The Signals Library's per-pole "✦ Suggest" (events.generate_for_pole) is the same shape, one level down: drafts cited events for one pole of an existing signal into event_proposals, never written to `events` until the user confirms |
 | 4. Rank forces | No | Deterministic scoring/bucketing over existing signals, temp=0 |
 | 5. Scenario logics | No | Structured synthesis over the project's own axes/signals |
 | 6. Narrative + Storyline | No (at generation time) | Reasons only over the project's grounded storyline/signal graph. News may enter earlier via the step-8 ingestion pipeline as a signal, never fetched live inside a narrative/storyline prompt |

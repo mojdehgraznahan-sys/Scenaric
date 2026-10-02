@@ -17,8 +17,12 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
+import { useNavigate } from "@/lib/use-navigate";
 import { createManualIndicator, type IndicatorWithReadings, type AlertIndicatorSummary } from "@/lib/actions/indicators";
 import type { Scenario } from "@/lib/types";
+import { Chip } from "@/components/chip";
+import { eventCategory } from "@/components/signals/pole";
+import { EventMeta } from "@/components/signals/spectrum";
 
 // Same window-global toast convention page-narrative.tsx already uses (GlobalToast in
 // app-shell.tsx) — not the unrelated shadcn useToast() hook in ui/use-toast.ts.
@@ -75,9 +79,12 @@ function Sparkline({ readings, color }: { readings: { date: string; value: numbe
 
 export function PageMonitoring() {
   const store = useStore();
+  const navigate = useNavigate();
   const projectId = store.activeProjectId;
   const scenarios = store.scenarios;
   const activeScenarios = React.useMemo(() => scenarios.filter((s) => !s.archived), [scenarios]);
+  const events = store.events;
+  const signals = store.signals;
 
   // "Track indicators" on the Narrative page generates for one scenario, persists it for
   // real, then lands here as /monitoring?scenarioId={id} to pre-filter to it.
@@ -304,6 +311,46 @@ export function PageMonitoring() {
             })
           )}
         </div>
+      </div>
+
+      {/* Events — read-only visibility into the Signals page "Events" view (observed/possible/
+          wildcard), for situational awareness while reading indicators. Pure display: an
+          indicator already watching a given event (indicators.event_id) is surfaced when one
+          exists, but nothing here auto-creates an indicator from an event. */}
+      <div className="mt-4 rounded-xl border border-border bg-card p-5 shadow-card">
+        <div className="mb-3.5 flex items-center justify-between gap-2">
+          <div>
+            <h2 className="text-[15px] font-semibold">Events</h2>
+            <div className="mt-0.5 text-[12.5px] text-muted-foreground">
+              Past and possible events behind your signals — context while you read indicators.
+            </div>
+          </div>
+          <Button variant="ghost" size="sm" onClick={() => navigate("/signals")}>
+            View in Signals →
+          </Button>
+        </div>
+        {events.length === 0 ? (
+          <div className="rounded-[10px] border border-dashed border-border p-4 text-center text-xs text-muted-foreground">No events yet.</div>
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            {events.map((ev) => {
+              const cat = eventCategory(ev, signals);
+              const watchedBy = ev.indicatorId ? indicators.find((i) => i.id === ev.indicatorId) : null;
+              return (
+                <div key={ev.id} className="flex flex-wrap items-center gap-2.5 rounded-[9px] border border-border bg-white px-3 py-2">
+                  <Chip category={cat} />
+                  <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-brand-dark">{ev.title}</span>
+                  <EventMeta ev={ev} />
+                  {watchedBy ? (
+                    <span className="whitespace-nowrap text-[10.5px] text-text-3">Watched by: {watchedBy.name}</span>
+                  ) : (
+                    <span className="whitespace-nowrap text-[10.5px] text-text-3">No indicator watching this yet</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <AddIndicatorDialog

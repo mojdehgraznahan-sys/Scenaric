@@ -68,6 +68,11 @@ export interface Signal {
   category: SteepCategory;
   source: string;
   title: string;
+  // A force can go two ways over the horizon — poleA/poleB name the two ends of that
+  // spectrum (e.g. "Tariffs soften" / "Tariffs bite harder"). Every event linked to this
+  // signal pulls toward one side or the other (EventLink.side) — see pole.ts's slPole().
+  poleA: string;
+  poleB: string;
   // Nullable: a manually-added or freshly-AI-suggested signal can sit unscored
   // until it goes through impact/uncertainty scoring.
   impact: number | null;
@@ -76,11 +81,13 @@ export interface Signal {
   createdAt: string;
 }
 
-// Signals page "Events" view — a specific occurrence (observed=past, possible=future),
-// optionally flagged wildcard, linked to one or more signals ("forces") it pushes toward a pole.
+// Signals Library — a specific occurrence (observed=past, possible=future), optionally
+// flagged wildcard, linked to one or more signals ("forces") it pulls toward one pole
+// (side) of. `side` is the only stored direction — the display label is always derived live
+// from the linked signal's current poleA/poleB via pole.ts's slPole(), never frozen text.
 export interface EventLink {
   signalId: string;
-  toward: string;
+  side: "a" | "b";
 }
 
 export interface EventItem {

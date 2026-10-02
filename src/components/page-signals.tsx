@@ -1,22 +1,17 @@
 "use client";
 
-// Signals Library — faithful Tailwind/shadcn port of the handoff page-signals.jsx.
+// Signals Library v2 — event-first capture, ported from
+// design/handoff/2026-09-28/Signals Library Standalone.html. Forces ("signals") show a
+// tug-of-war spectrum between two named poles; events pull toward one side or sit in the
+// Inbox until grouped. No flip-cards, no tabs — Suggestions/Scores (Ask AI's Find/Rank
+// review queues) are restyled panels on this same page rather than separate tabs.
 import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Icons, Stars } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Chip } from "@/components/chip";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 import { useNavigate } from "@/lib/use-navigate";
-import { getInsight, type InsightRow } from "@/lib/actions/insights";
-import { getSource } from "@/lib/actions/sources";
-import { suggestSignalCategory } from "@/lib/actions/ai-signals";
+import { getInsight } from "@/lib/actions/insights";
 import {
   listResearchSuggestions,
   confirmResearchSuggestion,
@@ -31,62 +26,29 @@ import {
   dismissAllInBatch,
   type SignalScoreProposalRow,
 } from "@/lib/actions/ai-signals-rank";
-import { AIGenerationFailedError } from "@/lib/ai/errors";
-import type { Signal, SteepCategory, EventItem } from "@/lib/types";
-import { FlipCard, FlipHint } from "@/components/signals/flip-card";
-import { EventCard, EventCount, eventCategory } from "@/components/signals/event-card";
-import { SignalCardBack } from "@/components/signals/signal-card-back";
-import { SignalEventTimeline } from "@/components/signals/signal-event-timeline";
-import { AddSignalModal } from "@/components/signals/add-signal-modal";
-
-const STEEP_CATEGORIES: SteepCategory[] = ["Social", "Technology", "Economic", "Ecological", "Political"];
-
-interface NewSignalForm {
-  category: SteepCategory;
-  title: string;
-  source: string;
-  body: string;
-  impact: number; // 0 = unset
-  uncertainty: "" | "Low" | "Medium" | "High";
-}
-
-const EMPTY_FORM: NewSignalForm = { category: "Technology", title: "", source: "", body: "", impact: 0, uncertainty: "" };
-
-function citationFor(insight: InsightRow, sourceName: string | null): string {
-  if (insight.speaker_name) return `${insight.source_type ?? "Knowledge Base"} — ${insight.speaker_name}`;
-  if (sourceName) return sourceName;
-  return insight.source_type ?? "Knowledge Base";
-}
+import {
+  suggestForceForEvent,
+  groupInboxIntoForces,
+  listForceProposals,
+  confirmForceProposal,
+  dismissForceProposal,
+  generateForPole,
+  listEventProposals,
+  confirmEventProposal,
+  dismissEventProposal,
+  type ForceProposalRow,
+  type EventProposalRow,
+} from "@/lib/actions/ai-forces";
+import type { EventItem, Signal, SteepCategory } from "@/lib/types";
+import { eventCategory, slPole } from "@/components/signals/pole";
+import { EventDot } from "@/components/signals/spectrum";
+import { ForceCard } from "@/components/signals/force-card";
+import { Inbox, GroupProposals } from "@/components/signals/inbox";
+import { AddEventModal, type AddEventModalPreset, type AddEventInput } from "@/components/signals/add-event-modal";
+import { AddForceModal } from "@/components/signals/add-force-modal";
+import { EventDrawer } from "@/components/signals/event-drawer";
 
 const CATEGORIES: Array<"All" | SteepCategory> = ["All", "Social", "Technology", "Economic", "Ecological", "Political"];
-
-const SORT_OPTIONS = [
-  { value: "recent", label: "Recently added" },
-  { value: "impact", label: "Impact" },
-  { value: "uncertainty", label: "Uncertainty" },
-  { value: "category", label: "Category" },
-] as const;
-type SortMode = (typeof SORT_OPTIONS)[number]["value"];
-const SORT_VALUES = SORT_OPTIONS.map((o) => o.value) as readonly string[];
-
-const UNCERTAINTY_RANK: Record<string, number> = { High: 3, Medium: 2, Low: 1 };
-
-// Client-side only — sorts what's already fetched into store.signals, never re-fetches.
-// Unscored signals (impact/uncertainty null) sort to the end under both numeric modes via
-// the -1 fallback, rather than crashing or landing in an unpredictable spot.
-function sortSignals(list: Signal[], mode: SortMode): Signal[] {
-  const sorted = [...list];
-  if (mode === "impact") {
-    sorted.sort((a, b) => (b.impact ?? -1) - (a.impact ?? -1));
-  } else if (mode === "uncertainty") {
-    sorted.sort((a, b) => (UNCERTAINTY_RANK[b.uncertainty ?? ""] ?? -1) - (UNCERTAINTY_RANK[a.uncertainty ?? ""] ?? -1));
-  } else if (mode === "category") {
-    sorted.sort((a, b) => a.category.localeCompare(b.category));
-  } else {
-    sorted.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }
-  return sorted;
-}
 
 // Filter-pill classes (literal strings so Tailwind JIT keeps them).
 const PILL: Record<string, { active: string; inactive: string }> = {
@@ -98,138 +60,50 @@ const PILL: Record<string, { active: string; inactive: string }> = {
   Political: { active: "bg-steep-political text-white border-steep-political", inactive: "bg-[#FEF2F2] text-steep-political border-[rgba(239,68,68,0.4)]" },
 };
 
-function uncertaintyBadge(u: Signal["uncertainty"]) {
-  if (u === "High") return "bg-brand-orangeLight text-brand-orange700";
-  if (u === "Medium") return "bg-[#FFFBEB] text-[#B45309]";
-  return "bg-[#ECFDF5] text-[#065F46]";
-}
-
 const BADGE_BASE = "inline-flex items-center rounded px-[7px] py-0.5 text-[10px] font-semibold uppercase tracking-[0.04em]";
 
 export function PageSignals() {
   const store = useStore();
   const signals = store.signals;
+  const events = store.events;
   const navigate = useNavigate();
   const router = useRouter();
   const searchParams = useSearchParams();
-  // Signals is the default/first tab (the page's primary content); Events sits next to it as
-  // its own tab (scenaric.pdf); Suggestions is the staging area for pending research_suggestions.
-  // Plain component state, not URL-persisted — unlike sortMode (a filter over what you're
-  // looking at), this doesn't need to be bookmarkable.
-  const [tab, setTab] = React.useState<"signals" | "events" | "suggestions" | "scores">("signals");
+
   const [filter, setFilter] = React.useState<"All" | SteepCategory>("All");
-  const [selected, setSelected] = React.useState<Signal | null>(null);
-  const [detailTab, setDetailTab] = React.useState<"overview" | "timeline">("overview");
-  const [addOpen, setAddOpen] = React.useState(false);
-  // Signals page "Events" view (scenaric.pdf). `flipped`/`focusKey` are keyed by
-  // "sig:<id>"/"evt:<id>" so the two id spaces can't collide; `jump()` is the cross-view
-  // navigation used by both card backs (still named forces/events externally — only the tab
-  // value they map to changed).
-  const [statusFilter, setStatusFilter] = React.useState<"All" | "Observed" | "Possible" | "Wildcards">("All");
-  const [flipped, setFlipped] = React.useState<Record<string, boolean>>({});
-  const [focusKey, setFocusKey] = React.useState<string | null>(null);
-  const scrollContainerRef = React.useRef<HTMLDivElement>(null);
-  const events = store.events;
-
-  const toggleFlip = React.useCallback((key: string) => {
-    setFlipped((f) => ({ ...f, [key]: !f[key] }));
-  }, []);
-
-  const jump = React.useCallback((toView: "forces" | "events", key: string) => {
-    setTab(toView === "forces" ? "signals" : "events");
-    setFilter("All");
-    if (toView === "events") setStatusFilter("All");
-    setFlipped((f) => ({ ...f, [key]: false }));
-    setFocusKey(key);
-  }, []);
-
-  React.useEffect(() => {
-    if (!focusKey) return;
-    const raf = requestAnimationFrame(() => {
-      const container = scrollContainerRef.current;
-      const card = container?.querySelector<HTMLElement>(`[data-card-id="${focusKey}"]`);
-      if (!container || !card) return;
-      const containerRect = container.getBoundingClientRect();
-      const cardRect = card.getBoundingClientRect();
-      const offset = cardRect.top - containerRect.top + container.scrollTop;
-      container.scrollTo({ top: Math.max(offset - 80, 0), behavior: "smooth" });
-    });
-    const timeout = setTimeout(() => setFocusKey(null), 2600);
-    return () => {
-      cancelAnimationFrame(raf);
-      clearTimeout(timeout);
-    };
-  }, [focusKey]);
-  // "Suggest signals" and "Scan for driving forces (web)" now live in the Ask AI panel
-  // (ask-ai.tsx's context="signals" TASKS) rather than this toolbar — see
-  // SCHWARTZ_METHODOLOGY_SKILL.md's research-mode policy for why the scan itself stages
-  // unconfirmed research_suggestions rather than writing signals directly. This page still owns
-  // reviewing/confirming what it finds; researchSuggestions is refreshed via the
-  // fm:signals-updated listener below whenever Ask AI runs that scan.
-  const [suggesting, setSuggesting] = React.useState(false);
-  const [suggestResult, setSuggestResult] = React.useState<string | null>(null);
-  const [researchSuggestions, setResearchSuggestions] = React.useState<ResearchSuggestionRow[]>([]);
-  const [workingSuggestionId, setWorkingSuggestionId] = React.useState<string | null>(null);
-  // Group 3 "Rank" (SIGNALS_ASK_AI_PROMPTS.md) score proposals — same staging/review pattern
-  // as researchSuggestions above, just a different source table (signal_score_proposals).
-  const [scoreProposals, setScoreProposals] = React.useState<SignalScoreProposalRow[]>([]);
-  const [workingProposalId, setWorkingProposalId] = React.useState<string | null>(null);
-  const [workingBatchId, setWorkingBatchId] = React.useState<string | null>(null);
+  const [openEventId, setOpenEventId] = React.useState<string | null>(null);
+  const [addingEvent, setAddingEvent] = React.useState<AddEventModalPreset | null>(null);
+  const [addEventOpen, setAddEventOpen] = React.useState(false);
+  const [addingForce, setAddingForce] = React.useState(false);
   const [addingToMatrixId, setAddingToMatrixId] = React.useState<string | null>(null);
-  const [addToMatrixError, setAddToMatrixError] = React.useState<{ id: string; message: string } | null>(null);
+  const [toast, setToast] = React.useState<string | null>(null);
 
-  // "+ Merge into Signal" from a Knowledge Base insight card lands here as
-  // /signals?mergeInsight={id} — see src/components/page-knowledge.tsx.
-  const [mergeInsight, setMergeInsight] = React.useState<InsightRow | null>(null);
-  const [mergeOpen, setMergeOpen] = React.useState(false);
-  const [mergeMode, setMergeMode] = React.useState<"existing" | "new">("new");
-  const [mergeTargetId, setMergeTargetId] = React.useState("");
-  const [mergeForm, setMergeForm] = React.useState<NewSignalForm>(EMPTY_FORM);
-  const [mergeError, setMergeError] = React.useState<string | null>(null);
-  const [mergeSubmitting, setMergeSubmitting] = React.useState(false);
-  const [categorySuggesting, setCategorySuggesting] = React.useState(false);
-  // Guards against a slow AI response landing after the user has already picked a
-  // category themselves — set on the category Select's onValueChange, never reset while
-  // this modal instance is open.
-  const categoryTouchedRef = React.useRef(false);
+  const showToast = React.useCallback((message: string) => setToast(message), []);
+  React.useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3800);
+    return () => clearTimeout(t);
+  }, [toast]);
 
+  const openEvent = events.find((e) => e.id === openEventId) ?? null;
+  const inbox = React.useMemo(() => events.filter((e) => e.links.length === 0), [events]);
+  const forces = filter === "All" ? signals : signals.filter((s) => s.category === filter);
+  const inboxFiltered = filter === "All" ? inbox : inbox.filter((e) => eventCategory(e, signals) === filter);
+
+  /* ─────────────────────────── Knowledge Base "+ Merge into Signal →" ─────────────────────────── */
+  // Lands here as /signals?mergeInsight={id} (page-knowledge.tsx). Instead of the old
+  // merge-or-create modal, prefill the new Add Event modal's "what it would mean" field with
+  // the insight's own text and let its inline suggestForceForEvent debounce do the matching.
   React.useEffect(() => {
     const insightId = searchParams.get("mergeInsight");
     if (!insightId) return;
-    // Clear the param immediately (replace, not push) so a refresh never reopens this —
-    // the fetch below still uses the id it captured before the param is gone.
     router.replace("/signals");
-    categoryTouchedRef.current = false;
     (async () => {
       try {
         const insight = await getInsight(insightId);
         if (!insight) return;
-        const source = insight.source_id ? await getSource(insight.source_id) : null;
-        setMergeInsight(insight);
-        setMergeMode(signals.length > 0 ? "existing" : "new");
-        setMergeTargetId(signals[0]?.id ?? "");
-        setMergeForm({
-          category: insight.category && insight.category !== "local_actor" ? insight.category : "Technology",
-          title: "",
-          source: citationFor(insight, source?.name ?? null),
-          body: insight.text,
-          impact: 0,
-          uncertainty: "",
-        });
-        setMergeOpen(true);
-
-        // AI's first attempt at the category, per the project's own focal question —
-        // replaces the instant fallback above once it lands, unless the user already
-        // picked one themselves in the meantime.
-        if (store.activeProjectId) {
-          setCategorySuggesting(true);
-          suggestSignalCategory({ projectId: store.activeProjectId, text: insight.text })
-            .then(({ category }) => {
-              if (!categoryTouchedRef.current) setMergeForm((f) => ({ ...f, category }));
-            })
-            .catch((err) => console.error("[signals] category suggestion failed", err))
-            .finally(() => setCategorySuggesting(false));
-        }
+        setAddingEvent({ title: "", body: insight.quote || insight.text });
+        setAddEventOpen(true);
       } catch (err) {
         console.error("[signals] failed to load insight for merge", err);
       }
@@ -237,158 +111,11 @@ export function PageSignals() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
-  const onMergeIntoExisting = async () => {
-    if (!mergeInsight || !mergeTargetId) {
-      setMergeError("Choose a signal to merge into.");
-      return;
-    }
-    const target = signals.find((s) => s.id === mergeTargetId);
-    if (!target) {
-      setMergeError("Choose a signal to merge into.");
-      return;
-    }
-    setMergeSubmitting(true);
-    setMergeError(null);
-    try {
-      const quote = mergeInsight.quote || mergeInsight.text;
-      await store.updateSignal({ id: target.id, body: `${target.body}\n\n— ${quote}`.trim() });
-      setMergeOpen(false);
-      setMergeInsight(null);
-    } catch (err) {
-      console.error("[signals] failed to merge insight into signal", err);
-      setMergeError("Couldn't merge into that signal — try again.");
-    } finally {
-      setMergeSubmitting(false);
-    }
-  };
-
-  const onCreateFromInsight = async () => {
-    if (!mergeForm.title.trim()) {
-      setMergeError("Title is required.");
-      return;
-    }
-    if (!store.activeProjectId) {
-      setMergeError("No active project.");
-      return;
-    }
-    setMergeSubmitting(true);
-    setMergeError(null);
-    try {
-      await store.createSignal({
-        projectId: store.activeProjectId,
-        category: mergeForm.category,
-        source: mergeForm.source.trim() || "Knowledge Base",
-        title: mergeForm.title.trim(),
-        body: mergeForm.body.trim(),
-        origin: "insight",
-      });
-      setMergeOpen(false);
-      setMergeInsight(null);
-    } catch (err) {
-      console.error("[signals] failed to create signal from insight", err);
-      setMergeError("Couldn't create the signal — try again.");
-    } finally {
-      setMergeSubmitting(false);
-    }
-  };
-
-  // Sort mode lives in the URL (?sort=...), not React state — useSearchParams() is
-  // already reactive, so there's no separate state to drift out of sync with it. Falls
-  // back to "recent" for anything missing or unrecognized.
-  const rawSort = searchParams.get("sort");
-  const sortMode: SortMode = (SORT_VALUES.includes(rawSort ?? "") ? rawSort : "recent") as SortMode;
-
-  const onSortChange = (mode: string) => {
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("sort", mode);
-    router.replace(`/signals?${params.toString()}`);
-  };
-
-  const filtered = filter === "All" ? signals : signals.filter((s) => s.category === filter);
-  const sortedFiltered = sortSignals(filtered, sortMode);
-  const unscoredCount = signals.filter((s) => s.impact == null || s.uncertainty == null).length;
-
-  // Detail-modal editing (in place, not a separate dialog) — see the detail modal below.
-  const [editOpen, setEditOpen] = React.useState(false);
-  const [editForm, setEditForm] = React.useState<NewSignalForm>(EMPTY_FORM);
-  const [editError, setEditError] = React.useState<string | null>(null);
-  const [editSubmitting, setEditSubmitting] = React.useState(false);
-
-  const onStartEdit = () => {
-    if (!selected) return;
-    setEditForm({
-      title: selected.title,
-      body: selected.body,
-      category: selected.category,
-      source: selected.source,
-      impact: selected.impact ?? 0,
-      uncertainty: selected.uncertainty ?? "",
-    });
-    setEditError(null);
-    setEditOpen(true);
-  };
-
-  const onSaveEdit = async () => {
-    if (!selected) return;
-    if (!editForm.title.trim()) {
-      setEditError("Title is required.");
-      return;
-    }
-    setEditSubmitting(true);
-    setEditError(null);
-    try {
-      const updated = await store.updateSignal({
-        id: selected.id,
-        title: editForm.title.trim(),
-        body: editForm.body.trim(),
-        category: editForm.category,
-        source: editForm.source.trim(),
-        impact: editForm.impact > 0 ? editForm.impact : null,
-        uncertainty: editForm.uncertainty || null,
-      });
-      setSelected(updated);
-      setEditOpen(false);
-    } catch (err) {
-      console.error("[signals] failed to save signal edit", err);
-      setEditError("Couldn't save — try again.");
-    } finally {
-      setEditSubmitting(false);
-    }
-  };
-
-  const onAddSignal = async (input: { category: SteepCategory; source: string; title: string; body: string }) => {
-    if (!store.activeProjectId) throw new Error("No active project.");
-    await store.createSignal({ projectId: store.activeProjectId, ...input });
-  };
-
-  // Manual "Add as event" — no date/impact collection in the modal (matches the design
-  // prototype's own minimal AddSignalModal), so observed defaults to today and possible gets a
-  // placeholder window label; impact defaults to a neutral 3 same as the prototype hardcodes.
-  const onAddEvent = async (input: {
-    title: string;
-    status: "observed" | "possible";
-    targetSignalId: string;
-    toward: string;
-    likelihood?: "Low" | "Medium" | "High";
-  }) => {
-    if (!store.activeProjectId) throw new Error("No active project.");
-    const created = await store.createEvent({
-      projectId: store.activeProjectId,
-      title: input.title,
-      status: input.status,
-      occurredOn: input.status === "observed" ? new Date().toISOString().slice(0, 10) : null,
-      windowLabel: input.status === "possible" ? "Future" : null,
-      impact: 3,
-      likelihood: input.likelihood ?? null,
-      links: [{ signalId: input.targetSignalId, toward: input.toward }],
-    });
-    jump("events", `evt:${created.id}`);
-  };
-
-  const onDeleteSignal = async (id: string) => {
-    await store.deleteSignal(id);
-    setSelected(null);
-  };
+  /* ─────────────────────────── Suggestions (research_suggestions) ─────────────────────────── */
+  // "Find" prompts (Ask AI, ⌘I) stage results here — unchanged data model/logic from before the
+  // rebuild, just rendered as a panel on this page instead of behind a "Suggestions" tab.
+  const [researchSuggestions, setResearchSuggestions] = React.useState<ResearchSuggestionRow[]>([]);
+  const [workingSuggestionId, setWorkingSuggestionId] = React.useState<string | null>(null);
 
   const refreshResearchSuggestions = React.useCallback(async () => {
     if (!store.activeProjectId) return;
@@ -399,9 +126,6 @@ export function PageSignals() {
     refreshResearchSuggestions();
   }, [refreshResearchSuggestions]);
 
-  // Resync when Ask AI's "Scan for driving forces (web)" task (ask-ai.tsx's context="signals")
-  // writes new research_suggestions, same lightweight cross-component convention
-  // page-settings.tsx's/page-knowledge.tsx's fm:*-updated listeners already use.
   React.useEffect(() => {
     if (!store.activeProjectId) return;
     const onUpdated = (e: Event) => {
@@ -438,6 +162,11 @@ export function PageSignals() {
     }
   };
 
+  /* ─────────────────────────── Scores (signal_score_proposals) ─────────────────────────── */
+  const [scoreProposals, setScoreProposals] = React.useState<SignalScoreProposalRow[]>([]);
+  const [workingProposalId, setWorkingProposalId] = React.useState<string | null>(null);
+  const [workingBatchId, setWorkingBatchId] = React.useState<string | null>(null);
+
   const refreshScoreProposals = React.useCallback(async () => {
     if (!store.activeProjectId) return;
     setScoreProposals(await listSignalScoreProposals(store.activeProjectId));
@@ -447,8 +176,6 @@ export function PageSignals() {
     refreshScoreProposals();
   }, [refreshScoreProposals]);
 
-  // Same fm:signals-updated convention as research suggestions above — Ask AI's "Score
-  // impact"/"Score uncertainty" tasks (ask-ai.tsx) dispatch it after writing new proposals.
   React.useEffect(() => {
     if (!store.activeProjectId) return;
     const onUpdated = (e: Event) => {
@@ -511,820 +238,428 @@ export function PageSignals() {
     }
   };
 
-  const onScoreUnscored = async () => {
+  /* ─────────────────────────── Inbox → "Group into forces" (force_proposals) ─────────────────────────── */
+  const [forceProposals, setForceProposals] = React.useState<ForceProposalRow[]>([]);
+  const [grouping, setGrouping] = React.useState(false);
+  const [groupWorkingId, setGroupWorkingId] = React.useState<string | null>(null);
+  const [lastLeftoverIds, setLastLeftoverIds] = React.useState<string[]>([]);
+
+  const refreshForceProposals = React.useCallback(async () => {
     if (!store.activeProjectId) return;
-    setSuggesting(true);
-    setSuggestResult(null);
+    setForceProposals(await listForceProposals(store.activeProjectId));
+  }, [store.activeProjectId]);
+
+  React.useEffect(() => {
+    refreshForceProposals();
+  }, [refreshForceProposals]);
+
+  const onGroupInbox = async () => {
+    if (!store.activeProjectId || inbox.length === 0) return;
+    setGrouping(true);
+    setLastLeftoverIds([]);
     try {
-      const scoring = await store.scoreUnscoredSignals(store.activeProjectId);
-      setSuggestResult(scoring.scored === 0 ? "Couldn't score those signals — try again." : `Scored ${scoring.scored} signal(s).`);
+      const result = await groupInboxIntoForces(store.activeProjectId, inbox.map((e) => e.id));
+      setForceProposals((prev) => [...result.proposals, ...prev]);
+      setLastLeftoverIds(result.leftoverEventIds);
+      if (result.proposals.length === 0 && result.leftoverEventIds.length === 0) showToast("Nothing to group yet.");
     } catch (err) {
-      console.error("[signals] scoring failed", err);
-      setSuggestResult("Couldn't score signals right now — try again in a moment.");
+      console.error("[signals] group inbox failed", err);
+      showToast("Couldn't group events. Try again.");
     } finally {
-      setSuggesting(false);
+      setGrouping(false);
     }
   };
 
-  // "+ Add to Matrix": a scored signal is already on the Matrix automatically
-  // (getMatrixData auto-creates its dot) — jump straight to it. An unscored one isn't there
-  // yet, so score it first and only navigate once that actually lands; landing on the Matrix
-  // without the signal really being there would misrepresent what happened.
-  const onAddToMatrix = async (s: Signal) => {
+  const onConfirmForceProposal = async (p: ForceProposalRow) => {
+    if (!store.activeProjectId) return;
+    setGroupWorkingId(p.id);
+    try {
+      await confirmForceProposal(store.activeProjectId, p.id);
+      setForceProposals((prev) => prev.filter((x) => x.id !== p.id));
+      await Promise.all([store.refreshSignals(store.activeProjectId), store.refreshEvents(store.activeProjectId)]);
+    } catch (err) {
+      console.error("[signals] confirm force proposal failed", err);
+      showToast("Couldn't confirm that proposal — try again.");
+    } finally {
+      setGroupWorkingId(null);
+    }
+  };
+
+  const onDismissForceProposal = async (p: ForceProposalRow) => {
+    if (!store.activeProjectId) return;
+    setGroupWorkingId(p.id);
+    try {
+      await dismissForceProposal(store.activeProjectId, p.id);
+      setForceProposals((prev) => prev.filter((x) => x.id !== p.id));
+    } catch (err) {
+      console.error("[signals] dismiss force proposal failed", err);
+    } finally {
+      setGroupWorkingId(null);
+    }
+  };
+
+  /* ─────────────────────────── Per-pole "✦ Suggest" (event_proposals) ─────────────────────────── */
+  const [eventProposals, setEventProposals] = React.useState<EventProposalRow[]>([]);
+  const [busyPole, setBusyPole] = React.useState<Record<string, "a" | "b" | null>>({});
+
+  const refreshEventProposals = React.useCallback(async () => {
+    if (!store.activeProjectId) return;
+    setEventProposals(await listEventProposals(store.activeProjectId));
+  }, [store.activeProjectId]);
+
+  React.useEffect(() => {
+    refreshEventProposals();
+  }, [refreshEventProposals]);
+
+  const onGenerateForPole = async (sig: Signal, side: "a" | "b") => {
+    if (!store.activeProjectId) return;
+    setBusyPole((b) => ({ ...b, [sig.id]: side }));
+    try {
+      const result = await generateForPole(store.activeProjectId, sig.id, side);
+      if (!result.sufficientEvidence) {
+        showToast(`No credible event found toward "${slPole(sig, side)}" within your horizon.`);
+      } else {
+        setEventProposals((prev) => [...result.proposals, ...prev]);
+      }
+    } catch (err) {
+      console.error("[signals] generate for pole failed", err);
+      showToast("Couldn't suggest events — try again.");
+    } finally {
+      setBusyPole((b) => ({ ...b, [sig.id]: null }));
+    }
+  };
+
+  const onAcceptEventProposal = async (p: EventProposalRow) => {
+    if (!store.activeProjectId) return;
+    try {
+      await confirmEventProposal(store.activeProjectId, p.id);
+      setEventProposals((prev) => prev.filter((x) => x.id !== p.id));
+      await store.refreshEvents(store.activeProjectId);
+    } catch (err) {
+      console.error("[signals] confirm event proposal failed", err);
+      showToast("Couldn't add that event — try again.");
+    }
+  };
+
+  const onDismissEventProposal = async (p: EventProposalRow) => {
+    if (!store.activeProjectId) return;
+    try {
+      await dismissEventProposal(store.activeProjectId, p.id);
+      setEventProposals((prev) => prev.filter((x) => x.id !== p.id));
+    } catch (err) {
+      console.error("[signals] dismiss event proposal failed", err);
+    }
+  };
+
+  /* ─────────────────────────── Add Event / Add Force / drawer ─────────────────────────── */
+  const onSuggestForce = React.useCallback(
+    async (input: { title: string; body: string }) => {
+      if (!store.activeProjectId) return null;
+      return suggestForceForEvent(store.activeProjectId, input);
+    },
+    [store.activeProjectId]
+  );
+
+  const onSubmitAddEvent = async (input: AddEventInput): Promise<EventItem> => {
+    if (!store.activeProjectId) throw new Error("No active project.");
+    return store.createEvent({
+      projectId: store.activeProjectId,
+      title: input.title,
+      description: input.body || undefined,
+      category: input.category,
+      status: input.status,
+      occurredOn: input.occurredOn,
+      windowLabel: input.windowLabel,
+      source: input.source ?? undefined,
+      likelihood: input.likelihood,
+      impact: input.impact,
+      links: input.target ? [{ signalId: input.target.sigId, side: input.target.side }] : [],
+    });
+  };
+
+  const onAddForce = async (input: { title: string; category: SteepCategory; poleA: string; poleB: string; body: string }) => {
+    if (!store.activeProjectId) throw new Error("No active project.");
+    await store.createSignal({
+      projectId: store.activeProjectId,
+      category: input.category,
+      source: "Manual",
+      title: input.title,
+      poleA: input.poleA,
+      poleB: input.poleB,
+      body: input.body,
+    });
+    showToast("Force added.");
+  };
+
+  const onLinkEvent = (eventId: string, signalId: string, side: "a" | "b") => {
+    store.linkEvent(eventId, signalId, side).catch((err) => {
+      console.error("[signals] failed to link event", err);
+      showToast("Couldn't update that link — try again.");
+    });
+  };
+
+  const onUnlinkEvent = (eventId: string, signalId: string) => {
+    store.unlinkEvent(eventId, signalId).catch((err) => {
+      console.error("[signals] failed to unlink event", err);
+      showToast("Couldn't unlink that event — try again.");
+    });
+  };
+
+  const onMarkHappened = (eventId: string) => {
+    store
+      .updateEvent({ id: eventId, status: "observed", occurredOn: new Date().toISOString().slice(0, 10), likelihood: null })
+      .catch((err) => {
+        console.error("[signals] failed to mark event happened", err);
+        showToast("Couldn't update that event — try again.");
+      });
+  };
+
+  // Same "score-first-if-needed" safety the old page had for "+ Add to Matrix": a scored
+  // signal already has a dot (getMatrixData auto-positions it); an unscored one needs scoring
+  // first so the user never lands on the Matrix without the signal actually being there.
+  const onPlaceOnMatrix = async (s: Signal) => {
     if (s.impact != null && s.uncertainty != null) {
       navigate(`/matrix?focus=${s.id}`);
       return;
     }
     if (!store.activeProjectId) return;
     setAddingToMatrixId(s.id);
-    setAddToMatrixError(null);
     try {
       await store.scoreSignal(store.activeProjectId, s.id);
       navigate(`/matrix?focus=${s.id}`);
     } catch (err) {
-      console.error("[signals] failed to score signal for Add to Matrix", err);
-      setAddToMatrixError({
-        id: s.id,
-        message: err instanceof AIGenerationFailedError ? "Scoring failed — try again." : "Couldn't add to Matrix — try again.",
-      });
+      console.error("[signals] failed to score signal for Place on matrix", err);
+      showToast("Couldn't add to Matrix — try again.");
     } finally {
       setAddingToMatrixId(null);
     }
   };
 
   return (
-    <div ref={scrollContainerRef} className="scroll-y flex-1 overflow-y-auto p-5">
-      <div className="rounded-xl border border-border bg-card p-[18px] shadow-card">
-        <div className="mb-3.5 flex flex-wrap items-center justify-between gap-2">
-          <div>
+    <div className="scroll-y flex-1 overflow-y-auto p-5">
+      <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-[18px] shadow-card">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
             <h2 className="text-lg font-semibold">Signals Library</h2>
-            <div className="mt-0.5 text-[13px] text-muted-foreground">
-              Forces that could shape your focal question. Specific events, past or future, attach to a force. Click any card to flip it.
+            <div className="mt-0.5 max-w-[620px] text-[13px] text-muted-foreground">
+              Add what&apos;s happening, or what could. Each event pulls on a force, and every force can go two ways.
             </div>
           </div>
-          <div className="flex flex-nowrap items-center gap-2">
-            {/* Sort only affects the signal grid, so it only shows on that tab. Trigger always
-                shows the static "Sort" label (matches the handoff design) — the dropdown itself
-                keeps its full 4-mode behavior via sortMode/onSortChange. */}
-            {tab === "signals" && (
-              <Select value={sortMode} onValueChange={onSortChange}>
-                <SelectTrigger className="h-8 w-auto gap-1.5 border-border px-2.5 text-xs">
-                  <Icons.Filter size={12} />
-                  Sort
-                </SelectTrigger>
-                <SelectContent>
-                  {SORT_OPTIONS.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>
-                      {o.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-            <Button variant="primary" size="sm" onClick={() => setAddOpen(true)}>
-              <Icons.Plus size={12} /> Add Signal
+          <div className="flex flex-shrink-0 gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setAddingForce(true)}>
+              Add force
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                setAddingEvent({});
+                setAddEventOpen(true);
+              }}
+            >
+              + Add event
             </Button>
           </div>
         </div>
 
-        {/* Tabs — same underline treatment as page-knowledge.tsx's RIGHT_TABS. */}
-        <div className="mb-3.5 flex border-b border-border">
-          {(
-            [
-              { id: "signals", label: "Signals" },
-              { id: "events", label: "Events" },
-              { id: "suggestions", label: "Suggestions" },
-              { id: "scores", label: "Scores" },
-            ] as const
-          ).map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={cn(
-                "mx-3.5 -mb-px flex items-center gap-1.5 border-b-2 px-0.5 py-2 text-[13px] font-medium first:ml-0",
-                tab === t.id ? "border-brand-orange text-brand-orange" : "border-transparent text-muted-foreground"
-              )}
-            >
-              {t.label}
-              {t.id === "suggestions" && researchSuggestions.length > 0 && (
-                <span className="inline-flex items-center rounded bg-brand-orangeLight px-[6px] py-0.5 text-[10px] font-semibold text-brand-orange700">
-                  {researchSuggestions.length}
-                </span>
-              )}
-              {t.id === "scores" && scoreProposals.length > 0 && (
-                <span className="inline-flex items-center rounded bg-brand-orangeLight px-[6px] py-0.5 text-[10px] font-semibold text-brand-orange700">
-                  {scoreProposals.length}
-                </span>
-              )}
-            </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {CATEGORIES.map((c) => {
+            const active = filter === c;
+            return (
+              <button
+                key={c}
+                onClick={() => setFilter(c)}
+                className={cn("rounded-full border px-3 py-[5px] text-xs font-medium", active ? PILL[c].active : PILL[c].inactive)}
+              >
+                {c}
+              </button>
+            );
+          })}
+          <span className="ml-auto flex flex-wrap items-center gap-3 text-[11.5px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5">
+              <EventDot ev={{ status: "observed", wildcard: false }} />
+              Happened
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <EventDot ev={{ status: "possible", wildcard: false }} />
+              Could happen
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <EventDot ev={{ status: "possible", wildcard: true }} />
+              Wildcard
+            </span>
+          </span>
+        </div>
+
+        {store.signalsLoading && store.eventsLoading && signals.length === 0 && events.length === 0 && (
+          <div className="text-center text-xs text-muted-foreground">Loading your signals…</div>
+        )}
+
+        <Inbox items={inboxFiltered} total={inbox.length} onOpen={setOpenEventId} onGroup={onGroupInbox} grouping={grouping}>
+          {(forceProposals.length > 0 || lastLeftoverIds.length > 0) && (
+            <GroupProposals
+              proposals={forceProposals}
+              signals={signals}
+              events={events}
+              leftoverEventIds={lastLeftoverIds}
+              workingId={groupWorkingId}
+              onConfirm={onConfirmForceProposal}
+              onDismiss={onDismissForceProposal}
+            />
+          )}
+        </Inbox>
+
+        <div className="flex flex-wrap items-baseline gap-2.5">
+          <span className="whitespace-nowrap text-sm font-semibold">Forces · {forces.length}</span>
+          <span className="text-xs text-text-3">Each force can go two ways. Events show which way it&apos;s being pulled.</span>
+        </div>
+        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))" }}>
+          {forces.map((s) => (
+            <ForceCard
+              key={s.id}
+              sig={s}
+              events={events}
+              proposals={eventProposals.filter((p) => p.signal_id === s.id)}
+              busySide={busyPole[s.id] ?? null}
+              onOpen={setOpenEventId}
+              onAdd={(side) => {
+                setAddingEvent(side ? { sigId: s.id, side } : {});
+                setAddEventOpen(true);
+              }}
+              onGenerate={(side) => onGenerateForPole(s, side)}
+              onAcceptProposal={onAcceptEventProposal}
+              onDismissProposal={onDismissEventProposal}
+              onMatrix={addingToMatrixId === s.id ? undefined : () => onPlaceOnMatrix(s)}
+            />
           ))}
         </div>
+        {forces.length === 0 && <div className="text-[12.5px] text-text-3">No forces in this category yet.</div>}
 
-        {tab === "scores" ? (
-          scoreProposals.length === 0 ? (
-            <div className="rounded-[10px] border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
-              No pending score proposals — run &quot;Score impact&quot; or &quot;Score uncertainty&quot; from Ask AI (⌘I) to generate some.
-            </div>
-          ) : (
-            <div className="flex flex-col gap-3.5">
-              {Object.entries(
-                scoreProposals.reduce<Record<string, SignalScoreProposalRow[]>>((acc, p) => {
-                  (acc[p.batch_id] ??= []).push(p);
-                  return acc;
-                }, {})
-              ).map(([batchId, rows]) => (
-                <div key={batchId} className="flex flex-col gap-1.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">
-                      {rows[0].dimension === "impact" ? "Impact" : "Uncertainty"} proposals · {rows.length}
-                    </span>
-                    <div className="flex gap-1.5">
-                      <Button variant="ghost" size="sm" onClick={() => onDismissAllInBatch(batchId)} disabled={workingBatchId === batchId}>
-                        Dismiss all
-                      </Button>
-                      <Button variant="primary" size="sm" onClick={() => onConfirmAllInBatch(batchId)} disabled={workingBatchId === batchId}>
-                        Confirm all
-                      </Button>
+        {/* Suggestions/Scores (Ask AI's Find/Rank review queues) sit below Forces, not above —
+            they populate a beat after first paint (a separate fetch each), and rendering them
+            above the primary content caused the whole page to visibly jump/reflow downward
+            the instant they arrived, reading as if the view had switched. */}
+        {researchSuggestions.length > 0 && (
+          <div className="flex flex-col gap-2 rounded-xl border border-[#FDE68A] bg-[#FFFBEB] p-3.5">
+            <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">Suggestions · {researchSuggestions.length}</span>
+            {researchSuggestions.map((s) => (
+              <div key={s.id} className="rounded-[9px] border border-[#FDE68A] bg-white px-3 py-2.5">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13px] font-semibold text-brand-dark">{s.title}</div>
+                    <div className="mt-0.5 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.04em] text-text-3">
+                      <span className="rounded bg-[#F9FAFB] px-1.5 py-0.5 font-medium text-text-2">{s.category ? "Driving force" : "Key force"}</span>
+                      <span>{s.category ?? s.actor_type}</span>
                     </div>
+                    <div className="mt-1 text-xs text-muted-foreground">{s.body}</div>
+                    {s.citation_url && (
+                      <a href={s.citation_url} target="_blank" rel="noreferrer" className="mt-1 block truncate text-[11px] text-brand-orange">
+                        {s.citation_title || s.citation_url}
+                      </a>
+                    )}
                   </div>
-                  <div className="flex flex-col gap-1.5">
-                    {rows.map((p) => {
-                      const signal = signals.find((s) => s.id === p.signal_id);
-                      return (
-                        <div
-                          key={p.id}
-                          className={cn(
-                            "rounded-[9px] border px-3 py-2 text-xs",
-                            p.low_confidence || p.disagrees_with_user_classification
-                              ? "border-[#FDE68A] bg-[#FFFBEB]"
-                              : "border-border bg-white"
-                          )}
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-1.5">
-                                <span className="truncate text-[13px] font-semibold text-brand-dark">{signal?.title ?? "Unknown signal"}</span>
-                                <span className={cn(BADGE_BASE, "bg-[#F3F4F6] text-text-2")}>
-                                  {p.dimension === "impact" ? `Impact ${p.proposed_impact}` : p.proposed_uncertainty}
-                                </span>
-                                {p.low_confidence && <span className={cn(BADGE_BASE, "bg-brand-orangeLight text-brand-orange700")}>Low confidence</span>}
-                                {p.disagrees_with_user_classification && (
-                                  <span className={cn(BADGE_BASE, "bg-brand-orangeLight text-brand-orange700")}>Disagrees with you</span>
-                                )}
-                              </div>
-                              <p className="mt-1 text-muted-foreground">{p.rationale}</p>
-                              {p.disagrees_with_user_classification && (
-                                <p className="mt-0.5 text-brand-orange700">{p.disagrees_with_user_classification}</p>
-                              )}
-                            </div>
-                            <div className="flex flex-shrink-0 gap-1.5">
-                              <Button variant="ghost" size="sm" onClick={() => onDismissScoreProposal(p.id)} disabled={workingProposalId === p.id}>
-                                Dismiss
-                              </Button>
-                              <Button variant="primary" size="sm" onClick={() => onConfirmScoreProposal(p.id)} disabled={workingProposalId === p.id}>
-                                Confirm
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )
-        ) : tab === "suggestions" ? (
-          researchSuggestions.length === 0 ? (
-            <div className="rounded-[10px] border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
-              No pending suggestions yet — run one of the &quot;Find&quot; prompts from Ask AI (⌘I) to find some.
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2">
-              {researchSuggestions.map((s) => (
-                <div key={s.id} className="rounded-[9px] border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2.5">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[13px] font-semibold text-brand-dark">{s.title}</div>
-                      <div className="mt-0.5 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.04em] text-text-3">
-                        <span className="rounded bg-white px-1.5 py-0.5 font-medium text-text-2">{s.category ? "Driving force" : "Key force"}</span>
-                        <span>{s.category ?? s.actor_type}</span>
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">{s.body}</div>
-                      {s.citation_url && (
-                        <a href={s.citation_url} target="_blank" rel="noreferrer" className="mt-1 block truncate text-[11px] text-brand-orange">
-                          {s.citation_title || s.citation_url}
-                        </a>
-                      )}
-                    </div>
-                    <div className="flex flex-shrink-0 gap-1.5">
-                      <Button variant="ghost" size="sm" onClick={() => onDismissResearchSuggestion(s.id)} disabled={workingSuggestionId === s.id}>
-                        Dismiss
-                      </Button>
-                      <Button variant="primary" size="sm" onClick={() => onConfirmResearchSuggestion(s.id)} disabled={workingSuggestionId === s.id}>
-                        Confirm
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )
-        ) : tab === "signals" || tab === "events" ? (
-          <>
-            {suggestResult && (
-              <div className="mb-3.5 rounded-[10px] border border-border bg-[#F9FAFB] px-3 py-2 text-xs text-muted-foreground">
-                {suggestResult}
-              </div>
-            )}
-
-            {/* STEEP filter pills — apply to both the Signals and Events tabs; Events filters by
-                eventCategory()'s fallback-to-first-linked-signal when an event has no category. */}
-            <div className="mb-[18px] flex flex-wrap gap-2">
-              {CATEGORIES.map((c) => {
-                const active = filter === c;
-                return (
-                  <button
-                    key={c}
-                    onClick={() => setFilter(c)}
-                    className={cn("rounded-full border px-3 py-[5px] text-xs font-medium", active ? PILL[c].active : PILL[c].inactive)}
-                  >
-                    {c}
-                  </button>
-                );
-              })}
-            </div>
-
-            {tab === "events" && (
-              <div className="mb-[18px] flex flex-wrap gap-2">
-                {(["All", "Observed", "Possible", "Wildcards"] as const).map((s) => {
-                  const active = statusFilter === s;
-                  return (
-                    <button
-                      key={s}
-                      onClick={() => setStatusFilter(s)}
-                      className={cn(
-                        "rounded-full border px-3 py-[5px] text-xs font-medium",
-                        active ? "border-brand-dark bg-brand-dark text-white" : "border-border bg-white text-muted-foreground"
-                      )}
-                    >
-                      {s}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            {tab === "signals" ? (
-              <>
-                {store.signalsLoading && signals.length === 0 && (
-                  <div className="mb-3 text-center text-xs text-muted-foreground">Loading signals…</div>
-                )}
-                {!store.signalsLoading && unscoredCount > 0 && (
-                  <div className="mb-3.5 flex items-center justify-between rounded-[10px] border border-border bg-[#F9FAFB] px-3.5 py-2.5">
-                    <span className="text-xs text-muted-foreground">
-                      {unscoredCount} signal{unscoredCount === 1 ? "" : "s"} not yet scored.
-                    </span>
-                    <Button variant="ghost" size="sm" onClick={onScoreUnscored} disabled={suggesting}>
-                      {suggesting ? "Scoring…" : "Score now"}
+                  <div className="flex flex-shrink-0 gap-1.5">
+                    <Button variant="ghost" size="sm" onClick={() => onDismissResearchSuggestion(s.id)} disabled={workingSuggestionId === s.id}>
+                      Dismiss
+                    </Button>
+                    <Button variant="primary" size="sm" onClick={() => onConfirmResearchSuggestion(s.id)} disabled={workingSuggestionId === s.id}>
+                      Confirm
                     </Button>
                   </div>
-                )}
-                <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))" }}>
-                  {sortedFiltered.map((s) => {
-                    const key = `sig:${s.id}`;
-                    return (
-                      <FlipCard
-                        key={s.id}
-                        id={key}
-                        flipped={!!flipped[key]}
-                        focused={focusKey === key}
-                        onFlip={() => toggleFlip(key)}
-                        front={
-                          <SignalCard
-                            s={s}
-                            events={events}
-                            onFlip={() => toggleFlip(key)}
-                            onAddToMatrix={() => onAddToMatrix(s)}
-                            addingToMatrix={addingToMatrixId === s.id}
-                            addToMatrixError={addToMatrixError && addToMatrixError.id === s.id ? addToMatrixError.message : null}
-                            onDelete={() => onDeleteSignal(s.id)}
-                          />
-                        }
-                        back={
-                          <SignalCardBack
-                            sig={s}
-                            events={events}
-                            onFlip={() => toggleFlip(key)}
-                            onJump={(eventId) => jump("events", `evt:${eventId}`)}
-                            onDetails={() => {
-                              setSelected(s);
-                              setDetailTab("timeline");
-                            }}
-                          />
-                        }
-                      />
-                    );
-                  })}
                 </div>
-              </>
-            ) : (
-              <div className="flex flex-col gap-6">
-                {store.eventsLoading && events.length === 0 && (
-                  <div className="text-center text-xs text-muted-foreground">Loading events…</div>
-                )}
-                {(
-                  [
-                    { key: "Observed" as const, label: "Observed", subtitle: "Evidence that a force is moving" },
-                    {
-                      key: "Possible" as const,
-                      label: "Possible",
-                      subtitle: "Future events to watch — likelihood is per event, never per scenario",
-                    },
-                    { key: "Wildcards" as const, label: "Wildcards", subtitle: "Low-likelihood, high-impact — kept off the matrix" },
-                  ] as const
-                )
-                  .filter((group) => statusFilter === "All" || statusFilter === group.key)
-                  .map((group) => {
-                    const filteredByCategory = filter === "All" ? events : events.filter((e) => eventCategory(e, signals) === filter);
-                    const items =
-                      group.key === "Wildcards"
-                        ? filteredByCategory.filter((e) => e.wildcard)
-                        : filteredByCategory.filter((e) => !e.wildcard && e.status === group.key.toLowerCase());
-                    return (
-                      <div key={group.key}>
-                        <div className="mb-0.5 flex items-baseline gap-2">
-                          <span className="whitespace-nowrap text-[13.5px] font-semibold text-brand-dark">
-                            {group.label} · {items.length}
-                          </span>
-                          <span className="text-xs text-muted-foreground">{group.subtitle}</span>
-                        </div>
-                        <div className="mb-3 border-b border-border" />
-                        {items.length === 0 ? (
-                          <div className="rounded-[10px] border border-dashed border-border p-4 text-center text-xs text-muted-foreground">
-                            No {group.label.toLowerCase()} events in this filter.
-                          </div>
-                        ) : (
-                          <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))" }}>
-                            {items.map((ev) => {
-                              const key = `evt:${ev.id}`;
-                              return (
-                                <EventCard
-                                  key={ev.id}
-                                  ev={ev}
-                                  signals={signals}
-                                  flipped={!!flipped[key]}
-                                  focused={focusKey === key}
-                                  onFlip={() => toggleFlip(key)}
-                                  onJump={(signalId) => jump("forces", `sig:${signalId}`)}
-                                />
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
               </div>
-            )}
-          </>
-        ) : null}
-      </div>
-
-      {/* Detail modal */}
-      <Dialog
-        open={!!selected}
-        onOpenChange={(o) => {
-          if (!o) {
-            setSelected(null);
-            setEditOpen(false);
-            setDetailTab("overview");
-          }
-        }}
-      >
-        {selected && !editOpen && (
-          <DialogContent className="max-w-[540px] rounded-2xl p-6">
-            <div className="mb-3 flex items-center justify-between">
-              <Chip category={selected.category} />
-              <Button variant="ghost" size="sm" onClick={onStartEdit}>
-                Edit
-              </Button>
-            </div>
-            <DialogTitle className="mb-1.5 text-xl font-semibold tracking-[-0.01em]">{selected.title}</DialogTitle>
-            <div className="mb-3 flex gap-1 rounded-md bg-[#F3F4F6] p-0.5">
-              {(["overview", "timeline"] as const).map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setDetailTab(t)}
-                  className={cn(
-                    "flex-1 rounded-md px-2 py-1.5 text-xs font-medium capitalize",
-                    detailTab === t ? "bg-white text-brand-dark shadow-[0_1px_2px_rgba(15,23,42,0.08)]" : "text-muted-foreground"
-                  )}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-            {detailTab === "timeline" ? (
-              <>
-                <div className="mb-[18px]">
-                  <SignalEventTimeline sigId={selected.id} events={events} signals={signals} />
-                </div>
-                <Button variant="ghost" className="w-full" onClick={() => setSelected(null)}>
-                  Close
-                </Button>
-              </>
-            ) : (
-              <>
-                <div className="mb-3.5 font-mono text-[11.5px] text-text-3">SOURCE · {selected.source.toUpperCase()}</div>
-                <p className="mb-[18px] text-sm leading-[1.6] text-[#374151]">{selected.body}</p>
-                {selected.impact != null && selected.uncertainty != null ? (
-                  <div className="mb-[18px] grid grid-cols-2 gap-3">
-                    <div className="rounded-[10px] border border-border p-3">
-                      <div className="font-mono text-[10.5px] tracking-[0.06em] text-text-3">IMPACT</div>
-                      <div className="mt-1.5 flex items-center gap-1">
-                        <Stars value={selected.impact} size={14} />
-                        <span className="ml-1 text-[13px] font-semibold">{selected.impact}/5</span>
-                      </div>
-                    </div>
-                    <div className="rounded-[10px] border border-border p-3">
-                      <div className="font-mono text-[10.5px] tracking-[0.06em] text-text-3">UNCERTAINTY</div>
-                      <div className="mt-1.5">
-                        <span className={cn(BADGE_BASE, "text-[11px]", uncertaintyBadge(selected.uncertainty))}>{selected.uncertainty}</span>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="mb-[18px] rounded-[10px] border border-border p-3">
-                    <span className={cn(BADGE_BASE, "bg-[#F3F4F6] text-[#4B5563]")}>Not yet scored</span>
-                  </div>
-                )}
-                <div className="flex gap-2">
-                  <Button
-                    variant="primary"
-                    className="flex-1"
-                    onClick={() => {
-                      setSelected(null);
-                      navigate("/matrix");
-                    }}
-                  >
-                    Place on matrix →
-                  </Button>
-                  <Button variant="ghost" onClick={() => setSelected(null)}>
-                    Close
-                  </Button>
-                </div>
-              </>
-            )}
-          </DialogContent>
+            ))}
+          </div>
         )}
 
-        {selected && editOpen && (
-          <DialogContent className="max-w-[480px] rounded-2xl p-6">
-            <DialogTitle className="mb-4 text-lg font-semibold tracking-[-0.01em]">Edit signal</DialogTitle>
-            <div className="flex flex-col gap-3.5">
-              <div>
-                <Label htmlFor="edit-title" className="mb-1.5 block text-xs">
-                  Title
-                </Label>
-                <Input id="edit-title" autoFocus value={editForm.title} onChange={(e) => setEditForm((f) => ({ ...f, title: e.target.value }))} />
-              </div>
-              <div>
-                <Label htmlFor="edit-body" className="mb-1.5 block text-xs">
-                  Description
-                </Label>
-                <Textarea
-                  id="edit-body"
-                  rows={3}
-                  value={editForm.body}
-                  onChange={(e) => setEditForm((f) => ({ ...f, body: e.target.value }))}
-                  className="min-h-[70px]"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="mb-1.5 block text-xs">STEEP category</Label>
-                  <Select value={editForm.category} onValueChange={(v) => setEditForm((f) => ({ ...f, category: v as SteepCategory }))}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {STEEP_CATEGORIES.map((c) => (
-                        <SelectItem key={c} value={c}>
-                          {c}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label htmlFor="edit-source" className="mb-1.5 block text-xs">
-                    Source
-                  </Label>
-                  <Input id="edit-source" value={editForm.source} onChange={(e) => setEditForm((f) => ({ ...f, source: e.target.value }))} />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="mb-1.5 block text-xs">Impact</Label>
-                  <div className="flex h-9 items-center">
-                    <Stars value={editForm.impact} size={16} onChange={(v) => setEditForm((f) => ({ ...f, impact: v }))} />
+        {scoreProposals.length > 0 && (
+          <div className="flex flex-col gap-3.5 rounded-xl border border-[#FDE68A] bg-[#FFFBEB] p-3.5">
+            <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">Scores</span>
+            {Object.entries(
+              scoreProposals.reduce<Record<string, SignalScoreProposalRow[]>>((acc, p) => {
+                (acc[p.batch_id] ??= []).push(p);
+                return acc;
+              }, {})
+            ).map(([batchId, rows]) => (
+              <div key={batchId} className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">
+                    {rows[0].dimension === "impact" ? "Impact" : "Uncertainty"} proposals · {rows.length}
+                  </span>
+                  <div className="flex gap-1.5">
+                    <Button variant="ghost" size="sm" onClick={() => onDismissAllInBatch(batchId)} disabled={workingBatchId === batchId}>
+                      Dismiss all
+                    </Button>
+                    <Button variant="primary" size="sm" onClick={() => onConfirmAllInBatch(batchId)} disabled={workingBatchId === batchId}>
+                      Confirm all
+                    </Button>
                   </div>
                 </div>
-                <div>
-                  <Label className="mb-1.5 block text-xs">Uncertainty</Label>
-                  <div className="grid grid-cols-3 gap-0.5 rounded-md bg-[#F3F4F6] p-0.5">
-                    {(["Low", "Medium", "High"] as const).map((u) => (
-                      <button
-                        key={u}
-                        onClick={() => setEditForm((f) => ({ ...f, uncertainty: u }))}
+                <div className="flex flex-col gap-1.5">
+                  {rows.map((p) => {
+                    const signal = signals.find((s) => s.id === p.signal_id);
+                    return (
+                      <div
+                        key={p.id}
                         className={cn(
-                          "rounded-md border-0 px-2 py-1.5 text-xs font-medium",
-                          editForm.uncertainty === u ? "bg-white font-semibold text-brand-dark shadow-[0_1px_2px_rgba(15,23,42,0.08)]" : "bg-transparent text-muted-foreground"
+                          "rounded-[9px] border px-3 py-2 text-xs",
+                          p.low_confidence || p.disagrees_with_user_classification ? "border-[#FDE68A] bg-white" : "border-border bg-white"
                         )}
                       >
-                        {u}
-                      </button>
-                    ))}
-                  </div>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="truncate text-[13px] font-semibold text-brand-dark">{signal?.title ?? "Unknown signal"}</span>
+                              <span className={cn(BADGE_BASE, "bg-[#F3F4F6] text-text-2")}>
+                                {p.dimension === "impact" ? `Impact ${p.proposed_impact}` : p.proposed_uncertainty}
+                              </span>
+                              {p.low_confidence && <span className={cn(BADGE_BASE, "bg-brand-orangeLight text-brand-orange700")}>Low confidence</span>}
+                              {p.disagrees_with_user_classification && (
+                                <span className={cn(BADGE_BASE, "bg-brand-orangeLight text-brand-orange700")}>Disagrees with you</span>
+                              )}
+                            </div>
+                            <p className="mt-1 text-muted-foreground">{p.rationale}</p>
+                            {p.disagrees_with_user_classification && <p className="mt-0.5 text-brand-orange700">{p.disagrees_with_user_classification}</p>}
+                          </div>
+                          <div className="flex flex-shrink-0 gap-1.5">
+                            <Button variant="ghost" size="sm" onClick={() => onDismissScoreProposal(p.id)} disabled={workingProposalId === p.id}>
+                              Dismiss
+                            </Button>
+                            <Button variant="primary" size="sm" onClick={() => onConfirmScoreProposal(p.id)} disabled={workingProposalId === p.id}>
+                              Confirm
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
-              {editError && (
-                <div className="rounded-[7px] border border-[#FECACA] bg-[#FEF2F2] px-[11px] py-2 text-[12.5px] text-[#EF4444]">{editError}</div>
-              )}
-              <div className="mt-1 flex gap-2">
-                <Button variant="primary" className="flex-1" onClick={onSaveEdit} disabled={editSubmitting}>
-                  {editSubmitting ? "Saving…" : "Save"}
-                </Button>
-                <Button variant="ghost" onClick={() => setEditOpen(false)}>
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
+            ))}
+          </div>
         )}
-      </Dialog>
-
-      <AddSignalModal open={addOpen} onOpenChange={setAddOpen} signals={signals} onAddSignal={onAddSignal} onAddEvent={onAddEvent} />
-
-      {/* Merge into Signal modal */}
-      <Dialog
-        open={mergeOpen}
-        onOpenChange={(o) => {
-          setMergeOpen(o);
-          if (!o) {
-            setMergeInsight(null);
-            setMergeError(null);
-          }
-        }}
-      >
-        {mergeInsight && (
-          <DialogContent className="max-w-[480px] rounded-2xl p-6">
-            <DialogTitle className="mb-3 text-lg font-semibold tracking-[-0.01em]">Merge into signal</DialogTitle>
-            <div className="mb-4 rounded-[10px] border border-border bg-[#F9FAFB] p-3 text-[12.5px] italic leading-[1.5] text-brand-dark">
-              &quot;{mergeInsight.quote || mergeInsight.text}&quot;
-            </div>
-
-            <div className="mb-3.5 grid grid-cols-2 gap-0.5 rounded-md bg-[#F3F4F6] p-0.5">
-              <button
-                onClick={() => setMergeMode("existing")}
-                disabled={signals.length === 0}
-                className={cn(
-                  "rounded-md border-0 px-2 py-1.5 text-xs font-medium disabled:opacity-40",
-                  mergeMode === "existing" ? "bg-white font-semibold text-brand-dark shadow-[0_1px_2px_rgba(15,23,42,0.08)]" : "bg-transparent text-muted-foreground"
-                )}
-              >
-                Merge into existing
-              </button>
-              <button
-                onClick={() => setMergeMode("new")}
-                className={cn(
-                  "rounded-md border-0 px-2 py-1.5 text-xs font-medium",
-                  mergeMode === "new" ? "bg-white font-semibold text-brand-dark shadow-[0_1px_2px_rgba(15,23,42,0.08)]" : "bg-transparent text-muted-foreground"
-                )}
-              >
-                Create new signal
-              </button>
-            </div>
-
-            {mergeMode === "existing" ? (
-              <div className="flex flex-col gap-3.5">
-                <div>
-                  <Label className="mb-1.5 block text-xs">Signal</Label>
-                  <Select value={mergeTargetId} onValueChange={setMergeTargetId}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {signals.map((s) => (
-                        <SelectItem key={s.id} value={s.id}>
-                          {s.title}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                {mergeError && (
-                  <div className="rounded-[7px] border border-[#FECACA] bg-[#FEF2F2] px-[11px] py-2 text-[12.5px] text-[#EF4444]">
-                    {mergeError}
-                  </div>
-                )}
-                <div className="mt-1 flex gap-2">
-                  <Button variant="primary" className="flex-1" onClick={onMergeIntoExisting} disabled={mergeSubmitting}>
-                    {mergeSubmitting ? "Merging…" : "Merge"}
-                  </Button>
-                  <Button variant="ghost" onClick={() => setMergeOpen(false)}>
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-3.5">
-                <div>
-                  <Label htmlFor="merge-title" className="mb-1.5 block text-xs">
-                    Title
-                  </Label>
-                  <Input
-                    id="merge-title"
-                    autoFocus
-                    value={mergeForm.title}
-                    onChange={(e) => setMergeForm((f) => ({ ...f, title: e.target.value }))}
-                    placeholder="e.g. ASEAN ratifies the digital trade pact"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="merge-body" className="mb-1.5 block text-xs">
-                    Description
-                  </Label>
-                  <Textarea
-                    id="merge-body"
-                    rows={3}
-                    value={mergeForm.body}
-                    onChange={(e) => setMergeForm((f) => ({ ...f, body: e.target.value }))}
-                    className="min-h-[70px]"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label className="mb-1.5 block text-xs">
-                      STEEP category {categorySuggesting && <span className="font-normal normal-case text-text-3">— suggesting…</span>}
-                    </Label>
-                    <Select
-                      value={mergeForm.category}
-                      onValueChange={(v) => {
-                        categoryTouchedRef.current = true;
-                        setMergeForm((f) => ({ ...f, category: v as SteepCategory }));
-                      }}
-                      disabled={categorySuggesting}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {STEEP_CATEGORIES.map((c) => (
-                          <SelectItem key={c} value={c}>
-                            {c}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label htmlFor="merge-source" className="mb-1.5 block text-xs">
-                      Source
-                    </Label>
-                    <Input
-                      id="merge-source"
-                      value={mergeForm.source}
-                      onChange={(e) => setMergeForm((f) => ({ ...f, source: e.target.value }))}
-                    />
-                  </div>
-                </div>
-                {mergeError && (
-                  <div className="rounded-[7px] border border-[#FECACA] bg-[#FEF2F2] px-[11px] py-2 text-[12.5px] text-[#EF4444]">
-                    {mergeError}
-                  </div>
-                )}
-                <div className="mt-1 flex gap-2">
-                  <Button variant="primary" className="flex-1" onClick={onCreateFromInsight} disabled={mergeSubmitting}>
-                    {mergeSubmitting ? "Creating…" : "Create & merge"}
-                  </Button>
-                  <Button variant="ghost" onClick={() => setMergeOpen(false)}>
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-            )}
-          </DialogContent>
-        )}
-      </Dialog>
-    </div>
-  );
-}
-
-/* ─────────────────────────── Signal card ─────────────────────────── */
-// Kebab menu (Icons.MoreH → "Delete") matches the handoff mockup's decorative "..." affordance
-// (design/handoff/2026-07-24/.../page-signals.jsx) — same open/close-on-outside-click pattern
-// as page-projects.tsx's ProjectCard menu. Same immediate-delete behavior as before, just
-// relocated behind the menu instead of an always-visible trash icon.
-function SignalCard({
-  s,
-  events,
-  onFlip,
-  onAddToMatrix,
-  addingToMatrix,
-  addToMatrixError,
-  onDelete,
-}: {
-  s: Signal;
-  events: EventItem[];
-  onFlip: () => void;
-  onAddToMatrix: () => void;
-  addingToMatrix: boolean;
-  addToMatrixError: string | null;
-  onDelete: () => void;
-}) {
-  const [menuOpen, setMenuOpen] = React.useState(false);
-  const menuRef = React.useRef<HTMLDivElement>(null);
-
-  React.useEffect(() => {
-    if (!menuOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
-    };
-    window.addEventListener("mousedown", onDown);
-    return () => window.removeEventListener("mousedown", onDown);
-  }, [menuOpen]);
-
-  return (
-    <div
-      onClick={onFlip}
-      className="flex cursor-pointer flex-col gap-2 rounded-[10px] border border-border bg-white p-3.5 transition-[border,transform] duration-[120ms] hover:border-border-strong"
-    >
-      <div className="flex items-center justify-between">
-        <Chip category={s.category} />
-        <span className="font-mono text-[10.5px] text-text-3">{s.source}</span>
       </div>
-      <div className="text-sm font-semibold leading-[1.3] tracking-[-0.01em] text-brand-dark">{s.title}</div>
-      <div className="flex-1 text-[12.5px] leading-[1.5] text-muted-foreground">{s.body}</div>
-      {s.impact != null && s.uncertainty != null ? (
-        <div className="mt-1 flex items-center gap-2">
-          <span className="font-mono text-[11px] text-text-3">IMPACT</span>
-          <Stars value={s.impact} size={11} />
-          <span className={cn("ml-auto", BADGE_BASE, uncertaintyBadge(s.uncertainty))}>{s.uncertainty}</span>
-        </div>
-      ) : (
-        <div className="mt-1 flex items-center">
-          <span className={cn(BADGE_BASE, "bg-[#F3F4F6] text-[#4B5563]")}>Not yet scored</span>
+
+      {openEvent && (
+        <EventDrawer ev={openEvent} signals={signals} onClose={() => setOpenEventId(null)} onLink={onLinkEvent} onUnlink={onUnlinkEvent} onMarkHappened={onMarkHappened} />
+      )}
+
+      <AddEventModal
+        open={addEventOpen}
+        onOpenChange={setAddEventOpen}
+        signals={signals}
+        preset={addingEvent}
+        onSuggestForce={onSuggestForce}
+        onSubmit={onSubmitAddEvent}
+        onAdded={(ev) => showToast(ev.links.length > 0 ? "Event added." : "Added to the inbox.")}
+      />
+      <AddForceModal open={addingForce} onOpenChange={setAddingForce} onAdd={onAddForce} />
+
+      {toast && (
+        <div role="status" className="fixed bottom-5 left-5 z-[250] max-w-[420px] rounded-[10px] bg-brand-dark px-3.5 py-2.5 text-[13px] text-white shadow-[0_8px_24px_rgba(0,0,0,0.2)]">
+          {toast}
         </div>
       )}
-      <div className="flex items-center justify-between border-t border-[#F3F4F6] pt-2">
-        <EventCount sigId={s.id} events={events} />
-        <FlipHint label="EVENTS" />
-      </div>
-      <div className="flex items-center gap-1.5">
-        <Button
-          variant="soft"
-          size="sm"
-          className="flex-1"
-          disabled={addingToMatrix}
-          onClick={(e) => {
-            e.stopPropagation();
-            onAddToMatrix();
-          }}
-        >
-          {addingToMatrix ? "Adding…" : "+ Add to Matrix"}
-        </Button>
-        <div ref={menuRef} className="relative flex-shrink-0">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setMenuOpen((o) => !o);
-            }}
-            aria-label={`More options for ${s.title}`}
-            className="flex h-8 w-8 items-center justify-center rounded-md border-0 bg-transparent text-text-3 hover:bg-[#F5F5F5] hover:text-brand-dark"
-          >
-            <Icons.MoreH size={14} />
-          </button>
-          {menuOpen && (
-            <div
-              onClick={(e) => e.stopPropagation()}
-              className="slide-up absolute right-0 top-[calc(100%+4px)] z-30 w-32 rounded-[9px] border border-border bg-white p-[5px] shadow-[0_10px_28px_rgba(15,23,42,0.12)]"
-            >
-              <button
-                onClick={() => {
-                  setMenuOpen(false);
-                  onDelete();
-                }}
-                className="w-full rounded-md border-0 bg-transparent px-[9px] py-[7px] text-left text-[12.5px] text-[#EF4444] hover:bg-[#FEF2F2]"
-              >
-                Delete
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-      {addToMatrixError && <div className="text-[11px] text-[#DC2626]">{addToMatrixError}</div>}
     </div>
   );
 }

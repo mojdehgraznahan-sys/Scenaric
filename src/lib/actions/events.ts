@@ -10,7 +10,7 @@ import type { Database } from "@/lib/supabase/types";
 import type { SteepCategory } from "./signals";
 
 export type EventRow = Database["public"]["Tables"]["events"]["Row"];
-export type EventLink = { signalId: string; toward: string };
+export type EventLink = { signalId: string; side: "a" | "b" };
 export type EventWithLinks = EventRow & { links: EventLink[] };
 
 export async function listEventsWithLinks(projectId: string): Promise<EventWithLinks[]> {
@@ -20,13 +20,16 @@ export async function listEventsWithLinks(projectId: string): Promise<EventWithL
 
   const { data: links, error: linksError } = await supabase
     .from("event_signal_links")
-    .select("event_id, signal_id, toward")
+    .select("event_id, signal_id, side")
     .eq("project_id", projectId);
   if (linksError) throw linksError;
 
   const linksByEvent = new Map<string, EventLink[]>();
   for (const link of links) {
-    const entry = { signalId: link.signal_id, toward: link.toward };
+    // Pre-migration rows are backfilled side='b' in the DB itself (0038 migration) — the
+    // `?? "b"` here is only a defensive fallback for a row that somehow slipped through, not
+    // the primary backfill mechanism.
+    const entry: EventLink = { signalId: link.signal_id, side: (link.side as "a" | "b" | null) ?? "b" };
     const existing = linksByEvent.get(link.event_id);
     if (existing) existing.push(entry);
     else linksByEvent.set(link.event_id, [entry]);
@@ -76,7 +79,7 @@ export async function createEvent(input: {
   if (input.links.length > 0) {
     const { error: linkError } = await supabase
       .from("event_signal_links")
-      .insert(input.links.map((l) => ({ project_id: input.projectId, event_id: data.id, signal_id: l.signalId, toward: l.toward })));
+      .insert(input.links.map((l) => ({ project_id: input.projectId, event_id: data.id, signal_id: l.signalId, side: l.side })));
     if (linkError) throw linkError;
   }
 
@@ -119,6 +122,28 @@ export async function updateEvent(input: {
 export async function deleteEvent(id: string): Promise<void> {
   const supabase = createClient();
   const { error } = await supabase.from("events").delete().eq("id", id);
+  if (error) throw error;
+  revalidatePath("/signals");
+}
+
+// Signals Library v2 — the event drawer's "attach to a force"/"switch side" actions, and the
+// Inbox's "Group into forces" confirm flow (both new_force and attach proposals link events).
+// Upsert on (event_id, signal_id) since re-linking to the same force just changes its side.
+export async function linkEvent(input: { projectId: string; eventId: string; signalId: string; side: "a" | "b" }): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("event_signal_links")
+    .upsert(
+      { project_id: input.projectId, event_id: input.eventId, signal_id: input.signalId, side: input.side },
+      { onConflict: "event_id,signal_id" }
+    );
+  if (error) throw error;
+  revalidatePath("/signals");
+}
+
+export async function unlinkEvent(eventId: string, signalId: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase.from("event_signal_links").delete().eq("event_id", eventId).eq("signal_id", signalId);
   if (error) throw error;
   revalidatePath("/signals");
 }
