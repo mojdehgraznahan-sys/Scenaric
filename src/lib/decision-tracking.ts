@@ -26,6 +26,10 @@ export interface TrackedEventRow {
   forceId: string | null;
   forceTitle: string;
   pole: string;
+  // Raw a/b side of `pole` above — Monitoring/Strategy only ever show the resolved pole text,
+  // but the Home futures compass (compassPosition()) needs the raw letter to know which end
+  // of the axis force this event pulls toward.
+  side: "a" | "b" | null;
   supports: string[];
   currentLevel: LikelihoodLevel;
   history: HistoryEntry[];
@@ -115,6 +119,7 @@ export async function fetchTrackedEvents(supabase: SupabaseClient<Database>, pro
       forceId: link?.signalId ?? null,
       forceTitle: signal?.title ?? "(unlinked)",
       pole: link?.side === "a" ? (signal?.pole_a ?? "") : (signal?.pole_b ?? ""),
+      side: link?.side ?? null,
       supports: supportsByEvent.get(e.id) ?? [],
       currentLevel,
       history,

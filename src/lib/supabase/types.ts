@@ -33,13 +33,14 @@ export interface Database {
         Relationships: [];
       };
       profiles: {
-        Row: { id: string; org_id: string; name: string | null; email: string; role: string; created_at: string };
+        Row: { id: string; org_id: string; name: string | null; email: string; role: string; home_view: "setup" | "ceo" | null; created_at: string };
         Insert: {
           id: string;
           org_id: string;
           name?: string | null;
           email: string;
           role?: string;
+          home_view?: "setup" | "ceo" | null;
           created_at?: string;
         };
         Update: {
@@ -48,6 +49,7 @@ export interface Database {
           name?: string | null;
           email?: string;
           role?: string;
+          home_view?: "setup" | "ceo" | null;
           created_at?: string;
         };
         Relationships: [];

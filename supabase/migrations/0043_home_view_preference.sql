@@ -1,0 +1,11 @@
+-- Home CEO view / Setup view switch (design/2026-10-05/04-home-ceo-view/PROMPTS.md, Prompt 1):
+-- "Persist the choice per user (user_preferences.home_view...), server-side, not localStorage."
+--
+-- Deviates from the handoff's literal "create a user_preferences table": `profiles` (0001_schema.sql)
+-- is already exactly that — one row per user, primary-keyed on auth.users(id), with its own
+-- "update own profile" RLS policy keyed on auth.uid() (0003_rls.sql). Adding a column there
+-- reuses that existing row/policy instead of standing up a second one-column table for the
+-- same "this user's own settings" concern. Nullable: null means "no explicit choice yet" —
+-- the app computes the setup/ceo default itself (gated on whether the viewed project has a
+-- primary strategic option) rather than this migration guessing a default per existing user.
+alter table public.profiles add column home_view text check (home_view in ('setup', 'ceo'));

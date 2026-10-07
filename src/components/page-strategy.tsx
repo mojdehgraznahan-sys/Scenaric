@@ -19,10 +19,17 @@ import { listStrategicOptions, type StrategicOptionWithScores } from "@/lib/acti
 import { delta, levers, windowPoints, LIKELIHOOD_LEVELS, type LeversResult, type TrackedEvent } from "@/lib/decision-model";
 import { toTrackedEvent } from "@/lib/decision-tracking";
 import { draftRouteForTarget, type RouteDraftMove } from "@/lib/actions/ai-strategy-route";
-import { DcActionCard, DcBriefing, type ActionCardRow, type ScenarioLite } from "@/components/decision-ui";
-import type { Database } from "@/lib/supabase/types";
-
-type RouteMoveRow = Database["public"]["Tables"]["route_moves"]["Row"];
+import {
+  DcActionCard,
+  DcBriefing,
+  ROUTE_LANES as LANES,
+  ROUTE_HORIZONS as HORIZONS,
+  ROUTE_HORIZON_LABEL as HORIZON_LABEL,
+  ROUTE_MOVE_STATUS_STYLE as MOVE_STATUS_STYLE,
+  type ActionCardRow,
+  type RouteMoveRow,
+  type ScenarioLite,
+} from "@/components/decision-ui";
 
 const BADGE_BASE = "inline-flex items-center rounded px-[7px] py-0.5 text-[10px] font-semibold uppercase tracking-[0.04em]";
 
@@ -32,22 +39,6 @@ function riskBadge(risk: string | null) {
   if (risk === "High") return "bg-brand-orangeLight text-brand-orange700";
   return "bg-[#F3F4F6] text-muted-foreground";
 }
-
-const LANES: { id: RouteMoveRow["lane"]; name: string; sub: string }[] = [
-  { id: "noregret", name: "No-regret", sub: "Do now. Pays off in all four futures." },
-  { id: "shaping", name: "Shaping", sub: "Make the events that lead to the target more likely." },
-  { id: "hedge", name: "Hedges", sub: "Held in reserve. Triggered if another future gains ground." },
-];
-const HORIZONS: RouteMoveRow["horizon"][] = ["now", "2027", "2028", "2029_30"];
-const HORIZON_LABEL: Record<RouteMoveRow["horizon"], string> = { now: "Now", "2027": "2027", "2028": "2028", "2029_30": "2029–30" };
-
-const MOVE_STATUS_STYLE: Record<RouteMoveRow["status"], { bg: string; fg: string }> = {
-  active: { bg: "#ECFDF5", fg: "#065F46" },
-  planned: { bg: "#F3F4F6", fg: "#374151" },
-  held: { bg: "#F9FAFB", fg: "#6B7280" },
-  armed: { bg: "#FFFBEB", fg: "#B45309" },
-  paused: { bg: "#EFF6FF", fg: "#1D4ED8" },
-};
 
 export function PageStrategy() {
   const store = useStore();

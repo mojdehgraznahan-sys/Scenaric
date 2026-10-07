@@ -7,6 +7,7 @@
 // design/2026-10-05/02-monitoring/Monitoring Standalone.html's PageMonitoring, wired to real
 // data via useDecisions(projectId) instead of the mockup's window.FM_DECISIONS/DecisionStore.
 import * as React from "react";
+import { useSearchParams } from "next/navigation";
 import { Icons } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -47,6 +48,18 @@ export function PageMonitoring() {
   const { data, loading, actOnCard, reviewDiscovery } = useDecisions(projectId);
   const [filter, setFilter] = React.useState<Filter>("All");
   const [briefingOpen, setBriefingOpen] = React.useState(false);
+
+  // Deep link from Home's charts (design/2026-10-05/04-home-ceo-view/PROMPTS.md Prompt 2:
+  // "Each chart element links to its source event in Monitoring,
+  // /app/monitoring?event={id}") — scrolls to and briefly highlights that event's row once
+  // it's loaded, rather than leaving the query param a no-op.
+  const searchParams = useSearchParams();
+  const highlightEventId = searchParams.get("event");
+  React.useEffect(() => {
+    if (!highlightEventId || !data) return;
+    const el = document.getElementById(`dc-event-${highlightEventId}`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [highlightEventId, data]);
 
   const points = React.useMemo(() => windowPoints(), []);
   // Wildcards are tracked server-side like anything else once linked to a scenario, but don't
@@ -268,7 +281,15 @@ export function PageMonitoring() {
                 const latestScanChange = [...row.history].filter((h) => h.changedBy === "scan").sort((a, b) => b.observedAt.localeCompare(a.observedAt))[0];
                 const latestUserChange = !latestScanChange ? [...row.history].sort((a, b) => b.observedAt.localeCompare(a.observedAt))[0] : null;
                 return (
-                  <div key={row.eventId} className={cn("grid gap-x-3.5 gap-y-1.5 py-3", i > 0 && "border-t border-[#F3F4F6]")} style={{ gridTemplateColumns: "minmax(0,1fr) auto" }}>
+                  <div
+                    key={row.eventId}
+                    id={`dc-event-${row.eventId}`}
+                    className={cn("grid gap-x-3.5 gap-y-1.5 rounded-md py-3 transition-colors", i > 0 && "border-t border-[#F3F4F6]")}
+                    style={{
+                      gridTemplateColumns: "minmax(0,1fr) auto",
+                      ...(row.eventId === highlightEventId ? { background: "#FFF7ED", boxShadow: "0 0 0 1px #FED7AA" } : {}),
+                    }}
+                  >
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className="text-[13.5px] font-medium text-brand-dark">{row.title}</span>

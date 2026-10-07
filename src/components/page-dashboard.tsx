@@ -1,10 +1,17 @@
 "use client";
 
-// Home / Dashboard — faithful Tailwind/shadcn port of the handoff page-dashboard.jsx.
-// Store-driven for project identity (name/horizon/industry/lastEdited); KPIs, the 9-tile
-// stepsComplete tracker, and the News Feed are all fetched from GET /projects/:id/dashboard
-// and GET /projects/:id/news — real per-project data, not the seed.stats/seed.news demo
-// data this page used to read.
+// Home / Dashboard — faithful Tailwind/shadcn port of the handoff page-dashboard.jsx. Now the
+// "Setup view" half of page-home.tsx's PageHome switch (design/2026-10-05/04-home-ceo-view/
+// PROMPTS.md Prompt 1) — rendered standalone until a project has a strategy, after which CEO
+// view (page-home-v2.tsx) becomes the default. Store-driven for project identity (name/
+// horizon/industry/lastEdited); KPIs, the 9-tile stepsComplete tracker, and the News Feed are
+// all fetched from GET /projects/:id/dashboard and GET /projects/:id/news — real per-project
+// data, not the seed.stats/seed.news demo data this page used to read.
+//
+// The News Feed's old "+ Add to Signals" button is gone (Prompt 1, bullet 4) — new events now
+// come in only through Monitoring's daily-scan inbox, not an ad hoc per-article button here.
+// The underlying POST .../news/:id/add-to-signals route is untouched (not deleted — same grace-
+// period caution as 0042's indicators retirement), it's just no longer called from here.
 import * as React from "react";
 import { Icons } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
@@ -33,7 +40,6 @@ export function PageDashboard() {
 
   const [news, setNews] = React.useState<NewsItemRow[]>([]);
   const [unreadCount, setUnreadCount] = React.useState(0);
-  const [addingIds, setAddingIds] = React.useState<Set<string>>(new Set());
   // null = not loaded yet / fetch failed → each card falls back to its own static copy below,
   // never a blank card. An empty array (successful fetch, model judged nothing worth
   // surfacing) also falls back per-slot the same way.
@@ -76,33 +82,6 @@ export function PageDashboard() {
 
   const nextStepAction = recommendedActions?.find((a) => a.slot === "next_step") ?? null;
   const monitorAction = recommendedActions?.find((a) => a.slot === "monitor") ?? null;
-
-  const addToSignals = React.useCallback(
-    async (newsItemId: string) => {
-      if (!projectId) return;
-      setAddingIds((prev) => new Set(prev).add(newsItemId));
-      try {
-        const res = await fetch(`/api/projects/${projectId}/news/${newsItemId}/add-to-signals`, { method: "POST" });
-        if (!res.ok) throw new Error(`Request failed (${res.status}).`);
-        const result: { kind: "signal" | "event" } = await res.json();
-        setNews((prev) => prev.map((n) => (n.id === newsItemId ? { ...n, added_to_signals: true } : n)));
-        // Server actions have no window to dispatch from — this is the fm:*-updated push so the
-        // Signals page's store (events or signals) refreshes without a reload. See
-        // ai-news-items.ts's findMatchingPossibleEvent: a news item now resolves to either an
-        // existing possible event flipping to observed, or a brand-new signal.
-        window.dispatchEvent(new CustomEvent(result.kind === "event" ? "fm:events-updated" : "fm:signals-updated", { detail: { projectId } }));
-      } catch (err) {
-        console.error("[dashboard] failed to add news item to signals", err);
-      } finally {
-        setAddingIds((prev) => {
-          const next = new Set(prev);
-          next.delete(newsItemId);
-          return next;
-        });
-      }
-    },
-    [projectId]
-  );
 
   const tiles = STEP_LABELS.map((label, i) => ({
     label,
@@ -311,13 +290,6 @@ export function PageDashboard() {
                 >
                   {n.impact}
                 </span>
-                <button
-                  className="rounded-md px-2 py-1 text-[13px] font-medium text-brand-orange disabled:cursor-default disabled:text-text-3"
-                  disabled={n.added_to_signals || addingIds.has(n.id)}
-                  onClick={() => addToSignals(n.id)}
-                >
-                  {n.added_to_signals ? "Added" : addingIds.has(n.id) ? "Adding…" : "+ Add to Signals"}
-                </button>
               </div>
             ))
           )}

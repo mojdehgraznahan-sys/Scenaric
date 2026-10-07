@@ -21,11 +21,36 @@ import type { HistoryEntry } from "@/lib/decision-tracking";
 import type { DecisionsData } from "@/lib/actions/decisions";
 
 export type ActionCardRow = Database["public"]["Tables"]["action_cards"]["Row"];
+export type RouteMoveRow = Database["public"]["Tables"]["route_moves"]["Row"];
 
 export interface ScenarioLite {
   id: string;
   name: string;
   color: string | null;
+}
+
+// Route swimlane display constants — shared by Strategy's full swimlane and Home's miniature
+// one (design/2026-10-05/04-home-ceo-view/PROMPTS.md Prompt 2's "Route to {target} (mini)").
+export const ROUTE_LANES: { id: RouteMoveRow["lane"]; name: string; sub: string }[] = [
+  { id: "noregret", name: "No-regret", sub: "Do now. Pays off in all four futures." },
+  { id: "shaping", name: "Shaping", sub: "Make the events that lead to the target more likely." },
+  { id: "hedge", name: "Hedges", sub: "Held in reserve. Triggered if another future gains ground." },
+];
+export const ROUTE_HORIZONS: RouteMoveRow["horizon"][] = ["now", "2027", "2028", "2029_30"];
+export const ROUTE_HORIZON_LABEL: Record<RouteMoveRow["horizon"], string> = { now: "Now", "2027": "2027", "2028": "2028", "2029_30": "2029–30" };
+
+export const ROUTE_MOVE_STATUS_STYLE: Record<RouteMoveRow["status"], { bg: string; fg: string }> = {
+  active: { bg: "#ECFDF5", fg: "#065F46" },
+  planned: { bg: "#F3F4F6", fg: "#374151" },
+  held: { bg: "#F9FAFB", fg: "#6B7280" },
+  armed: { bg: "#FFFBEB", fg: "#B45309" },
+  paused: { bg: "#EFF6FF", fg: "#1D4ED8" },
+};
+
+// Same fallback discipline as resolveEvidenceTitleForEvent below (never a raw id) — Home's
+// "Pulling off course: {event}" line needs this too.
+export function titleForTrackedEvent(tracked: { eventId: string; title: string }[], eventId: string): string {
+  return tracked.find((t) => t.eventId === eventId)?.title ?? "an untitled event";
 }
 
 const dcMono: React.CSSProperties = { fontFamily: "var(--font-mono)", fontSize: 11, color: "#9CA3AF", letterSpacing: ".02em" };
@@ -370,5 +395,5 @@ export function DcBriefing({ onClose, projectName, data, scenarios }: DcBriefing
 }
 
 function resolveEvidenceTitleForEvent(data: DecisionsData, eventId: string): string {
-  return data.tracked.find((t) => t.eventId === eventId)?.title ?? "an untitled event";
+  return titleForTrackedEvent(data.tracked, eventId);
 }
