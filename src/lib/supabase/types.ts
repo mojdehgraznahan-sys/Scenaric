@@ -643,6 +643,7 @@ export interface Database {
           year: number | null;
           strength: string | null;
           signal_id: string | null;
+          event_id: string | null;
           created_at: string;
         };
         Insert: {
@@ -656,6 +657,7 @@ export interface Database {
           year?: number | null;
           strength?: string | null;
           signal_id?: string | null;
+          event_id?: string | null;
           created_at?: string;
         };
         Update: {
@@ -669,6 +671,7 @@ export interface Database {
           year?: number | null;
           strength?: string | null;
           signal_id?: string | null;
+          event_id?: string | null;
           created_at?: string;
         };
         Relationships: [];
@@ -835,6 +838,9 @@ export interface Database {
           citations: unknown;
           generated_at: string;
           created_at: string;
+          state: "not_yet" | "approaching" | "hit" | null;
+          hit_at: string | null;
+          source_event_id: string | null;
         };
         Insert: {
           id?: string;
@@ -847,6 +853,9 @@ export interface Database {
           citations?: unknown;
           generated_at?: string;
           created_at?: string;
+          state?: "not_yet" | "approaching" | "hit" | null;
+          hit_at?: string | null;
+          source_event_id?: string | null;
         };
         Update: {
           id?: string;
@@ -859,6 +868,9 @@ export interface Database {
           citations?: unknown;
           generated_at?: string;
           created_at?: string;
+          state?: "not_yet" | "approaching" | "hit" | null;
+          hit_at?: string | null;
+          source_event_id?: string | null;
         };
         Relationships: [];
       };
@@ -1387,8 +1399,433 @@ export interface Database {
         };
         Relationships: [];
       };
+      // ---- Decision layer (0042_decision_layer.sql) ----
+      event_likelihood_history: {
+        Row: {
+          id: string;
+          project_id: string;
+          event_id: string;
+          level: number;
+          observed_at: string;
+          source_title: string | null;
+          source_name: string | null;
+          source_url: string | null;
+          cite: string | null;
+          changed_by: "scan" | "user";
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          event_id: string;
+          level: number;
+          observed_at?: string;
+          source_title?: string | null;
+          source_name?: string | null;
+          source_url?: string | null;
+          cite?: string | null;
+          changed_by: "scan" | "user";
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          event_id?: string;
+          level?: number;
+          observed_at?: string;
+          source_title?: string | null;
+          source_name?: string | null;
+          source_url?: string | null;
+          cite?: string | null;
+          changed_by?: "scan" | "user";
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      event_scenario_links: {
+        Row: {
+          id: string;
+          project_id: string;
+          event_id: string;
+          scenario_id: string;
+          phase: "precursors" | "catalysts" | "first_order" | "second_order" | "realized";
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          event_id: string;
+          scenario_id: string;
+          phase: "precursors" | "catalysts" | "first_order" | "second_order" | "realized";
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          event_id?: string;
+          scenario_id?: string;
+          phase?: "precursors" | "catalysts" | "first_order" | "second_order" | "realized";
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      event_levers: {
+        Row: {
+          id: string;
+          project_id: string;
+          event_id: string;
+          lever: "influence" | "watch";
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          event_id: string;
+          lever: "influence" | "watch";
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          event_id?: string;
+          lever?: "influence" | "watch";
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      discovered_events: {
+        Row: {
+          id: string;
+          project_id: string;
+          title: string;
+          body: string | null;
+          source_name: string | null;
+          source_url: string | null;
+          found_at: string;
+          status: "observed" | "possible";
+          likelihood: "Low" | "Medium" | "High" | null;
+          proposed_force_id: string | null;
+          proposed_side: "a" | "b" | null;
+          proposed_scenarios: string[];
+          fits: boolean;
+          proposal: string | null;
+          dc_status: "pending" | "confirmed" | "sent_to_signals" | "rejected";
+          reviewed_by: string | null;
+          reviewed_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          title: string;
+          body?: string | null;
+          source_name?: string | null;
+          source_url?: string | null;
+          found_at?: string;
+          status?: "observed" | "possible";
+          likelihood?: "Low" | "Medium" | "High" | null;
+          proposed_force_id?: string | null;
+          proposed_side?: "a" | "b" | null;
+          proposed_scenarios?: string[];
+          fits: boolean;
+          proposal?: string | null;
+          dc_status?: "pending" | "confirmed" | "sent_to_signals" | "rejected";
+          reviewed_by?: string | null;
+          reviewed_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          title?: string;
+          body?: string | null;
+          source_name?: string | null;
+          source_url?: string | null;
+          found_at?: string;
+          status?: "observed" | "possible";
+          likelihood?: "Low" | "Medium" | "High" | null;
+          proposed_force_id?: string | null;
+          proposed_side?: "a" | "b" | null;
+          proposed_scenarios?: string[];
+          fits?: boolean;
+          proposal?: string | null;
+          dc_status?: "pending" | "confirmed" | "sent_to_signals" | "rejected";
+          reviewed_by?: string | null;
+          reviewed_at?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      action_cards: {
+        Row: {
+          id: string;
+          project_id: string;
+          urgency: "urgent" | "high" | "medium";
+          audience: "ceo" | "cso";
+          scenario_id: string | null;
+          trigger_kind:
+            | "target_catalyst_weakening"
+            | "blocker_rising"
+            | "influenceable_gaining"
+            | "event_threshold"
+            | "signpost_hit"
+            | "frame_check"
+            | "momentum_flip";
+          evidence_event_id: string | null;
+          evidence_discovery_id: string | null;
+          title: string;
+          body: string;
+          effect: unknown;
+          status: "pending" | "accepted" | "deferred" | "dismissed";
+          owner_id: string | null;
+          due_on: string | null;
+          decided_by: string | null;
+          decided_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          urgency: "urgent" | "high" | "medium";
+          audience: "ceo" | "cso";
+          scenario_id?: string | null;
+          trigger_kind:
+            | "target_catalyst_weakening"
+            | "blocker_rising"
+            | "influenceable_gaining"
+            | "event_threshold"
+            | "signpost_hit"
+            | "frame_check"
+            | "momentum_flip";
+          evidence_event_id?: string | null;
+          evidence_discovery_id?: string | null;
+          title: string;
+          body: string;
+          effect?: unknown;
+          status?: "pending" | "accepted" | "deferred" | "dismissed";
+          owner_id?: string | null;
+          due_on?: string | null;
+          decided_by?: string | null;
+          decided_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          urgency?: "urgent" | "high" | "medium";
+          audience?: "ceo" | "cso";
+          scenario_id?: string | null;
+          trigger_kind?:
+            | "target_catalyst_weakening"
+            | "blocker_rising"
+            | "influenceable_gaining"
+            | "event_threshold"
+            | "signpost_hit"
+            | "frame_check"
+            | "momentum_flip";
+          evidence_event_id?: string | null;
+          evidence_discovery_id?: string | null;
+          title?: string;
+          body?: string;
+          effect?: unknown;
+          status?: "pending" | "accepted" | "deferred" | "dismissed";
+          owner_id?: string | null;
+          due_on?: string | null;
+          decided_by?: string | null;
+          decided_at?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      strategy_targets: {
+        Row: {
+          project_id: string;
+          scenario_id: string;
+          chosen_by: string | null;
+          chosen_at: string;
+        };
+        Insert: {
+          project_id: string;
+          scenario_id: string;
+          chosen_by?: string | null;
+          chosen_at?: string;
+        };
+        Update: {
+          project_id?: string;
+          scenario_id?: string;
+          chosen_by?: string | null;
+          chosen_at?: string;
+        };
+        Relationships: [];
+      };
+      route_moves: {
+        Row: {
+          id: string;
+          project_id: string;
+          scenario_id: string;
+          lane: "noregret" | "shaping" | "hedge";
+          horizon: "now" | "2027" | "2028" | "2029_30";
+          title: string;
+          link_kind: "event" | "signpost" | "option";
+          link_id: string;
+          pushes: boolean;
+          status: "active" | "planned" | "held" | "armed" | "paused";
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          scenario_id: string;
+          lane: "noregret" | "shaping" | "hedge";
+          horizon: "now" | "2027" | "2028" | "2029_30";
+          title: string;
+          link_kind: "event" | "signpost" | "option";
+          link_id: string;
+          pushes?: boolean;
+          status?: "active" | "planned" | "held" | "armed" | "paused";
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          scenario_id?: string;
+          lane?: "noregret" | "shaping" | "hedge";
+          horizon?: "now" | "2027" | "2028" | "2029_30";
+          title?: string;
+          link_kind?: "event" | "signpost" | "option";
+          link_id?: string;
+          pushes?: boolean;
+          status?: "active" | "planned" | "held" | "armed" | "paused";
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      strategy_revisions: {
+        Row: {
+          id: string;
+          project_id: string;
+          since: string;
+          items: unknown;
+          status: "proposed" | "applied" | "dismissed";
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          since?: string;
+          items?: unknown;
+          status?: "proposed" | "applied" | "dismissed";
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          since?: string;
+          items?: unknown;
+          status?: "proposed" | "applied" | "dismissed";
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      briefings: {
+        Row: {
+          id: string;
+          project_id: string;
+          audience: "ceo" | "cso";
+          period_start: string;
+          period_end: string;
+          payload: unknown;
+          sent_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          audience: "ceo" | "cso";
+          period_start: string;
+          period_end: string;
+          payload?: unknown;
+          sent_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          audience?: "ceo" | "cso";
+          period_start?: string;
+          period_end?: string;
+          payload?: unknown;
+          sent_at?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      momentum_snapshots: {
+        Row: {
+          id: string;
+          project_id: string;
+          scenario_id: string;
+          taken_at: string;
+          score: number;
+          label: "Building" | "Edging up" | "Steady" | "Easing" | "Fading";
+          progress: number;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          scenario_id: string;
+          taken_at?: string;
+          score: number;
+          label: "Building" | "Edging up" | "Steady" | "Easing" | "Fading";
+          progress?: number;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          scenario_id?: string;
+          taken_at?: string;
+          score?: number;
+          label?: "Building" | "Edging up" | "Steady" | "Easing" | "Fading";
+          progress?: number;
+        };
+        Relationships: [];
+      };
+      scan_runs: {
+        Row: {
+          id: string;
+          project_id: string;
+          ran_at: string;
+          sources_scanned: number;
+          changes: number;
+          cards_created: number;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          ran_at?: string;
+          sources_scanned?: number;
+          changes?: number;
+          cards_created?: number;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          ran_at?: string;
+          sources_scanned?: number;
+          changes?: number;
+          cards_created?: number;
+        };
+        Relationships: [];
+      };
     };
     Views: {
+      event_likelihood_current: {
+        Row: Database["public"]["Tables"]["event_likelihood_history"]["Row"];
+        Relationships: [];
+      };
       // Adds derived `quadrant`/`settled_pole` on top of matrix_placements — see 0040's
       // `with (security_invoker = true)` comment for why this view is safe to query directly.
       matrix_placements_v: {

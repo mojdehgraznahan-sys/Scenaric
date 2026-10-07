@@ -1,592 +1,437 @@
 "use client";
 
-// Monitoring — leading indicators (Step 8, Build Plan §11). Real data throughout: the main
-// list + sparkline come from GET /projects/:id/indicators (indicators joined with their last 7
-// indicator_readings — real history, not the fake trend-shape sparkline the original design
-// mockup had), the alert banner from GET /projects/:id/indicators/alert-summary (real,
-// grounded rationale text, hidden entirely when nothing is in Alert), and "Add indicator" is a
-// real create flow (manual, or "Suggest with AI" against the existing generate endpoint).
+// Monitoring v2 (design/2026-10-05/02-monitoring/PROMPTS.md) — which future is arriving, what
+// moved it, and what to do about it. Replaces the old indicators-based page entirely (Phase 1
+// plan, Finding 1): indicators/indicator_readings stay in the DB untouched for the retirement
+// grace period, but nothing here reads them anymore. Reference:
+// design/2026-10-05/02-monitoring/Monitoring Standalone.html's PageMonitoring, wired to real
+// data via useDecisions(projectId) instead of the mockup's window.FM_DECISIONS/DecisionStore.
 import * as React from "react";
-import { useSearchParams } from "next/navigation";
 import { Icons } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 import { useNavigate } from "@/lib/use-navigate";
-import { createManualIndicator, type IndicatorWithReadings, type AlertIndicatorSummary } from "@/lib/actions/indicators";
-import type { Scenario } from "@/lib/types";
-import { Chip } from "@/components/chip";
-import { eventCategory } from "@/components/signals/pole";
-import { EventMeta } from "@/components/signals/spectrum";
+import { useDecisions } from "@/lib/use-decisions";
+import { delta, windowPoints, LIKELIHOOD_LEVELS, STORYLINE_PHASES, type StorylinePhase } from "@/lib/decision-model";
+import { toTrackedEvent, type TrackedEventRow } from "@/lib/decision-tracking";
+import { DcSpark, DcTrend, DcScenarioDots, DcActionCard, DcBriefing, type ScenarioLite } from "@/components/decision-ui";
+import { slPole } from "@/components/signals/pole";
+import { DEFAULT_COLUMN_LABELS } from "@/components/storyline/data";
+import type { ActionCardRow } from "@/components/decision-ui";
 
-// Same window-global toast convention page-narrative.tsx already uses (GlobalToast in
-// app-shell.tsx) — not the unrelated shadcn useToast() hook in ui/use-toast.ts.
-interface FmWindow extends Window {
-  FM_toast?: (opts: { message: string; actionText?: string; action?: string; duration?: number }) => void;
-}
+const PHASE_LABEL: Record<StorylinePhase, string> = {
+  precursors: DEFAULT_COLUMN_LABELS[0],
+  catalysts: DEFAULT_COLUMN_LABELS[1],
+  first_order: DEFAULT_COLUMN_LABELS[2],
+  second_order: DEFAULT_COLUMN_LABELS[3],
+  realized: DEFAULT_COLUMN_LABELS[4],
+};
 
-const GRID_COLS = "grid-cols-[minmax(260px,2.2fr)_1.2fr_90px_80px_74px_84px]";
+type Filter = "All" | "Changed" | "Helps target" | "Works against";
 
-function statusColor(st: "On track" | "Watch" | "Alert") {
-  if (st === "Alert") return { bg: "#FEF2F2", fg: "#EF4444", dot: "#EF4444" };
-  if (st === "Watch") return { bg: "#FFFBEB", fg: "#B45309", dot: "#F59E0B" };
-  return { bg: "#ECFDF5", fg: "#065F46", dot: "#10B981" };
-}
-
-function trendArrow(trend: "up" | "flat" | "down" | null) {
-  if (trend === "up") return "↑";
-  if (trend === "down") return "↓";
-  if (trend === "flat") return "→";
-  return "—";
-}
-
-// Real 7-day history, no library — value domain is exactly {0,1,2} (On track/Watch/Alert
-// ordinal, see indicators-monitoring.ts's STATUS_ORDINAL), so this deliberately renders as a
-// discrete 3-level staircase rather than a smoothed line — an honest rendering of a genuinely
-// discrete signal, not a display bug.
-const SPARK_W = 64;
-const SPARK_H = 20;
-const SPARK_PAD = 3;
-
-function Sparkline({ readings, color }: { readings: { date: string; value: number }[]; color: string }) {
-  if (readings.length === 0) return <span className="text-[11.5px] text-text-3">—</span>;
-
-  const y = (v: number) => SPARK_PAD + (SPARK_H - 2 * SPARK_PAD) - (v / 2) * (SPARK_H - 2 * SPARK_PAD);
-  const x = (i: number, n: number) => (n <= 1 ? SPARK_W / 2 : SPARK_PAD + (i / (n - 1)) * (SPARK_W - 2 * SPARK_PAD));
-
-  if (readings.length === 1) {
-    return (
-      <svg width={SPARK_W} height={SPARK_H} viewBox={`0 0 ${SPARK_W} ${SPARK_H}`} role="img" aria-label="1 day of history">
-        <circle cx={x(0, 1)} cy={y(readings[0].value)} r={2} fill={color} />
-      </svg>
-    );
-  }
-
-  const points = readings.map((r, i) => `${x(i, readings.length)},${y(r.value)}`).join(" ");
-  const last = readings[readings.length - 1];
-  return (
-    <svg width={SPARK_W} height={SPARK_H} viewBox={`0 0 ${SPARK_W} ${SPARK_H}`} role="img" aria-label={`${readings.length} days of history`}>
-      <polyline points={points} fill="none" stroke={color} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx={x(readings.length - 1, readings.length)} cy={y(last.value)} r={2} fill={color} />
-    </svg>
-  );
+function formatLastScan(ranAt: string): string {
+  return new Date(ranAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 export function PageMonitoring() {
   const store = useStore();
   const navigate = useNavigate();
   const projectId = store.activeProjectId;
-  const scenarios = store.scenarios;
-  const activeScenarios = React.useMemo(() => scenarios.filter((s) => !s.archived), [scenarios]);
-  const events = store.events;
-  const signals = store.signals;
+  const scenarios = React.useMemo(() => store.scenarios.filter((s) => !s.archived), [store.scenarios]);
+  const scenariosLite: ScenarioLite[] = React.useMemo(() => scenarios.map((s) => ({ id: s.id, name: s.name, color: s.color })), [scenarios]);
+  const scenarioById = React.useMemo(() => new Map(scenarios.map((s) => [s.id, s])), [scenarios]);
+  const eventById = React.useMemo(() => new Map(store.events.map((e) => [e.id, e])), [store.events]);
+  const signalById = React.useMemo(() => new Map(store.signals.map((s) => [s.id, s])), [store.signals]);
 
-  // "Track indicators" on the Narrative page generates for one scenario, persists it for
-  // real, then lands here as /monitoring?scenarioId={id} to pre-filter to it.
-  const searchParams = useSearchParams();
-  const scenarioIdParam = searchParams.get("scenarioId");
+  const { data, loading, actOnCard, reviewDiscovery } = useDecisions(projectId);
+  const [filter, setFilter] = React.useState<Filter>("All");
+  const [briefingOpen, setBriefingOpen] = React.useState(false);
 
-  const [indicators, setIndicators] = React.useState<IndicatorWithReadings[]>([]);
-  const [loading, setLoading] = React.useState(false);
-  const [statusFilter, setStatusFilter] = React.useState("All");
-  const [scenarioFilter, setScenarioFilter] = React.useState<string | null>(scenarioIdParam);
-  const [alerts, setAlerts] = React.useState<AlertIndicatorSummary[]>([]);
-  const [addOpen, setAddOpen] = React.useState(false);
+  const points = React.useMemo(() => windowPoints(), []);
+  // Wildcards are tracked server-side like anything else once linked to a scenario, but don't
+  // belong in the main list (handoff Prompt 2, edge case) — split them out here using the real
+  // events list already loaded by useStore(), rather than adding an is_wildcard column to
+  // TrackedEventRow just for this one filter.
+  const { mainTracked, wildcardTracked } = React.useMemo(() => {
+    const main: TrackedEventRow[] = [];
+    const wild: TrackedEventRow[] = [];
+    for (const t of data?.tracked ?? []) (eventById.get(t.eventId)?.wildcard ? wild : main).push(t);
+    return { mainTracked: main, wildcardTracked: wild };
+  }, [data?.tracked, eventById]);
 
-  // Ask AI drawer scoping (ask-ai.tsx's context="monitoring" branch) — "Explain this
-  // indicator's status" needs the currently-selected row; cleared on unmount so the drawer's
-  // task correctly disables again once nothing is selected.
-  React.useEffect(() => {
-    return () => store.setMonitoringAskAiContext(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const modeled = React.useMemo(() => mainTracked.map((row) => ({ row, model: toTrackedEvent(row, points) })), [mainTracked, points]);
+  const trackedById = React.useMemo(() => new Map(mainTracked.map((t) => [t.eventId, t])), [mainTracked]);
 
-  const onRowClick = (indicator: IndicatorWithReadings) => {
-    const current = store.monitoringAskAiContext?.selectedIndicator;
-    store.setMonitoringAskAiContext(current?.id === indicator.id ? null : { selectedIndicator: { id: indicator.id, name: indicator.name } });
+  if (!projectId) {
+    return <div className="flex-1 p-5 text-sm text-muted-foreground">Select a project to see Monitoring.</div>;
+  }
+  if (loading && !data) {
+    return <div className="flex-1 p-5 text-sm text-muted-foreground">Loading…</div>;
+  }
+  if (!data) {
+    return <div className="flex-1 p-5 text-sm text-muted-foreground">Couldn&apos;t load Monitoring. Try reloading.</div>;
+  }
+
+  if (mainTracked.length === 0 && wildcardTracked.length === 0) {
+    return (
+      <div className="scroll-y flex-1 overflow-y-auto p-5">
+        <div className="rounded-xl border border-border bg-card p-5 shadow-card">
+          <h2 className="m-0 text-lg font-semibold">Monitoring</h2>
+          <div className="mt-0.5 text-[13px] text-muted-foreground">Which future is arriving, what moved it, and what to do about it.</div>
+          <div className="mt-4 rounded-[10px] border border-dashed border-border p-5 text-center text-sm text-muted-foreground">
+            Monitoring starts once your storyline links events to scenarios.{" "}
+            <button onClick={() => navigate("/storyline")} className="font-semibold text-brand-orange700 underline">
+              Go to Storyline
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const target = data.targetScenarioId ? scenarioById.get(data.targetScenarioId) ?? null : null;
+  const health = data.targetScenarioId ? data.healthByScenario[data.targetScenarioId] : null;
+  const pending = data.actions.filter((a) => a.status === "pending");
+  const helps = (eventId: string) => (target ? (trackedById.get(eventId)?.supports.includes(target.id) ?? false) : false);
+
+  const rows = modeled
+    .filter(({ row, model }) => {
+      if (filter === "All") return true;
+      if (filter === "Changed") return delta(model) !== 0;
+      if (filter === "Helps target") return helps(row.eventId);
+      return !helps(row.eventId); // Works against
+    })
+    .sort((a, b) => Math.abs(delta(b.model) * b.model.impact) - Math.abs(delta(a.model) * a.model.impact));
+
+  const unfitDiscoveries = data.inbox.filter((n) => !n.fits && n.dc_status === "pending");
+
+  const toneColor = health ? ({ low: "#10B981", mid: "#F59E0B", high: "#EF4444" }[health.tone]) : "#9CA3AF";
+
+  const evidenceTitleFor = (card: ActionCardRow): string | null => {
+    if (card.evidence_event_id) return trackedById.get(card.evidence_event_id)?.title ?? null;
+    if (card.evidence_discovery_id) return data.inbox.find((d) => d.id === card.evidence_discovery_id)?.title ?? null;
+    return null;
   };
 
-  const toast = React.useCallback((message: string) => {
-    const w = window as FmWindow;
-    if (w.FM_toast) w.FM_toast({ message });
-  }, []);
+  const resolveDiscoveryForce = (forceId: string, side: "a" | "b" | null) => {
+    const signal = signalById.get(forceId);
+    if (!signal) return { forceTitle: "(unknown force)", poleText: "" };
+    return { forceTitle: signal.title, poleText: side ? slPole(signal, side) : signal.poleB };
+  };
 
-  const refreshIndicators = React.useCallback(async (id: string) => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/projects/${id}/indicators`);
-      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
-      setIndicators(await res.json());
-    } catch (err) {
-      console.error("[monitoring] failed to load indicators", err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const refreshAlerts = React.useCallback(async (id: string) => {
-    try {
-      const res = await fetch(`/api/projects/${id}/indicators/alert-summary`);
-      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
-      setAlerts(await res.json());
-    } catch (err) {
-      console.error("[monitoring] failed to load alert summary", err);
-    }
-  }, []);
-
-  React.useEffect(() => {
-    setScenarioFilter(scenarioIdParam);
-  }, [scenarioIdParam]);
-
-  React.useEffect(() => {
-    if (!projectId) return;
-    refreshIndicators(projectId);
-    refreshAlerts(projectId);
-  }, [projectId, refreshIndicators, refreshAlerts]);
-
-  const onCreated = React.useCallback(() => {
-    if (!projectId) return;
-    refreshIndicators(projectId);
-    refreshAlerts(projectId);
-  }, [projectId, refreshIndicators, refreshAlerts]);
-
-  const scenarioFiltered = scenarioFilter ? indicators.filter((i) => i.scenario_id === scenarioFilter) : indicators;
-  const filtered = statusFilter === "All" ? scenarioFiltered : scenarioFiltered.filter((i) => i.status === statusFilter);
-  const filterScenario = scenarioFilter ? scenarios.find((s) => s.id === scenarioFilter) : null;
-
-  const summary = [
-    { label: "All", count: scenarioFiltered.length, color: "text-brand-dark", dot: "#1E1B2E" },
-    { label: "Alert", count: scenarioFiltered.filter((i) => i.status === "Alert").length, color: "text-[#EF4444]", dot: "#EF4444" },
-    { label: "Watch", count: scenarioFiltered.filter((i) => i.status === "Watch").length, color: "text-[#F59E0B]", dot: "#F59E0B" },
-    { label: "On track", count: scenarioFiltered.filter((i) => i.status === "On track").length, color: "text-[#10B981]", dot: "#10B981" },
-  ];
+  const sectionHeader = (title: string, sub?: string, right?: React.ReactNode) => (
+    <div className="mb-2.5 flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <div className="text-sm font-semibold text-brand-dark">{title}</div>
+        {sub && <div className="mt-0.5 text-[12.5px] text-muted-foreground">{sub}</div>}
+      </div>
+      {right}
+    </div>
+  );
 
   return (
     <div className="scroll-y flex-1 overflow-y-auto p-5">
-      <div className="rounded-xl border border-border bg-card p-5 shadow-card">
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold">Monitoring</h2>
-            <div className="mt-0.5 text-[13px] text-muted-foreground">Leading indicators tell you which scenario is unfolding.</div>
-          </div>
-          <Button variant="primary" size="sm" onClick={() => setAddOpen(true)} disabled={!projectId}>
-            <Icons.Plus size={12} /> Add indicator
-          </Button>
-        </div>
-
-        {/* Alert summary — real, grounded rationale from the most recent grounded reading;
-            hidden entirely when nothing is in Alert, never a stale placeholder. */}
-        {alerts.length > 0 && (
-          <div className="mb-3.5 flex items-start gap-3 rounded-xl border border-[#FECACA] bg-[#FEF2F2] p-3.5">
-            <Icons.Bell size={16} stroke="#EF4444" className="mt-0.5 flex-shrink-0" />
-            <div className="flex-1">
-              <div className="mb-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.06em] text-[#991B1B]">
-                {alerts.length} indicator{alerts.length === 1 ? "" : "s"} in alert
+      <div className="flex flex-col gap-4">
+        {/* Header */}
+        <div className="rounded-xl border border-border bg-card p-5 shadow-card">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="m-0 text-lg font-semibold">Monitoring</h2>
+              <div className="mt-0.5 text-[13px] text-muted-foreground">Which future is arriving, what moved it, and what to do about it.</div>
+              <div className="mt-2 font-mono text-[11px] text-text-3">
+                {data.lastScan ? `Last scan ${formatLastScan(data.lastScan.ran_at)} · ${data.lastScan.sources_scanned} sources` : "First scan runs tonight at 06:00"}
               </div>
-              <ul className="m-0 flex list-none flex-col gap-1.5 p-0 text-[13px] leading-[1.55] text-[#7F1D1D]">
-                {alerts.map((a) => {
-                  const scenario = a.scenarioId ? scenarios.find((s) => s.id === a.scenarioId) : null;
-                  return (
-                    <li key={a.indicatorId}>
-                      <strong>{a.indicatorName}</strong>
-                      {scenario ? (
-                        <>
-                          {" → "}
-                          <strong>{scenario.name}</strong>
-                        </>
-                      ) : null}
-                      {": "}
-                      {a.rationale} <span className="text-[11px] text-[#991B1B]/70">(as of {a.asOfDate})</span>
-                    </li>
-                  );
-                })}
-              </ul>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setBriefingOpen(true)}>
+                <Icons.File size={12} /> Executive briefing
+              </Button>
+              <Button variant="primary" size="sm" onClick={() => navigate("/strategy")}>
+                {pending.length} actions in Strategy <Icons.ArrowRight size={12} />
+              </Button>
             </div>
           </div>
-        )}
 
-        {filterScenario && (
-          <div className="mb-3.5 flex items-center gap-2 rounded-[10px] border border-brand-orange100 bg-brand-orangeLight px-3.5 py-2.5 text-[12.5px] text-brand-orange700">
-            <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ background: filterScenario.color }} />
-            <span className="flex-1">
-              Showing indicators for <strong>{filterScenario.name}</strong>
-            </span>
-            <button
-              onClick={() => setScenarioFilter(null)}
-              className="flex-shrink-0 border-0 bg-transparent p-0 text-[12.5px] font-semibold text-brand-orange700 underline"
+          {/* Target banner */}
+          {target && health ? (
+            <div
+              className="mt-4 grid items-center gap-4 rounded-xl p-3.5"
+              style={{ gridTemplateColumns: "auto minmax(0,1fr) auto", border: `1px solid ${target.color}` }}
             >
-              Show all
-            </button>
-          </div>
-        )}
-
-        {/* Status summary */}
-        <div className="mb-[18px] grid grid-cols-4 gap-3">
-          {summary.map((s) => (
-            <button
-              key={s.label}
-              onClick={() => setStatusFilter(s.label)}
-              className={cn(
-                "rounded-[10px] bg-white text-left",
-                statusFilter === s.label ? "border-[1.5px] border-brand-dark px-3.5 py-[11px]" : "border border-border px-3.5 py-3"
-              )}
-            >
-              <div className="flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.06em] text-text-3">
-                <span className="h-1.5 w-1.5 rounded-full" style={{ background: s.dot }} />
-                {s.label}
+              <div>
+                <div className="font-mono text-[11px] text-text-3">Target future</div>
+                <div className="mt-1 flex items-center gap-2">
+                  <span className="h-[9px] w-[9px] rounded-full" style={{ background: target.color }} />
+                  <span className="text-[16px] font-semibold">{target.name}</span>
+                </div>
               </div>
-              <div className={cn("mt-1 text-[26px] font-semibold tracking-[-0.02em]", s.color)}>{s.count}</div>
-            </button>
-          ))}
-        </div>
-
-        {/* Indicator list */}
-        <div className="overflow-hidden rounded-xl border border-border">
-          <div
-            className={cn(
-              "grid border-b border-border bg-[#F9FAFB] px-3.5 py-2.5 font-mono text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground",
-              GRID_COLS
-            )}
-          >
-            <div>INDICATOR</div>
-            <div>SCENARIO</div>
-            <div className="text-center">STATUS</div>
-            <div className="text-center">TREND</div>
-            <div className="text-center">7-DAY</div>
-            <div className="text-center">GROUNDED</div>
-          </div>
-          {loading ? (
-            <div className="p-6 text-center text-sm text-muted-foreground">Loading…</div>
-          ) : filtered.length === 0 ? (
-            <div className="p-6 text-center text-sm text-muted-foreground">
-              No indicators yet — click &quot;Add indicator&quot; or generate some from a scenario&apos;s Narrative page (&quot;Track indicators&quot;).
+              <div className="text-[13px] leading-[1.55] text-[#374151]">
+                <b style={{ color: toneColor }}>{health.label}.</b> {health.gaining.length} supporting event{health.gaining.length === 1 ? "" : "s"} gaining,{" "}
+                {health.weakening.length} weakening
+                {health.weakening[0] ? ` (${trackedById.get(health.weakening[0].eventId)?.title ?? "an untitled event"})` : ""}.{" "}
+                {health.blockersRising.length} blocker{health.blockersRising.length === 1 ? "" : "s"} rising.
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => navigate("/strategy")}>
+                View route
+              </Button>
             </div>
           ) : (
-            filtered.map((ind, i) => {
-              const c = statusColor(ind.status);
-              const scenario = scenarios.find((s) => s.id === ind.scenario_id);
-              const isSelected = store.monitoringAskAiContext?.selectedIndicator?.id === ind.id;
-              return (
-                <div
-                  key={ind.id}
-                  onClick={() => onRowClick(ind)}
-                  title="Select for Ask AI"
-                  className={cn(
-                    "grid cursor-pointer items-center px-3.5 py-3 hover:bg-[#FAFAFA]",
-                    GRID_COLS,
-                    i < filtered.length - 1 && "border-b border-[#F3F4F6]",
-                    isSelected && "ring-2 ring-inset ring-brand-orange"
-                  )}
-                >
-                  <div>
-                    <div className="text-[13.5px] font-medium text-brand-dark">{ind.name}</div>
-                    {ind.note && <div className="mt-0.5 text-[11.5px] text-text-3">{ind.note}</div>}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full" style={{ background: scenario?.color || "#9CA3AF" }} />
-                    <span className="text-[12.5px] text-[#374151]">{scenario?.name || "—"}</span>
-                  </div>
-                  <div className="text-center">
-                    <span
-                      className="inline-flex items-center rounded px-[7px] py-0.5 text-[10px] font-semibold uppercase tracking-[0.04em]"
-                      style={{ background: c.bg, color: c.fg }}
-                    >
-                      {ind.status}
-                    </span>
-                  </div>
-                  <div className="text-center text-[13px] font-semibold" style={{ color: c.fg }}>
-                    {trendArrow(ind.trend)}
-                  </div>
-                  <div className="flex justify-center">
-                    <Sparkline readings={ind.readings} color={c.dot} />
-                  </div>
-                  <div className="text-center text-[11.5px] text-text-3">{ind.grounded_in ? "✓" : "—"}</div>
-                </div>
-              );
-            })
+            <div className="mt-4 rounded-[10px] border border-dashed border-border p-3.5 text-[13px] text-muted-foreground">
+              Choose a target future in{" "}
+              <button onClick={() => navigate("/strategy")} className="font-semibold text-brand-orange700 underline">
+                Strategy
+              </button>
+              .
+            </div>
           )}
         </div>
-      </div>
 
-      {/* Events — read-only visibility into the Signals page "Events" view (observed/possible/
-          wildcard), for situational awareness while reading indicators. Pure display: an
-          indicator already watching a given event (indicators.event_id) is surfaced when one
-          exists, but nothing here auto-creates an indicator from an event. */}
-      <div className="mt-4 rounded-xl border border-border bg-card p-5 shadow-card">
-        <div className="mb-3.5 flex items-center justify-between gap-2">
-          <div>
-            <h2 className="text-[15px] font-semibold">Events</h2>
-            <div className="mt-0.5 text-[12.5px] text-muted-foreground">
-              Past and possible events behind your signals — context while you read indicators.
-            </div>
-          </div>
-          <Button variant="ghost" size="sm" onClick={() => navigate("/signals")}>
-            View in Signals →
-          </Button>
-        </div>
-        {events.length === 0 ? (
-          <div className="rounded-[10px] border border-dashed border-border p-4 text-center text-xs text-muted-foreground">No events yet.</div>
-        ) : (
-          <div className="flex flex-col gap-1.5">
-            {events.map((ev) => {
-              const cat = eventCategory(ev, signals);
-              const watchedBy = ev.indicatorId ? indicators.find((i) => i.id === ev.indicatorId) : null;
+        {/* Scenario momentum */}
+        <div className="rounded-xl border border-border bg-card p-5 shadow-card">
+          {sectionHeader(
+            "Scenario momentum",
+            "Event changes over the last 12 weeks, rolled up into each future through its links. Momentum is relative evidence, not probability."
+          )}
+          <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))" }}>
+            {scenarios.map((s) => {
+              const m = data.momentumByScenario[s.id];
+              const prog = data.progressByScenario[s.id] ?? 0;
+              const sps = data.signposts.filter((p) => p.scenario_id === s.id);
+              const isTarget = s.id === target?.id;
+              const arrow = m.score >= 2 ? "↑" : m.score <= -2 ? "↓" : "→";
               return (
-                <div key={ev.id} className="flex flex-wrap items-center gap-2.5 rounded-[9px] border border-border bg-white px-3 py-2">
-                  <Chip category={cat} />
-                  <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-brand-dark">{ev.title}</span>
-                  <EventMeta ev={ev} />
-                  {watchedBy ? (
-                    <span className="whitespace-nowrap text-[10.5px] text-text-3">Watched by: {watchedBy.name}</span>
-                  ) : (
-                    <span className="whitespace-nowrap text-[10.5px] text-text-3">No indicator watching this yet</span>
-                  )}
+                <div
+                  key={s.id}
+                  className="flex flex-col gap-2.5 rounded-xl p-3.5"
+                  style={{ border: isTarget ? `1.5px solid ${s.color}` : "1px solid #E5E7EB" }}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full" style={{ background: s.color }} />
+                    <span className="text-[13.5px] font-semibold">{s.name}</span>
+                    {isTarget && <span className="ml-auto font-mono text-[11px]" style={{ color: s.color }}>Target</span>}
+                  </div>
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="font-mono text-[22px] font-semibold text-brand-dark">{arrow}</span>
+                    <span className="text-[15px] font-semibold">{m.label}</span>
+                  </div>
+                  <div>
+                    <div className="grid grid-cols-5 gap-[3px]">
+                      {STORYLINE_PHASES.map((phase, i) => (
+                        <span key={phase} title={PHASE_LABEL[phase]} className="h-[5px] rounded-sm" style={{ background: i < prog ? s.color : "#F3F4F6" }} />
+                      ))}
+                    </div>
+                    <div className="mt-1 text-[11.5px] text-muted-foreground">
+                      Storyline: {prog ? `${PHASE_LABEL[STORYLINE_PHASES[prog - 1]]} reached` : "no phase complete yet"}
+                    </div>
+                  </div>
+                  <div className="text-[11.5px] text-muted-foreground">
+                    Signposts: {sps.filter((p) => p.state === "hit").length} hit · {sps.filter((p) => p.state === "approaching").length} approaching ·{" "}
+                    {sps.length} total
+                  </div>
+                  <div className="flex flex-col gap-[5px] border-t border-[#F3F4F6] pt-2">
+                    {m.contrib.slice(0, 2).map((c) => (
+                      <div key={c.event.eventId} className="grid items-start gap-1 text-[12px] leading-[1.4] text-[#374151]" style={{ gridTemplateColumns: "14px 1fr" }}>
+                        <span className="font-mono" style={{ color: c.score > 0 ? "#B45309" : "#1D4ED8" }}>
+                          {c.score > 0 ? "+" : "−"}
+                        </span>
+                        <span>{trackedById.get(c.event.eventId)?.title ?? "an untitled event"}</span>
+                      </div>
+                    ))}
+                    {!m.contrib.length && <div className="text-[12px] text-text-3">No supporting event moved.</div>}
+                  </div>
                 </div>
               );
             })}
           </div>
-        )}
-      </div>
+        </div>
 
-      <AddIndicatorDialog
-        open={addOpen}
-        onOpenChange={setAddOpen}
-        projectId={projectId}
-        scenarios={activeScenarios}
-        indicators={indicators}
-        onCreated={onCreated}
-        toast={toast}
-      />
+        <div className="grid items-start gap-4" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,420px),1fr))" }}>
+          {/* Tracked events */}
+          <div className="rounded-xl border border-border bg-card p-5 shadow-card">
+            {sectionHeader(
+              "Tracked events",
+              "Likelihood re-scored daily against the news. Every change cites its source.",
+              <div className="flex flex-wrap gap-1">
+                {(["All", "Changed", "Helps target", "Works against"] as const).map((f) => (
+                  <Button key={f} variant={filter === f ? "primary" : "ghost"} size="sm" className="px-2.5" aria-pressed={filter === f} onClick={() => setFilter(f)}>
+                    {f}
+                  </Button>
+                ))}
+              </div>
+            )}
+            <div className="flex flex-col">
+              {rows.map(({ row, model }, i) => {
+                const last = model.hist[model.hist.length - 1];
+                const d = delta(model);
+                const good = target ? (helps(row.eventId) ? d > 0 : d < 0) : null;
+                const latestScanChange = [...row.history].filter((h) => h.changedBy === "scan").sort((a, b) => b.observedAt.localeCompare(a.observedAt))[0];
+                const latestUserChange = !latestScanChange ? [...row.history].sort((a, b) => b.observedAt.localeCompare(a.observedAt))[0] : null;
+                return (
+                  <div key={row.eventId} className={cn("grid gap-x-3.5 gap-y-1.5 py-3", i > 0 && "border-t border-[#F3F4F6]")} style={{ gridTemplateColumns: "minmax(0,1fr) auto" }}>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[13.5px] font-medium text-brand-dark">{row.title}</span>
+                        {d !== 0 && last < 4 && good !== null && (
+                          <span className="text-[11px] font-semibold" style={{ color: good ? "#047857" : "#B91C1C" }}>
+                            {good ? "good for target" : "bad for target"}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-0.5 text-[11.5px] text-text-3">
+                        {row.forceTitle} → {row.pole} · {PHASE_LABEL[row.phase]}
+                      </div>
+                      {latestScanChange ? (
+                        <div className="mt-1.5 text-[12px] leading-[1.45] text-[#4B5563]">
+                          “{latestScanChange.cite}” <span className="text-text-3">{latestScanChange.sourceTitle}, {new Date(latestScanChange.observedAt).toLocaleDateString()}</span>
+                        </div>
+                      ) : latestUserChange ? (
+                        <div className="mt-1.5 text-[12px] leading-[1.45] text-[#4B5563]">Updated manually.</div>
+                      ) : null}
+                      <div className="mt-1.5">
+                        <DcScenarioDots scenarioIds={row.supports} targetId={target?.id ?? null} scenarios={scenariosLite} />
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end gap-1.5">
+                      <DcTrend hist={model.hist} />
+                      <DcSpark hist={model.hist} color={d === 0 ? "#9CA3AF" : good === false ? "#EF4444" : good === true ? "#10B981" : "#9CA3AF"} />
+                      <span aria-label={`${row.title}: ${LIKELIHOOD_LEVELS[model.hist[0]]} to ${LIKELIHOOD_LEVELS[last]} over 12 weeks`} className="font-mono text-[11px] text-[#374151]">
+                        {d ? `${LIKELIHOOD_LEVELS[model.hist[0]]} → ` : ""}
+                        {LIKELIHOOD_LEVELS[last]}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-4">
+            {/* Recommended actions */}
+            <div className="rounded-xl border border-border bg-card p-5 shadow-card">
+              {sectionHeader("Recommended actions", "Created when a threshold is crossed. Accepting one updates your route in Strategy.")}
+              <div className="flex flex-col gap-2.5">
+                {pending.slice(0, 3).map((a) => (
+                  <DcActionCard
+                    key={a.id}
+                    card={a}
+                    status="pending"
+                    compact
+                    evidenceTitle={evidenceTitleFor(a)}
+                    scenario={a.scenario_id ? scenariosLite.find((s) => s.id === a.scenario_id) ?? null : null}
+                    onAct={(card, status) => actOnCard(card.id, status, store.user.id || null)}
+                  />
+                ))}
+                {!pending.length && <div className="text-[13px] text-muted-foreground">All actions handled.</div>}
+                {pending.length > 3 && (
+                  <Button variant="ghost" size="sm" onClick={() => navigate("/strategy")}>
+                    +{pending.length - 3} more in Strategy
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {/* New events found */}
+            <div className="rounded-xl border border-border bg-card p-5 shadow-card">
+              {sectionHeader("New events found", "Developments not yet in your project. Nothing joins until you confirm it.")}
+              {unfitDiscoveries.length >= 2 && (
+                <div className="mb-2.5 rounded-[10px] border border-[#FDE68A] bg-[#FFFBEB] p-3">
+                  <div className="text-[12.5px] font-semibold text-[#92400E]">Your frame may be missing something</div>
+                  <div className="mt-[3px] text-[12.5px] leading-[1.5] text-[#78350F]">
+                    {unfitDiscoveries.length} new events fit no existing force. Add the force, then check in the Matrix whether it should become an axis.
+                  </div>
+                  <div className="mt-2 flex gap-1.5">
+                    <Button variant="ghost" size="sm" className="bg-white" onClick={() => navigate("/signals")}>
+                      Add force
+                    </Button>
+                    <Button variant="ghost" size="sm" className="bg-white" onClick={() => navigate("/matrix")}>
+                      Review axes
+                    </Button>
+                  </div>
+                </div>
+              )}
+              <div className="flex flex-col">
+                {data.inbox.map((n, i) => {
+                  const resolved = n.fits && n.proposed_force_id ? resolveDiscoveryForce(n.proposed_force_id, n.proposed_side) : null;
+                  return (
+                    <div key={n.id} className={cn("flex flex-col gap-1.5 py-2.5", i > 0 && "border-t border-[#F3F4F6]", n.dc_status === "rejected" && "opacity-50")}>
+                      <div className="text-[13px] font-medium leading-[1.4]">{n.title}</div>
+                      <div className="text-[11.5px] text-text-3">
+                        {n.source_name ?? "Unknown source"} · {new Date(n.found_at).toLocaleDateString()} · {n.likelihood ?? (n.status === "observed" ? "Observed" : "Medium")}
+                      </div>
+                      {resolved ? (
+                        <>
+                          <div className="text-[12px] text-[#374151]">
+                            Proposed: {resolved.forceTitle} → {resolved.poleText}
+                          </div>
+                          <DcScenarioDots scenarioIds={n.proposed_scenarios} targetId={target?.id ?? null} scenarios={scenariosLite} />
+                        </>
+                      ) : (
+                        <div className="text-[12px] text-[#92400E]">Fits no force. {n.proposal}</div>
+                      )}
+                      {n.dc_status === "pending" ? (
+                        <div className="flex gap-1.5">
+                          {n.fits ? (
+                            <Button variant="soft" size="sm" onClick={() => reviewDiscovery(n.id, "confirmed", store.user.id || null)}>
+                              Confirm
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="soft"
+                              size="sm"
+                              onClick={() => {
+                                reviewDiscovery(n.id, "sent_to_signals", store.user.id || null);
+                                navigate("/signals");
+                              }}
+                            >
+                              Send to Signals
+                            </Button>
+                          )}
+                          <Button variant="ghost" size="sm" className="border-none" onClick={() => reviewDiscovery(n.id, "rejected", store.user.id || null)}>
+                            Reject
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between text-[12px] text-muted-foreground">
+                          <span>{n.dc_status === "confirmed" ? "Added to project and tracked" : n.dc_status === "sent_to_signals" ? "Sent to Signals" : "Rejected"}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {data.inbox.length === 0 && <div className="text-[13px] text-muted-foreground">Nothing found yet.</div>}
+              </div>
+
+              {wildcardTracked.length > 0 && <WildcardsRow tracked={wildcardTracked} eventById={eventById} />}
+            </div>
+          </div>
+        </div>
+      </div>
+      {briefingOpen && <DcBriefing onClose={() => setBriefingOpen(false)} projectName={store.project.name} data={data} scenarios={scenariosLite} />}
     </div>
   );
 }
 
-type AddMode = "manual" | "ai";
-
-function AddIndicatorDialog({
-  open,
-  onOpenChange,
-  projectId,
-  scenarios,
-  indicators,
-  onCreated,
-  toast,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  projectId: string | null;
-  scenarios: Scenario[];
-  indicators: IndicatorWithReadings[];
-  onCreated: () => void;
-  toast: (message: string) => void;
-}) {
-  const [mode, setMode] = React.useState<AddMode>("manual");
-
-  const [name, setName] = React.useState("");
-  const [note, setNote] = React.useState("");
-  const [scenarioId, setScenarioId] = React.useState("none");
-  const [triggerCondition, setTriggerCondition] = React.useState("");
-  const [creating, setCreating] = React.useState(false);
-
-  const [aiScenarioId, setAiScenarioId] = React.useState("");
-  const [confirmReplace, setConfirmReplace] = React.useState(false);
-  const [generating, setGenerating] = React.useState(false);
-  const [aiNotice, setAiNotice] = React.useState<string | null>(null);
-
-  const resetAndClose = () => {
-    setName("");
-    setNote("");
-    setScenarioId("none");
-    setTriggerCondition("");
-    setAiScenarioId("");
-    setConfirmReplace(false);
-    setAiNotice(null);
-    setMode("manual");
-    onOpenChange(false);
-  };
-
-  const onCreateManual = async () => {
-    if (!projectId || !name.trim() || creating) return;
-    setCreating(true);
-    try {
-      await createManualIndicator({
-        projectId,
-        scenarioId: scenarioId === "none" ? null : scenarioId,
-        name: name.trim(),
-        note: note.trim() || null,
-        triggerCondition: triggerCondition.trim() || null,
-      });
-      toast("Indicator added");
-      onCreated();
-      resetAndClose();
-    } catch (err) {
-      console.error("[monitoring] failed to create indicator", err);
-      toast("Couldn't add that indicator — try again");
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  // generateIndicatorsForScenario deletes ALL existing indicators for the scenario before
-  // inserting new ones (ai-indicators.ts) — not additive. Checked client-side against the
-  // indicators already loaded on the page, no extra query needed.
-  const existingCountForAiScenario = aiScenarioId ? indicators.filter((i) => i.scenario_id === aiScenarioId).length : 0;
-  const isDestructive = existingCountForAiScenario > 0;
-
-  const onSuggestWithAi = async () => {
-    if (!projectId || !aiScenarioId || generating) return;
-    if (isDestructive && !confirmReplace) return;
-    setGenerating(true);
-    setAiNotice(null);
-    try {
-      const res = await fetch(`/api/projects/${projectId}/indicators/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scenarioId: aiScenarioId }),
-      });
-      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
-      const result: { sufficientEvidence: boolean; gap?: string | null; count: number } = await res.json();
-      if (!result.sufficientEvidence) {
-        setAiNotice(result.gap || "The model found insufficient evidence to generate indicators for this scenario.");
-        return;
-      }
-      toast(`Generated ${result.count} indicator(s)`);
-      onCreated();
-      resetAndClose();
-    } catch (err) {
-      console.error("[monitoring] indicator generate failed", err);
-      setAiNotice("Something went wrong generating indicators — try again.");
-    } finally {
-      setGenerating(false);
-    }
-  };
-
+// Collapsed "Wildcards · watched" row (handoff Prompt 2 edge case) — wildcards stay out of
+// the main Tracked events list but are still worth a glance at their early sign.
+function WildcardsRow({ tracked, eventById }: { tracked: { eventId: string; title: string }[]; eventById: Map<string, { precursor: string | null }> }) {
+  const [open, setOpen] = React.useState(false);
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && resetAndClose()}>
-      <DialogContent className="max-w-[480px] p-6">
-        <DialogTitle className="mb-3 text-[18px] font-semibold">Add indicator</DialogTitle>
-        <div className="mb-4 flex gap-2">
-          <Button variant={mode === "manual" ? "primary" : "ghost"} size="sm" onClick={() => setMode("manual")}>
-            Manual
-          </Button>
-          <Button variant={mode === "ai" ? "primary" : "ghost"} size="sm" onClick={() => setMode("ai")}>
-            <Icons.Sparkle size={12} /> Suggest with AI
-          </Button>
+    <div className="mt-2.5 border-t border-[#F3F4F6] pt-2.5">
+      <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-1.5 border-none bg-transparent p-0 text-left font-mono text-[11px] text-text-3">
+        <Icons.ArrowRight size={10} className={cn("transition-transform", open && "rotate-90")} />
+        Wildcards · watched ({tracked.length})
+      </button>
+      {open && (
+        <div className="mt-1.5 flex flex-col gap-1.5">
+          {tracked.map((t) => (
+            <div key={t.eventId} className="text-[12px] text-[#4B5563]">
+              <span className="font-medium">{t.title}</span>
+              {eventById.get(t.eventId)?.precursor && <span className="text-text-3"> · Early sign: {eventById.get(t.eventId)?.precursor}</span>}
+            </div>
+          ))}
         </div>
-
-        {mode === "manual" ? (
-          <div className="flex flex-col gap-3.5">
-            <div>
-              <Label htmlFor="ind-name" className="mb-1.5 block text-xs">
-                Name
-              </Label>
-              <Input id="ind-name" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. EU AI Act high-risk ruling published" />
-            </div>
-            <div>
-              <Label className="mb-1.5 block text-xs">Scenario</Label>
-              <Select value={scenarioId} onValueChange={setScenarioId}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No scenario</SelectItem>
-                  {scenarios.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="ind-note" className="mb-1.5 block text-xs">
-                Note
-              </Label>
-              <Textarea id="ind-note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional context for this indicator" />
-            </div>
-            <div>
-              <Label htmlFor="ind-trigger" className="mb-1.5 block text-xs">
-                Trigger condition
-              </Label>
-              <Textarea
-                id="ind-trigger"
-                rows={3}
-                value={triggerCondition}
-                onChange={(e) => setTriggerCondition(e.target.value)}
-                placeholder="What separates On track / Watch / Alert for this indicator?"
-              />
-              <div className="mt-1 text-[11px] text-text-3">Used by daily monitoring to judge status — recommended but not required.</div>
-            </div>
-            <div className="flex gap-2">
-              <Button variant="primary" className="flex-1" onClick={onCreateManual} disabled={!name.trim() || creating}>
-                {creating ? "Adding…" : "Add indicator"}
-              </Button>
-              <Button variant="ghost" onClick={resetAndClose}>
-                Cancel
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3.5">
-            <div>
-              <Label className="mb-1.5 block text-xs">Scenario</Label>
-              <Select
-                value={aiScenarioId}
-                onValueChange={(v) => {
-                  setAiScenarioId(v);
-                  setConfirmReplace(false);
-                  setAiNotice(null);
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose a scenario" />
-                </SelectTrigger>
-                <SelectContent>
-                  {scenarios.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {isDestructive && (
-              <div className="rounded-[10px] border border-[#FDE68A] bg-[#FFFBEB] p-3 text-[12.5px] text-[#92400E]">
-                <p className="m-0 mb-2">
-                  This scenario already has {existingCountForAiScenario} indicator{existingCountForAiScenario === 1 ? "" : "s"}. Generating new ones
-                  replaces them — the old ones are deleted, not merged.
-                </p>
-                <label className="flex cursor-pointer items-center gap-2 text-[12.5px]">
-                  <input type="checkbox" checked={confirmReplace} onChange={(e) => setConfirmReplace(e.target.checked)} />
-                  I understand this replaces the existing indicators
-                </label>
-              </div>
-            )}
-
-            {aiNotice && <div className="rounded-[10px] border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2.5 text-[12.5px] text-[#92400E]">{aiNotice}</div>}
-
-            <div className="flex gap-2">
-              <Button
-                variant="primary"
-                className="flex-1"
-                onClick={onSuggestWithAi}
-                disabled={!aiScenarioId || generating || (isDestructive && !confirmReplace)}
-              >
-                {generating ? "Generating…" : isDestructive ? "Replace existing indicators" : "Suggest indicators"}
-              </Button>
-              <Button variant="ghost" onClick={resetAndClose}>
-                Cancel
-              </Button>
-            </div>
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
+      )}
+    </div>
   );
 }

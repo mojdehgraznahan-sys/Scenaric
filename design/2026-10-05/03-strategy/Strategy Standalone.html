@@ -1,0 +1,1203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scenaric — Strategy (standalone reference)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Scenaric.ai design tokens */
+:root {
+  /* Brand */
+  --ink: #1E1B2E;
+  --ink-2: #29243D;
+  --orange: #F97316;
+  --orange-hover: #EA6B0B;
+  --orange-50: #FFF7ED;
+  --orange-100: #FED7AA;
+  --orange-200: #FBC589;
+  --orange-700: #C2410C;
+  --green-50: #ECFDF5;
+  --green-500: #10B981;
+  --green-700: #065F46;
+  --red-50: #FEF2F2;
+  --red-500: #EF4444;
+  --amber-300: #F59E0B;
+  --amber-50: #FFFBEB;
+  --amber-bell: #F59E0B;
+  --blue-50: #EFF6FF;
+  --blue-500: #3B82F6;
+  --blue-700: #1D4ED8;
+  --purple-50: #F5F3FF;
+  --purple-500: #8B5CF6;
+  --teal-50: #F0FDFA;
+  --teal-500: #14B8A6;
+
+  /* Surface */
+  --bg: #F5F5F5;
+  --card: #FFFFFF;
+  --border: #E5E7EB;
+  --border-strong: #D1D5DB;
+
+  /* Text */
+  --text: #0F172A;
+  --text-2: #6B7280;
+  --text-3: #9CA3AF;
+
+  /* Effects */
+  --shadow-card: 0 1px 2px rgba(15,23,42,.04), 0 1px 3px rgba(15,23,42,.04);
+  --shadow-elev: 0 8px 24px rgba(15,23,42,.08), 0 2px 6px rgba(15,23,42,.04);
+
+  /* Radius */
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 10px;
+  --r-xl: 14px;
+  --r-2xl: 20px;
+
+  /* Type */
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--font-sans);
+  color: var(--text);
+  background: var(--bg);
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.5;
+}
+button { font-family: inherit; cursor: pointer; }
+input, textarea, select { font-family: inherit; }
+a { color: inherit; text-decoration: none; }
+
+/* Reusable */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 8px;
+  font-weight: 500;
+  border-radius: var(--r-md);
+  padding: 10px 16px;
+  font-size: 14px;
+  line-height: 1;
+  border: 1px solid transparent;
+  transition: background .15s ease, border-color .15s ease, color .15s ease, transform .05s ease;
+  white-space: nowrap;
+}
+.btn:active { transform: translateY(0.5px); }
+.btn-primary { background: var(--orange); color: #fff; border-color: var(--orange); }
+.btn-primary:hover { background: var(--orange-hover); border-color: var(--orange-hover); }
+.btn-primary:disabled { opacity: .4; cursor: not-allowed; }
+.btn-ghost { background: transparent; color: var(--text); border-color: var(--border); }
+.btn-ghost:hover { background: #F9FAFB; border-color: var(--border-strong); }
+.btn-soft { background: var(--orange-50); color: var(--orange-700); border-color: var(--orange-100); }
+.btn-soft:hover { background: #FEEBD2; }
+.btn-dark { background: var(--ink); color: #fff; border-color: var(--ink); }
+.btn-dark:hover { background: #2c2742; }
+.btn-on-ink { background: rgba(255,255,255,.08); color: #fff; border-color: rgba(255,255,255,.2); }
+.btn-on-ink:hover { background: rgba(255,255,255,.15); }
+.btn-lg { padding: 14px 22px; font-size: 15px; }
+.btn-sm { padding: 7px 11px; font-size: 13px; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-card);
+}
+.input {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: #fff;
+  outline: none;
+  transition: border .15s ease, box-shadow .15s ease;
+}
+.input:focus { border-color: var(--orange); box-shadow: 0 0 0 3px rgba(249,115,22,.2); }
+.textarea { resize: none; line-height: 1.55; }
+
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid transparent;
+}
+.chip-social    { background: #F5F3FF; color: #8B5CF6; border-color: rgba(139,92,246,.25); }
+.chip-technology{ background: #EFF6FF; color: #3B82F6; border-color: rgba(59,130,246,.25); }
+.chip-economic  { background: #ECFDF5; color: #10B981; border-color: rgba(16,185,129,.25); }
+.chip-ecological{ background: #F0FDFA; color: #14B8A6; border-color: rgba(20,184,166,.25); }
+.chip-political { background: #FEF2F2; color: #EF4444; border-color: rgba(239,68,68,.25); }
+
+.badge-high   { background: #FFF7ED; color: #C2410C; }
+.badge-mid    { background: #FFFBEB; color: #B45309; }
+.badge-low    { background: #ECFDF5; color: #065F46; }
+.badge {
+  display: inline-flex; align-items: center;
+  font-size: 10px; font-weight: 600;
+  padding: 2px 7px; border-radius: 4px;
+  letter-spacing: .04em; text-transform: uppercase;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-size: 11px;
+  color: var(--orange);
+  font-weight: 500;
+}
+.mono { font-family: var(--font-mono); }
+
+.divider { height: 1px; background: var(--border); }
+.scroll-y { overflow-y: auto; }
+.scroll-y::-webkit-scrollbar { width: 8px; height: 8px; }
+.scroll-y::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 4px; }
+.scroll-y::-webkit-scrollbar-track { background: transparent; }
+
+/* Stars */
+.stars { display: inline-flex; gap: 1px; }
+.star { width: 12px; height: 12px; }
+.star-fill { color: var(--orange); }
+.star-empty { color: var(--border); }
+
+/* Sidenav */
+.fm-mark {
+  width: 28px; height: 28px;
+  background: var(--ink);
+  color: #fff;
+  border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: -0.02em;
+  font-family: var(--font-mono);
+}
+.sec-label {
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  padding: 0 11px;
+  margin: 14px 0 6px;
+  font-weight: 500;
+}
+.nav-item {
+  display: flex; align-items: center; gap: 10px;
+  height: 34px;
+  margin: 2px 7px;
+  padding: 0 9px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #6B7280;
+  cursor: pointer;
+  border: none; background: transparent; text-align: left;
+  width: calc(100% - 14px);
+  transition: background .12s ease, color .12s ease;
+}
+.nav-item:hover { color: var(--text); background: #F3F4F6; }
+.nav-item.active { background: var(--orange); color: #fff; }
+.nav-item.active:hover { background: var(--orange); }
+.nav-icon { width: 14px; height: 14px; flex-shrink: 0; }
+.nav-dot {
+  margin-left: auto;
+  width: 6px; height: 6px;
+  border-radius: 999px;
+  background: var(--amber-bell);
+}
+
+/* Pill horizon grid (onboarding) */
+.horizon-card {
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  padding: 14px 16px;
+  text-align: left;
+  background: #fff;
+  cursor: pointer;
+  transition: border .15s ease, background .15s ease;
+}
+.horizon-card.selected {
+  border: 2px solid var(--orange);
+  background: var(--orange-50);
+  padding: 13px 15px;
+}
+.horizon-card:hover:not(.selected) { border-color: var(--border-strong); }
+
+/* Progress bar */
+.progress-track { height: 4px; background: var(--border); border-radius: 999px; overflow: hidden; }
+.progress-fill { height: 100%; background: var(--orange); transition: width .3s ease; }
+
+/* Matrix dot */
+.matrix-dot {
+  position: absolute;
+  width: 36px; height: 36px;
+  border-radius: 999px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  cursor: grab;
+  user-select: none;
+  transform: translate(-50%, -50%);
+  transition: box-shadow .15s ease;
+}
+.matrix-dot.dragging { cursor: grabbing; }
+.matrix-dot { transition: box-shadow .15s ease, transform .15s ease, border-width .12s ease; }
+.matrix-dot--candidate { cursor: pointer; }
+.matrix-dot--candidate:hover { border-width: 2px !important; transform: translate(-50%, -50%) scale(1.08); }
+
+/* Tab */
+.tab {
+  padding: 8px 2px;
+  margin: 0 14px;
+  border-bottom: 2px solid transparent;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+  cursor: pointer;
+  background: transparent;
+  border-top: none; border-left: none; border-right: none;
+}
+.tab:first-child { margin-left: 0; }
+.tab.active { color: var(--orange); border-bottom-color: var(--orange); }
+
+/* Upload zone */
+.dropzone {
+  border: 2px dashed var(--border);
+  background: #fff;
+  border-radius: var(--r-xl);
+  padding: 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: border .15s ease, background .15s ease;
+}
+.dropzone:hover, .dropzone.drag {
+  border-color: var(--orange);
+  background: var(--orange-50);
+}
+
+/* Skeleton stripe placeholder */
+.placeholder-img {
+  background:
+    repeating-linear-gradient(
+      135deg,
+      #F3F4F6 0 12px,
+      #E5E7EB 12px 24px
+    );
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono);
+  color: var(--text-2);
+  font-size: 11px;
+}
+
+/* Animations */
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+.fade-in { animation: fadeIn .25s ease-out both; }
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .5; }
+}
+.pulse { animation: pulse 1.6s ease-in-out infinite; }
+
+@keyframes slideUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.slide-up { animation: slideUp .3s ease-out both; }
+
+/* Storyline — drop-target pulse for arrow rewiring/creation */
+@keyframes fmDropPulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(249,115,22,0.18), 0 4px 14px rgba(15,23,42,0.10); }
+  50%      { box-shadow: 0 0 0 8px rgba(249,115,22,0.10), 0 4px 14px rgba(15,23,42,0.10); }
+}
+/* Storyline — toast slide-in from bottom-right */
+@keyframes fmToastIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+html,body,#root{height:100%;margin:0}
+a{color:#C2410C}a:hover{color:#9A3412}
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script>
+// ─── SEED — demo project (data.js). Shapes are the contract; values are mock.
+// Scenaric.ai — APAC Expansion 2030 demo content
+// Based on Peter Schwartz's 9-step methodology
+
+window.FM_DATA = {
+  project: {
+    name: "APAC Expansion 2030",
+    role: "Owner",
+    focal_question: "How should we approach SEA market entry given geopolitical uncertainty over the next 5-10 years?",
+    horizon: "5–10 years",
+    industry: "Technology",
+    summary: "Strategic planning for Southeast Asia expansion across Indonesia, Vietnam, Philippines, and Thailand markets.",
+    created: "Feb 14, 2026",
+  },
+  projects: [
+    {
+      id: "proj_apac",
+      name: "APAC Expansion 2030",
+      focal_question: "How should we approach SEA market entry given geopolitical uncertainty over the next 5-10 years?",
+      horizon: "5–10 years",
+      industry: "Technology",
+      stepsComplete: 4,
+      lastEdited: "2026-07-05T14:20:00Z",
+      archived: false,
+    },
+    {
+      id: "proj_supply",
+      name: "Supply Chain Disruption Planning",
+      focal_question: "How resilient does our APAC supply chain need to be against a 2027-2030 disruption event?",
+      horizon: "3–5 years",
+      industry: "Manufacturing",
+      stepsComplete: 2,
+      lastEdited: "2026-06-28T09:05:00Z",
+      archived: false,
+    },
+    {
+      id: "proj_ai_reg",
+      name: "AI Regulation Outlook",
+      focal_question: "How will AI regulation reshape our product roadmap and go-to-market over the next 5 years?",
+      horizon: "5 years",
+      industry: "Technology",
+      stepsComplete: 0,
+      lastEdited: "2026-07-07T11:40:00Z",
+      archived: false,
+    },
+    {
+      id: "proj_talent",
+      name: "2026 Talent Strategy Review",
+      focal_question: "What workforce model best positions us for a 3-5 year horizon of hybrid work and AI-augmented roles?",
+      horizon: "3–5 years",
+      industry: "Technology",
+      stepsComplete: 8,
+      lastEdited: "2026-05-02T16:00:00Z",
+      archived: true,
+    },
+  ],
+  stats: {
+    sources: 12, interviews: 5, insights: 48, voices: 9,
+    signals: 23, scenarios: 4, indicators: 11,
+  },
+  sources: [
+    { id: "s1", name: "2025 Annual Strategy Review.pdf", type: "doc", status: "Complete", progress: 100 },
+    { id: "s2", name: "CEO Interview — Jan Oosterom.mp3", type: "audio", status: "Processing", progress: 62 },
+    { id: "s3", name: "McKinsey APAC Outlook Q4.pdf", type: "doc", status: "Complete", progress: 100 },
+    { id: "s4", name: "Internal SEA Customer Survey.csv", type: "survey", status: "Complete", progress: 100 },
+    { id: "s5", name: "ASEAN Trade Policy Brief.pdf", type: "doc", status: "Complete", progress: 100 },
+  ],
+  interviews: [
+    {
+      id: "i1", initials: "JO", name: "Jan Oosterom", role: "CEO · 18 min",
+      avatar_bg: "#E5E7EB", avatar_fg: "#6B7280",
+      tag: "Political", status: "Processing",
+      quote: "The biggest unknown is how fast regulation will shift in key markets."
+    },
+    {
+      id: "i2", initials: "SC", name: "Sarah Chen", role: "COO · Transcript",
+      avatar_bg: "#DBEAFE", avatar_fg: "#1D4ED8",
+      tag: "Social", status: "Complete",
+      quote: "Our workforce doesn't have the skills for the AI transition we're planning."
+    },
+    {
+      id: "i3", initials: "MR", name: "Maya R.", role: "VP Strategy · 24 min",
+      avatar_bg: "#EDE9FE", avatar_fg: "#6D28D9",
+      tag: "Economic", status: "Complete",
+      quote: "Currency volatility could swing margins by ten points either way."
+    },
+  ],
+  // AI-extracted insights — unified shape across Docs/Audio/Survey/Web.
+  // category = STEEP category or "local_actor" (Key Force, not yet a driving force).
+  extracted_insights: [
+    { id: "ei1", source_type: "Audio", category: "local_actor", actor_type: "Supplier", confidence: "High",
+      source_name: "quarterly-strategy-briefing-q3-fy2026.mp3",
+      quote: "display panels and semiconductors are still our most concentrated risk categories",
+      paraphrase: "Display panels and semiconductors are the most concentrated supply chain risk categories." },
+    { id: "ei2", source_type: "Audio", category: "local_actor", actor_type: "Customer", confidence: "High",
+      source_name: "quarterly-strategy-briefing-q3-fy2026.mp3",
+      quote: "Vietnam and Indonesia remain the strongest growth opportunities",
+      paraphrase: "Vietnam and Indonesia are seen as the strongest growth opportunities for Southeast Asia market entry." },
+    { id: "ei3", source_type: "Docs", category: "Political", actor_type: null, confidence: "Medium",
+      source_name: "01_market-entry-southeast-asia-2027.pdf",
+      quote: "regulatory alignment across ASEAN member states remains inconsistent",
+      paraphrase: "Inconsistent regulatory alignment across ASEAN states is a macro uncertainty for market entry timing." },
+    { id: "ei4", source_type: "Survey", category: "Economic", actor_type: null, confidence: "High",
+      source_name: "Internal SEA Customer Survey.csv",
+      quote: "78% of respondents rated currency volatility as their top operating concern",
+      paraphrase: "Currency volatility is the top operating concern for the majority of surveyed customers." },
+    { id: "ei5", source_type: "Web", category: "Technology", actor_type: null, confidence: "Medium",
+      source_name: "reuters.com/asia-ai-infrastructure",
+      quote: "regional cloud providers are racing to localise AI infrastructure",
+      paraphrase: "Localisation of AI infrastructure among regional cloud providers is accelerating." },
+  ],
+  insights: [
+    "Supply chain resilience flagged by 78% of managers as most critical uncertainty for the next 3 years.",
+    "Indonesian protectionism cited in 4 of 5 executive interviews as accelerating risk.",
+    "Gen Z hiring expectations diverge sharply from current compensation framework.",
+  ],
+  signals: [
+    { id: "sg1", poles: ["Tariffs soften", "Tariffs bite harder"], category: "Political", source: "Reuters",  title: "EU Carbon Border Adjustment Mechanism", impact: 5, uncertainty: "High",   body: "New tariffs on carbon-intensive imports will reshape competitive dynamics across SEA supply chains by 2027." },
+    { id: "sg2", poles: ["Adoption stalls", "Adoption accelerates"], category: "Technology", source: "Gartner",  title: "Gen AI enterprise adoption accelerates", impact: 5, uncertainty: "Medium", body: "Enterprise AI deployment doubled YoY; productivity gains captured unevenly across sectors and geographies." },
+    { id: "sg3", poles: ["Expectations revert", "Talent war intensifies"], category: "Social", source: "Deloitte",     title: "Gen Z workforce expectations shift",     impact: 4, uncertainty: "Medium", body: "Workers under 30 prioritise purpose over compensation; talent wars intensifying in tech hubs." },
+    { id: "sg4", poles: ["Decoupling reverses", "Decoupling deepens"], category: "Political", source: "FT",        title: "US-China decoupling deepens",            impact: 5, uncertainty: "High",   body: "Bifurcated technology stacks force multinationals to choose sides on cloud, semiconductors, and standards." },
+    { id: "sg5", poles: ["Growth stalls", "Growth accelerates"], category: "Economic", source: "World Bank", title: "SEA middle-class doubles by 2030",       impact: 4, uncertainty: "Low",    body: "Rising disposable income across Indonesia, Vietnam, Philippines fuels premium consumer categories." },
+    { id: "sg6", poles: ["Costs contained", "Costs surge"], category: "Ecological", source: "IPCC",     title: "Climate adaptation costs surge",         impact: 4, uncertainty: "High",   body: "Physical risk premiums for coastal SEA operations rising; ESG reporting mandates tighten." },
+    { id: "sg7", poles: ["Channel fragments", "Channel concentrates"], category: "Technology", source: "IDC",      title: "Mobile-first commerce dominates",        impact: 3, uncertainty: "Low",    body: "Over 70% of SEA digital commerce flows through super-apps; web channels secondary." },
+    { id: "sg8", poles: ["Fragmentation", "Openness"], poleAliases: { "Harmonisation resumes": "b" }, category: "Political", source: "Nikkei",    title: "ASEAN trade harmonisation stalls",       impact: 4, uncertainty: "High",   body: "Regional trade agreement implementation patchy; bilateral arrangements proliferate." },
+    { id: "sg9", poles: ["Volatility eases", "Higher volatility"], category: "Economic", source: "Bloomberg",  title: "Currency volatility regime",             impact: 4, uncertainty: "High",   body: "FX swings of 10-15% reshape unit economics for cross-border operations." },
+  ],
+  // Events: single occurrences, past (observed) or future (possible). Linked to forces via `links`;
+  // `toward` names which end of the force the event pushes it. Likelihood applies to possible events only.
+  events: [
+    { id: "ev1", category: "Economic", body: "Foreign firms can now hold majority stakes in Indonesian e-commerce operators without a local partner.", status: "observed", date: "Feb 2026", title: "Indonesia raises e-commerce foreign-ownership cap to 67%", impact: 3, source: "Reuters", links: [{ sigId: "sg8", toward: "Openness" }] },
+    { id: "ev2", category: "Political", body: "Brussels locks the dates for full CBAM charges, removing the last ambiguity on when importers start paying.", status: "observed", date: "Mar 2026", title: "EU confirms CBAM definitive phase timetable", impact: 4, source: "Reuters", links: [{ sigId: "sg1", toward: "Tariffs bite harder" }] },
+    { id: "ev3", category: "Economic", body: "The central bank let the dong slip past its managed band for the first time since 2015.", status: "observed", date: "May 2026", title: "Vietnam dong breaks the 12% trading band", impact: 3, source: "Bloomberg", indicatorId: "in5", links: [{ sigId: "sg9", toward: "Higher volatility" }] },
+    { id: "ev4", category: "Political", body: "Export controls now reach SEA-registered subsidiaries, forcing supply-chain audits across the region.", status: "observed", date: "Jul 2026", title: "US adds 14 SEA-based firms to the Entity List", impact: 4, source: "FT", indicatorId: "in2", links: [{ sigId: "sg4", toward: "Decoupling deepens" }] },
+    { id: "ev5", category: "Political", body: "All ten member states complete ratification, enabling a single customs window across the bloc.", status: "possible", date: "2027", title: "ASEAN customs harmonisation clears final ratification", likelihood: "Medium", impact: 4, indicatorId: "in1", links: [{ sigId: "sg8", toward: "Harmonisation resumes" }] },
+    { id: "ev6", category: "Technology", body: "Regional enterprise AI spend crosses a scale where local talent and compute become the binding constraint.", status: "possible", date: "2027", title: "Enterprise AI capex in SEA passes $20B", likelihood: "Medium", impact: 3, indicatorId: "in4", links: [{ sigId: "sg2", toward: "Adoption accelerates" }] },
+    { id: "ev7", category: "Political", body: "Personal and transaction data must be stored and processed inside Indonesia, with no offshore mirror.", status: "possible", date: "2027–28", title: "Indonesia mandates in-country data residency", likelihood: "High", impact: 4, indicatorId: "in3", links: [{ sigId: "sg8", toward: "Fragmentation" }, { sigId: "sg4", toward: "Decoupling deepens" }] },
+    { id: "ev8", category: "Political", body: "Washington and Beijing agree a phased rollback of tariffs imposed since 2018.", status: "possible", date: "2028", title: "US–China tariff climbdown", likelihood: "Low", impact: 5, links: [{ sigId: "sg4", toward: "Decoupling reverses" }] },
+    { id: "ev9", category: "Political", body: "A blockade cuts off leading-edge semiconductor supply for months, stalling hardware-dependent roadmaps.", status: "possible", wildcard: true, date: "Any time", title: "Taiwan Strait blockade halts advanced-chip supply", likelihood: "Low", impact: 5, precursor: "War-risk insurance premiums on strait shipping", links: [{ sigId: "sg4", toward: "Decoupling deepens" }, { sigId: "sg2", toward: "Adoption stalls" }] },
+    { id: "ev10", category: "Ecological", body: "A single flood event disables Jakarta's port and data centres for weeks.", status: "possible", wildcard: true, date: "Any time", title: "Catastrophic Jakarta coastal flood", likelihood: "Low", impact: 5, precursor: "Reinsurers withdrawing coastal Java cover", links: [{ sigId: "sg6", toward: "Costs surge" }] },
+    { id: "ev11", category: "Technology", body: "A regulator forces a dominant super-app to separate payments, commerce and logistics.", status: "possible", wildcard: true, date: "Any time", title: "Regulator-ordered break-up of a dominant super-app", likelihood: "Low", impact: 4, precursor: "Competition authority opens a structural-remedy inquiry", links: [{ sigId: "sg7", toward: "Channel fragments" }] },
+    // Inbox: events not yet tied to a force (links: []).
+    { id: "evi1", category: "Social", status: "observed", date: "Aug 2026", source: "Bangkok Post", title: "Thailand launches 10-year visas for foreign tech workers", body: "Long-stay visas with tax breaks, aimed at pulling regional tech talent to Bangkok.", impact: 3, links: [] },
+    { id: "evi2", category: "Political", status: "possible", date: "2027", likelihood: "Medium", title: "Malaysia caps foreign ownership of data centres at 49%", body: "Hyperscalers would need a local majority partner for any new capacity.", impact: 4, links: [] },
+    { id: "evi3", category: "Political", status: "observed", date: "Jun 2026", source: "Inquirer", title: "Philippines passes a digital-services tax on foreign platforms", body: "A 12% VAT now applies to foreign streaming, ads and marketplace fees.", impact: 3, links: [] },
+    { id: "evi4", category: "Technology", status: "possible", date: "2027–28", likelihood: "High", title: "Vietnam requires local hosting for platforms above 1M users", body: "Large platforms must keep user data and core services on in-country servers.", impact: 4, links: [] },
+    { id: "evi5", category: "Political", status: "possible", date: "2028", likelihood: "Low", title: "Singapore and Indonesia sign a cross-border data-flow pact", body: "Certified firms could move data freely between the two markets under shared rules.", impact: 4, links: [] },
+  ],
+  scenarios: [
+    {
+      id: "sc1", name: "Pacific Connector", quadrant: "TR", color: "#10B981",
+      tagline: "Open markets + aligned geopolitics",
+      summary: "ASEAN consolidates as a unified trade bloc; multilateral institutions hold; AI productivity is broadly captured. Our expansion runs ahead of plan.",
+      narrative: "By 2030, ASEAN has matured into a functional trade bloc. Customs harmonisation cleared in 2027 and digital service tariffs were eliminated by mid-decade. US-China relations stabilised after a 2026 climbdown, allowing dual-track operations to consolidate onto shared infrastructure. AI productivity gains were widely diffused: SEA-based enterprises saw 2-4% annual TFP growth from 2027 onward. For us, this is the high road. Single regional HQ in Singapore, distributed engineering across Ho Chi Minh and Jakarta, premium consumer expansion in Bangkok. Growth runs 30% ahead of plan; margins improve 600bps.",
+    },
+    {
+      id: "sc2", name: "Fragmented Frontier", quadrant: "BR", color: "#F97316",
+      tagline: "Open markets + misaligned politics",
+      summary: "Markets stay open but politics fragment. Multiple AI stacks, multiple compliance regimes. Speed and modularity beat scale.",
+      narrative: "Trade flows continue but politics atomise. By 2027, three competing AI/cloud stacks (Western, Chinese, sovereign) force market-by-market decisions. Regulators in Indonesia, Vietnam, and the Philippines diverge sharply on data residency and content moderation. We respond by adopting a federated architecture: country-level pods with local stacks, shared brand and product spine. CAPEX rises 15% but speed-to-market improves; we win where local incumbents lack global capability.",
+    },
+    {
+      id: "sc3", name: "Walled Gardens", quadrant: "TL", color: "#3B82F6",
+      tagline: "Closed markets + aligned geopolitics",
+      summary: "Geopolitical détente but rising protectionism. Local-for-local becomes mandatory. We trade scale for compliance.",
+      narrative: "A surprising US-China climbdown in 2027 brings geopolitical calm — but the post-COVID instinct to onshore everything hardens into permanent industrial policy. SEA governments mandate local data, local IP, local employment. We restructure into autonomous country businesses with joint-venture partners. ROIC compresses but we hold share. The plan becomes operationally complex but politically resilient.",
+    },
+    {
+      id: "sc4", name: "Bamboo Curtain", quadrant: "BL", color: "#EF4444",
+      tagline: "Closed markets + fragmented politics",
+      summary: "Worst case: blocs harden, decoupling accelerates. Investment thesis under threat; preserve optionality.",
+      narrative: "Sino-Western relations rupture in late 2026; SEA nations are forced into alignment decisions. Capital controls reappear; tech sanctions escalate to consumer-facing services. We pull back from Indonesia and Philippines, consolidate Vietnam/Singapore, and preserve optionality through minority stakes in local champions. Revenue declines 20% but cash conversion improves; we wait for the regime to shift.",
+    },
+  ],
+  axes: {
+    x: "Geopolitical Alignment", // L: misaligned, R: aligned
+    y: "Market Openness",        // T: open, B: closed -- wait re-check labels
+  },
+  // Quadrants used: TL Predetermined, TR Critical, BL Background, BR Wildcards
+  quadrants: { TL: "Predetermined", TR: "Critical ★", BL: "Background", BR: "Wildcards" },
+  matrix_dots: [
+    // x,y in 0..100 percent (0 = left/top, 100 = right/bottom)
+    { id: "d1", sigId: "sg1", x: 28, y: 30, label: "CO₂", color: "#EF4444", category: "Political" },
+    { id: "d2", sigId: "sg2", x: 74, y: 38, impactAns: "somewhat", plausible: "both", confirmed: true, label: "AI",  color: "#F97316", category: "Technology", selected: true },
+    { id: "d3", sigId: "sg4", x: 74, y: 18, impactAns: "completely", plausible: "both", confirmed: true, label: "Geo", color: "#EF4444", category: "Political" },
+    { id: "d4", sigId: "sg3", x: 47, y: 36, label: "Z",   color: "#8B5CF6", category: "Social" },
+    { id: "d5", sigId: "sg6", x: 33, y: 64, label: "Bio", color: "#14B8A6", category: "Ecological" },
+    { id: "d6", sigId: "sg9", x: 60, y: 70, label: "FX",  color: "#10B981", category: "Economic" },
+    { id: "d7", sigId: "sg5", x: 38, y: 78, label: "M+",  color: "#10B981", category: "Economic" },
+    { id: "d8", sigId: "sg7", x: 50, y: 82, label: "Mob", color: "#3B82F6", category: "Technology" },
+    { id: "d9", sigId: "sg8", x: 75, y: 42, label: "Tx",  color: "#EF4444", category: "Political" },
+  ],
+  indicators: [
+    { id: "in1", name: "ASEAN customs harmonisation milestone", scenario: "Pacific Connector", status: "Watch", trend: "+", note: "Target Q3 2026" },
+    { id: "in2", name: "US-China tariff schedule revisions", scenario: "Bamboo Curtain", status: "Alert", trend: "↑", note: "3 escalations YTD" },
+    { id: "in3", name: "Indonesian data residency rulings", scenario: "Walled Gardens", status: "Watch", trend: "→", note: "Comment period open" },
+    { id: "in4", name: "Enterprise AI capex (SEA)", scenario: "Pacific Connector", status: "On track", trend: "↑", note: "+34% YoY" },
+    { id: "in5", name: "Vietnam dong volatility", scenario: "Fragmented Frontier", status: "Watch", trend: "↑", note: "12% band breached" },
+    { id: "in6", name: "Cross-border cloud sanctions", scenario: "Bamboo Curtain", status: "Alert", trend: "↑", note: "2 new actions" },
+  ],
+  strategies: [
+    { id: "st1", name: "Federated regional architecture",   robustIn: ["Pacific Connector", "Fragmented Frontier"], risk: "Low",    cost: "Medium",  notes: "Standardise core, localise edge. Resilient across alignment outcomes." },
+    { id: "st2", name: "Singapore-anchored expansion",      robustIn: ["Pacific Connector", "Walled Gardens"],      risk: "Medium", cost: "High",    notes: "Strong if openness holds; capital at risk in bamboo curtain." },
+    { id: "st3", name: "JV-first market entry",             robustIn: ["Walled Gardens", "Fragmented Frontier"],    risk: "Low",    cost: "Low",     notes: "Slower but politically resilient. Preserves optionality." },
+    { id: "st4", name: "Hedge through minority stakes",     robustIn: ["Bamboo Curtain", "Walled Gardens"],         risk: "Medium", cost: "Low",     notes: "Optionality play. Returns lower but downside protected." },
+  ],
+  news: [
+    { id: "n1", title: "Climate Regulation Proposal in EU expands carbon border tariffs", source: "Reuters",   time: "2h",  impact: "HIGH" },
+    { id: "n2", title: "Major Tech Company AI breakthroughs lift productivity outlook",   source: "FT",         time: "5h",  impact: "MID" },
+    { id: "n3", title: "Consumer Sustainability Survey shows shift in SEA preferences",   source: "Deloitte",   time: "1d",  impact: "MID" },
+    { id: "n4", title: "Indonesia drafts new data localisation framework",                source: "Nikkei",     time: "1d",  impact: "HIGH" },
+    { id: "n5", title: "Vietnam dong fluctuation breaches managed-float band",            source: "Bloomberg",  time: "2d",  impact: "MID" },
+  ],
+  recommended: [
+    { title: "Analyse summaries",   body: "Surface the key tensions across your interview transcripts." },
+    { title: "Identify trends",     body: "Cluster signals into emerging themes by STEEP category." },
+    { title: "Explore scenarios",   body: "Plot critical uncertainties on a 2×2 matrix." },
+    { title: "Generate insights",   body: "Get 1-pagers per scenario with implications." },
+  ],
+  chat_seed: [
+    { role: "ai", text: "Welcome back. Ready to build robust scenarios?" },
+    { role: "ai", text: "I've flagged 3 driving forces across your research." },
+  ],
+};
+
+// Mock output of the Ask AI "Generate events from my forces" prompt (signals.find.events).
+// Two opposing possible events per force: one per pole.
+window.FM_EVENT_PROPOSALS = {
+  sg1: [
+    { title: "EU extends CBAM to downstream manufactured goods", body: "Scope widens beyond raw materials to finished products, pulling SEA assemblers into the regime.", toward: "Tariffs bite harder", likelihood: "Medium", impact: 5, date: "2027–28" },
+    { title: "EU grants ASEAN a CBAM equivalence deal", body: "Regional carbon pricing is recognised as equivalent, exempting certified exporters.", toward: "Tariffs soften", likelihood: "Low", impact: 4, date: "2028" },
+  ],
+  sg2: [
+    { title: "A top-3 SEA bank replaces its contact centre with AI agents", body: "A flagship deployment resets what boards consider the baseline for AI adoption.", toward: "Adoption accelerates", likelihood: "High", impact: 4, date: "2027" },
+    { title: "Major AI liability ruling in a SEA court", body: "A court holds a deployer liable for an AI decision, chilling enterprise rollouts.", toward: "Adoption stalls", likelihood: "Low", impact: 4, date: "2028" },
+  ],
+  sg3: [
+    { title: "Vietnam tech hubs report under-30 attrition above 30%", body: "Retention collapses as purpose-led employers outbid on culture rather than pay.", toward: "Talent war intensifies", likelihood: "Medium", impact: 3, date: "2027" },
+    { title: "Regional downturn restores pay as the top hiring factor", body: "A recession flips priorities back to job security and compensation.", toward: "Expectations revert", likelihood: "Medium", impact: 3, date: "2028" },
+  ],
+  sg5: [
+    { title: "Indonesia household consumption growth falls below 3%", body: "Middle-class expansion stalls on credit tightening and informal-sector strain.", toward: "Growth stalls", likelihood: "Low", impact: 4, date: "2027" },
+    { title: "Philippines premium retail sales grow 20% year on year", body: "Evidence the premium tier is widening beyond Manila into secondary cities.", toward: "Growth accelerates", likelihood: "Medium", impact: 3, date: "2027" },
+  ],
+  sg6: [
+    { title: "Singapore mandates physical-risk disclosure for regional assets", body: "Firms must publish flood and heat exposure for every SEA site they operate.", toward: "Costs surge", likelihood: "High", impact: 4, date: "2027" },
+    { title: "Regional catastrophe-bond pool caps coastal premiums", body: "A public–private pool absorbs tail risk and stabilises insurance costs.", toward: "Costs contained", likelihood: "Low", impact: 3, date: "2028–29" },
+  ],
+  sg9: [
+    { title: "Bank Indonesia intervenes to defend the rupiah at 17,000", body: "A disorderly slide forces direct intervention and signals a new volatility regime.", toward: "Higher volatility", likelihood: "Medium", impact: 4, date: "2027" },
+    { title: "ASEAN local-currency settlement passes 25% of intra-regional trade", body: "Reduced dollar dependence dampens cross-border FX swings.", toward: "Volatility eases", likelihood: "Low", impact: 3, date: "2029" },
+  ],
+  sg7: [
+    { title: "A super-app captures over 80% of Indonesian digital checkout", body: "Channel concentration makes platform terms the binding constraint on entry.", toward: "Channel concentrates", likelihood: "Medium", impact: 3, date: "2027" },
+  ],
+};
+
+</script>
+<script>
+// ─── DECISION LAYER SEED + MODEL (decision-data.js). Model functions are the spec for server-side roll-ups.
+// Monitoring + Strategy decision layer: tracked event likelihoods, scenario links,
+// discovered events, action cards, target-scenario routes and briefings.
+// Likelihood lives on EVENTS only. Scenarios get momentum (relative evidence), never probability.
+window.FM_DECISIONS = {
+  lastScan: "Today 06:00",
+  sourcesScanned: 214,
+  window: ["Jul 12", "Jul 26", "Aug 9", "Aug 23", "Sep 6", "Sep 20", "Oct 4"],
+  levels: ["Ruled out", "Low", "Medium", "High", "Occurred"],
+  phases: ["Precursors", "Catalysts", "First-order", "Second-order", "Realised"],
+  // hist: one likelihood level per window point (0 Ruled out … 4 Occurred)
+  tracked: [
+    { evId: "ev5", title: "ASEAN customs harmonisation clears final ratification", force: "ASEAN trade harmonisation", pole: "Openness", impact: 4, phase: 1, lever: "influence", supports: ["sc1", "sc2"],
+      hist: [2, 2, 2, 2, 2, 1, 1], change: { date: "Sep 18", source: "Inquirer", cite: "Philippine Senate defers vote on the ASEAN customs protocol to the 2027 session." } },
+    { evId: "evi5", title: "Singapore and Indonesia sign a cross-border data-flow pact", force: "ASEAN trade harmonisation", pole: "Openness", impact: 4, phase: 1, lever: "influence", supports: ["sc1", "sc2"],
+      hist: [1, 1, 1, 1, 2, 2, 2], change: { date: "Sep 4", source: "Straits Times", cite: "Trade ministers publish a joint negotiating text; signing targeted for H1 2028." } },
+    { evId: "ev6", title: "Enterprise AI capex in SEA passes $20B", force: "Gen AI enterprise adoption", pole: "Adoption accelerates", impact: 3, phase: 2, lever: "influence", supports: ["sc1", "sc2"],
+      hist: [2, 2, 2, 3, 3, 3, 3], change: { date: "Aug 20", source: "IDC", cite: "Q2 regional AI spend tracker revised up 34%; run-rate now $17.8B." } },
+    { evId: "ev8", title: "US–China tariff climbdown", force: "US-China decoupling", pole: "Decoupling reverses", impact: 5, phase: 1, lever: "watch", supports: ["sc1", "sc3"],
+      hist: [1, 1, 1, 1, 1, 1, 1], change: null },
+    { evId: "ev1", title: "Indonesia raises e-commerce foreign-ownership cap to 67%", force: "ASEAN trade harmonisation", pole: "Openness", impact: 3, phase: 0, lever: "watch", supports: ["sc1", "sc2"],
+      hist: [4, 4, 4, 4, 4, 4, 4], change: null },
+    { evId: "ev7", title: "Indonesia mandates in-country data residency", force: "ASEAN trade harmonisation", pole: "Fragmentation", impact: 4, phase: 1, lever: "watch", supports: ["sc2", "sc3", "sc4"],
+      hist: [3, 3, 3, 3, 3, 3, 3], change: null },
+    { evId: "evi4", title: "Vietnam requires local hosting for platforms above 1M users", force: "ASEAN trade harmonisation", pole: "Fragmentation", impact: 4, phase: 1, lever: "watch", supports: ["sc3", "sc4"],
+      hist: [2, 2, 2, 2, 3, 3, 3], change: { date: "Sep 2", source: "VnExpress", cite: "Ministry of Information publishes Decree 53 amendments for public consultation." } },
+    { evId: "evi2", title: "Malaysia caps foreign ownership of data centres at 49%", force: "ASEAN trade harmonisation", pole: "Fragmentation", impact: 4, phase: 1, lever: "influence", supports: ["sc3", "sc4"],
+      hist: [2, 2, 2, 2, 2, 1, 1], change: { date: "Sep 24", source: "The Edge", cite: "MITI withdraws the draft after hyperscaler and chamber submissions." } },
+    { evId: "ev4", title: "US adds 14 SEA-based firms to the Entity List", force: "US-China decoupling", pole: "Decoupling deepens", impact: 4, phase: 1, lever: "watch", supports: ["sc2", "sc4"],
+      hist: [3, 4, 4, 4, 4, 4, 4], change: { date: "Jul 22", source: "FT", cite: "Commerce Department adds SEA subsidiaries to export-control list." } },
+  ],
+  signposts: [
+    { id: "sp1", scenario: "sc1", name: "Single ASEAN customs window goes live", state: "not yet" },
+    { id: "sp2", scenario: "sc1", name: "SG–ID data-flow pact signed", state: "approaching" },
+    { id: "sp3", scenario: "sc2", name: "A third sovereign AI stack launches in ASEAN", state: "hit", hitAt: 3 },
+    { id: "sp4", scenario: "sc2", name: "Two or more ASEAN-6 diverge on content-moderation law", state: "approaching" },
+    { id: "sp5", scenario: "sc3", name: "Vietnam local-hosting decree enacted", state: "approaching" },
+    { id: "sp6", scenario: "sc3", name: "US–China tariff rollback announced", state: "not yet" },
+    { id: "sp7", scenario: "sc4", name: "Entity List extended to SEA subsidiaries", state: "hit", hitAt: 1 },
+    { id: "sp8", scenario: "sc4", name: "Capital controls in any ASEAN-6 market", state: "not yet" },
+  ],
+  // New developments found by the daily scan, not yet in the project.
+  inbox: [
+    { id: "nx1", title: "Thailand and Singapore launch a joint sandbox for cross-border AI models", source: "Nikkei Asia", time: "3h", fits: true, force: "Gen AI enterprise adoption", pole: "Adoption accelerates", supports: ["sc1", "sc2"], likelihood: "Observed" },
+    { id: "nx2", title: "Gulf sovereign funds commit $12B to SEA data centres on local-ownership terms", source: "Bloomberg", time: "9h", fits: false, proposal: "New force: Sovereign compute capital", supports: [], likelihood: "Observed" },
+    { id: "nx3", title: "Vietnam drafts a national-LLM requirement for public-sector procurement", source: "Reuters", time: "1d", fits: false, proposal: "New force: Sovereign compute capital", supports: [], likelihood: "Medium" },
+    { id: "nx4", title: "Indonesia's OJK proposes onshore cloud for all payment processors", source: "Jakarta Post", time: "2d", fits: true, force: "ASEAN trade harmonisation", pole: "Fragmentation", supports: ["sc3", "sc4"], likelihood: "Medium" },
+  ],
+  // Action cards emitted by Monitoring when a threshold is crossed.
+  actions: [
+    { id: "a1", raised: "1d", urgency: "Urgent", audience: "CEO", scenario: "sc1", trigger: "Target catalyst weakening", evidence: "ev5",
+      title: "Pause the Singapore single-HQ consolidation",
+      body: "Customs ratification dropped from Medium to Low. The HQ move only pays off once a single customs window exists. Hold Phase 2 and keep capital in the federated build-out.",
+      effect: { move: "m5", status: "paused" } },
+    { id: "a2", raised: "3d", urgency: "High", audience: "CEO", scenario: "sc3", trigger: "Blocker rising", evidence: "evi4",
+      title: "Arm the Vietnam hosting hedge",
+      body: "Vietnam's local-hosting rule moved to High. Pre-qualify an in-country hosting partner now so the switch takes weeks, not quarters. Est. $2.4M.",
+      effect: { move: "h1", status: "armed" } },
+    { id: "a3", raised: "5d", urgency: "Medium", audience: "CSO", scenario: "sc1", trigger: "Influenceable event gaining", evidence: "evi5",
+      title: "Join the SG–ID data-flow working group",
+      body: "The pact moved from Low to Medium and is a lever you can push. Submit cross-border use cases through the Singapore Business Federation before the text closes.",
+      effect: { move: "m4", status: "active" } },
+    { id: "a4", raised: "6d", urgency: "Medium", audience: "CEO", scenario: "sc1", trigger: "Event passed threshold", evidence: "ev6",
+      title: "Bring the HCMC AI talent hub forward to Q1",
+      body: "AI capex moved to High, so the talent crunch will arrive early. The hub pays off in all four futures, which makes it a no-regret move.",
+      effect: { move: "m2", status: "active" } },
+    { id: "a5", raised: "2d", urgency: "Medium", audience: "CSO", scenario: null, trigger: "Frame check", evidence: "nx2",
+      title: "Add 'Sovereign compute capital' as a force",
+      body: "Two of the last four discoveries don't fit any force, and both point at state-directed compute. Add the force in Signals and test it in the Matrix at the next review.",
+      effect: { navigate: "/app/signals" } },
+  ],
+  // Route to target. lane: noregret | shaping | hedge. when: Now | 2027 | 2028 | 2029–30
+  routes: {
+    sc1: [
+      { id: "m1", lane: "noregret", when: "Now", title: "Federated regional architecture: core platform", link: { kind: "option", ref: "st1" }, status: "active" },
+      { id: "m2", lane: "noregret", when: "2027", title: "HCMC AI talent hub", link: { kind: "event", ref: "ev6" }, status: "planned" },
+      { id: "m3", lane: "shaping", when: "Now", title: "Industry coalition for customs ratification", link: { kind: "event", ref: "ev5" }, status: "active", push: true },
+      { id: "m4", lane: "shaping", when: "2027", title: "SG–ID data-flow working group", link: { kind: "event", ref: "evi5" }, status: "planned", push: true },
+      { id: "m5", lane: "shaping", when: "2028", title: "Singapore single regional HQ", link: { kind: "signpost", ref: "sp1" }, status: "planned" },
+      { id: "m6", lane: "shaping", when: "2029–30", title: "Premium consumer launch, Bangkok + Jakarta", link: { kind: "signpost", ref: "sp2" }, status: "planned" },
+      { id: "h1", lane: "hedge", when: "2027", title: "Pre-qualified Vietnam hosting partner", link: { kind: "signpost", ref: "sp5" }, status: "held" },
+      { id: "h2", lane: "hedge", when: "2028", title: "Minority stakes in local champions", link: { kind: "signpost", ref: "sp8" }, status: "held" },
+      { id: "h3", lane: "hedge", when: "2027", title: "Indonesia country-JV playbook", link: { kind: "event", ref: "ev7" }, status: "held" },
+    ],
+  },
+  revision: {
+    since: "Aug 12",
+    items: [
+      { kind: "Re-sequence", text: "Move the Singapore single HQ from 2028 to 2029, after the customs vote." },
+      { kind: "New move", text: "Explore a sovereign-compute partnership in Vietnam, prompted by the two unfitted discoveries." },
+      { kind: "Re-score", text: "Singapore-anchored expansion: in Pacific Connector, downgrade from robust to conditional." },
+    ],
+  },
+};
+
+(function () {
+  const KEY = "scenaric.decisions.v1";
+  const D = window.FM_DECISIONS;
+  const initial = {
+    target: "sc1",
+    actions: Object.fromEntries(D.actions.map(a => [a.id, "pending"])),
+    inbox: Object.fromEntries(D.inbox.map(n => [n.id, "pending"])),
+    moves: {},
+    revision: "proposed",
+  };
+  let state;
+  try { state = Object.assign({}, initial, JSON.parse(localStorage.getItem(KEY) || "{}")); } catch (e) { state = initial; }
+  const subs = new Set();
+  const DS = {
+    get: () => state,
+    set: (patch) => { state = Object.assign({}, state, typeof patch === "function" ? patch(state) : patch); localStorage.setItem(KEY, JSON.stringify(state)); subs.forEach(f => f(state)); },
+    subscribe: (f) => { subs.add(f); return () => subs.delete(f); },
+  };
+  window.DecisionStore = DS;
+  window.useDecisions = function () {
+    const [s, setS] = React.useState(DS.get());
+    React.useEffect(() => DS.subscribe(setS), []);
+    return [s, DS.set];
+  };
+
+  // Derived model — shared by Monitoring, Strategy and the briefing.
+  const delta = (t) => t.hist[t.hist.length - 1] - t.hist[0];
+  window.DecisionModel = {
+    delta,
+    lvl: (n) => D.levels[n],
+    momentum(scId) {
+      const contrib = D.tracked.filter(t => t.supports.includes(scId)).map(t => ({ t, score: delta(t) * t.impact })).filter(c => c.score !== 0).sort((a, b) => Math.abs(b.score) - Math.abs(a.score));
+      const score = contrib.reduce((s, c) => s + c.score, 0);
+      const label = score >= 6 ? "Building" : score >= 2 ? "Edging up" : score <= -6 ? "Fading" : score <= -2 ? "Easing" : "Steady";
+      return { score, label, contrib };
+    },
+    progress(scId) {
+      const ev = D.tracked.filter(t => t.supports.includes(scId));
+      let reached = 0;
+      D.phases.forEach((_, i) => { const p = ev.filter(t => t.phase === i); if (p.length && p.every(t => t.hist[t.hist.length - 1] >= 3)) reached = i + 1; });
+      return reached;
+    },
+    levers(scId) {
+      const sup = D.tracked.filter(t => t.supports.includes(scId));
+      const block = D.tracked.filter(t => !t.supports.includes(scId));
+      return { influence: sup.filter(t => t.lever === "influence"), watch: sup.filter(t => t.lever === "watch"), block };
+    },
+    health(scId) {
+      const sup = D.tracked.filter(t => t.supports.includes(scId));
+      const block = D.tracked.filter(t => !t.supports.includes(scId));
+      const gaining = sup.filter(t => delta(t) > 0), weakening = sup.filter(t => delta(t) < 0);
+      const blockersRising = block.filter(t => delta(t) > 0 && t.hist[t.hist.length - 1] < 4);
+      const m = this.momentum(scId).score;
+      const rivals = (window.FM_DATA.scenarios || []).filter(s => s.id !== scId && this.momentum(s.id).score >= 6);
+      let label = "On course", tone = "low";
+      if (m < 0 && rivals.length) { label = "Off course"; tone = "high"; }
+      else if (weakening.some(t => t.impact >= 4) || blockersRising.length) { label = "At risk"; tone = "mid"; }
+      else if (gaining.length <= weakening.length) { label = "Holding"; tone = "mid"; }
+      return { label, tone, gaining, weakening, blockersRising, rivals };
+    },
+  };
+})();
+
+</script>
+<script>
+// ─── STORE SHIM — stands in for app.jsx's StoreProvider. Claude Code: use the real store/hooks instead.
+window.FM = { useStore: () => ({
+  project: FM_DATA.project, strategies: FM_DATA.strategies, scenarios: FM_DATA.scenarios,
+  seed: FM_DATA, user: { name: "John Tan" }, activeProjectId: "p1",
+  projects: [{ id: "p1", stepsComplete: 8, lastEdited: "2026-07-07T09:00:00Z" }],
+}) };
+</script>
+</head>
+<body>
+<template id="__bundler_thumbnail"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#1E1B2E"></rect><circle cx="50" cy="50" r="24" fill="none" stroke="#fff" stroke-width="6"></circle><circle cx="50" cy="50" r="9" fill="#F97316"></circle></svg></template>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+// ─── ICONS (components/icons.jsx)
+// Shared icons (Feather-style)
+const { useState, useEffect, useRef, useMemo, useCallback } = React;
+
+const Icon = ({ d, size = 16, stroke = "currentColor", fill = "none", strokeWidth = 2, className = "", style }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className} style={style}>
+    {d}
+  </svg>
+);
+
+const Icons = {
+  ArrowRight: (p) => <Icon {...p} d={<>
+    <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
+  </>}/>,
+  ArrowLeft: (p) => <Icon {...p} d={<>
+    <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
+  </>}/>,
+  Check: (p) => <Icon {...p} d={<polyline points="20 6 9 17 4 12"/>}/>,
+  X: (p) => <Icon {...p} d={<><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></>}/>,
+  Plus: (p) => <Icon {...p} d={<><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></>}/>,
+  Search: (p) => <Icon {...p} d={<><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></>}/>,
+  Bell: (p) => <Icon {...p} d={<><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></>}/>,
+  Compass: (p) => <Icon {...p} d={<><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></>}/>,
+  Sparkle: (p) => <Icon {...p} d={<><path d="M12 3l1.8 5.5L19 10l-5.2 1.5L12 17l-1.8-5.5L5 10l5.2-1.5L12 3z"/></>}/>,
+  Mic: (p) => <Icon {...p} d={<><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></>}/>,
+  Link: (p) => <Icon {...p} d={<><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></>}/>,
+  File: (p) => <Icon {...p} d={<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></>}/>,
+  Upload: (p) => <Icon {...p} d={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></>}/>,
+  Survey: (p) => <Icon {...p} d={<><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></>}/>,
+  Rocket: (p) => <Icon {...p} d={<><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></>}/>,
+  Star: (p) => <Icon {...p} d={<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>}/>,
+  Layers: (p) => <Icon {...p} d={<><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></>}/>,
+  Grid: (p) => <Icon {...p} d={<><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></>}/>,
+  Brain: (p) => <Icon {...p} d={<><path d="M12 5a3 3 0 0 0-6 0 3 3 0 0 0-3 3 3 3 0 0 0 1.5 2.6A3 3 0 0 0 6 16a3 3 0 0 0 6 0V5z"/><path d="M12 5a3 3 0 0 1 6 0 3 3 0 0 1 3 3 3 3 0 0 1-1.5 2.6A3 3 0 0 1 18 16a3 3 0 0 1-6 0V5z"/></>}/>,
+  Eye: (p) => <Icon {...p} d={<><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></>}/>,
+  Map: (p) => <Icon {...p} d={<><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></>}/>,
+  Target: (p) => <Icon {...p} d={<><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></>}/>,
+  Activity: (p) => <Icon {...p} d={<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>}/>,
+  Settings: (p) => <Icon {...p} d={<><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></>}/>,
+  Database: (p) => <Icon {...p} d={<><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></>}/>,
+  Radio: (p) => <Icon {...p} d={<><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></>}/>,
+  Edit3: (p) => <Icon {...p} d={<><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></>}/>,
+  Compass2: (p) => <Icon {...p} d={<><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></>}/>,
+  Trending: (p) => <Icon {...p} d={<><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></>}/>,
+  MoreH: (p) => <Icon {...p} d={<><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></>}/>,
+  Filter: (p) => <Icon {...p} d={<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>}/>,
+  ChevronDown: (p) => <Icon {...p} d={<polyline points="6 9 12 15 18 9"/>}/>,
+  ChevronRight: (p) => <Icon {...p} d={<polyline points="9 18 15 12 9 6"/>}/>,
+  Send: (p) => <Icon {...p} d={<><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></>}/>,
+  Refresh: (p) => <Icon {...p} d={<><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></>}/>,
+  Logo: ({ size = 28, reverse = false }) => {
+    const base = reverse ? "#fff" : "#1E1B2E";
+    return (
+      <svg width={size} height={size} viewBox="0 0 48 48" fill="none" style={{ display: "block", flexShrink: 0 }} aria-label="Scenaric">
+        <rect x="3"  y="3"  width="18" height="18" rx="5" fill={base}/>
+        <rect x="27" y="3"  width="18" height="18" rx="5" fill="#F97316"/>
+        <rect x="3"  y="27" width="18" height="18" rx="5" fill={base}/>
+        <rect x="27" y="27" width="18" height="18" rx="5" fill={base}/>
+      </svg>
+    );
+  },
+};
+
+// Star rating
+function Stars({ count = 5, value = 0, onChange, size = 12 }) {
+  return (
+    <span className="stars" style={{ gap: 2 }}>
+      {Array.from({ length: count }).map((_, i) => (
+        <svg
+          key={i}
+          width={size} height={size} viewBox="0 0 24 24"
+          fill={i < value ? "#F97316" : "transparent"}
+          stroke={i < value ? "#F97316" : "#D1D5DB"}
+          strokeWidth="2"
+          style={{ cursor: onChange ? "pointer" : "default" }}
+          onClick={() => onChange && onChange(i + 1)}
+        >
+          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+        </svg>
+      ))}
+    </span>
+  );
+}
+
+Object.assign(window, { Icons, Stars, Icon });
+
+</script>
+<script type="text/babel" data-presets="react">
+// ─── SHARED DECISION UI (components/decision-ui.jsx)
+// Shared UI for Monitoring + Strategy: likelihood spark, scenario chips, action cards, executive briefing.
+const dcMono = { fontFamily: "var(--font-mono)", fontSize: 10.5, letterSpacing: ".06em", textTransform: "uppercase", color: "#9CA3AF" };
+const dcScen = (id) => (window.FM_DATA.scenarios || []).find(s => s.id === id);
+const dcEvent = (id) => window.FM_DECISIONS.tracked.find(t => t.evId === id);
+
+function DcSpark({ hist, color }) {
+  const w = 84, h = 22, step = w / (hist.length - 1);
+  const y = (v) => h - 2 - (v / 4) * (h - 4);
+  let d = `M0 ${y(hist[0])}`;
+  hist.forEach((v, i) => { if (i) d += ` H${i * step} V${y(v)}`; });
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: "block" }}>
+      {[1, 2, 3].map(l => <line key={l} x1="0" x2={w} y1={y(l)} y2={y(l)} stroke="#F3F4F6"/>)}
+      <path d={d} fill="none" stroke={color} strokeWidth="1.6"/>
+      <circle cx={w - 1.5} cy={y(hist[hist.length - 1])} r="2.2" fill={color}/>
+    </svg>
+  );
+}
+
+function DcTrend({ t }) {
+  const M = window.DecisionModel, d = M.delta(t), last = t.hist[t.hist.length - 1];
+  const occurredNow = last === 4 && t.hist[0] < 4;
+  const tone = occurredNow ? { fg: "#1E1B2E", bg: "#F3F4F6", txt: "Occurred" } : d > 0 ? { fg: "#B45309", bg: "#FFFBEB", txt: "Rising" } : d < 0 ? { fg: "#1D4ED8", bg: "#EFF6FF", txt: "Falling" } : { fg: "#6B7280", bg: "#F9FAFB", txt: last === 4 ? "Occurred" : "Stable" };
+  return <span className="badge" style={{ background: tone.bg, color: tone.fg, fontSize: 10 }}>{tone.txt}</span>;
+}
+
+function DcScenarioDots({ ids, target }) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+      {ids.map(id => { const s = dcScen(id); if (!s) return null; return (
+        <span key={id} title={s.name} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: "#374151", padding: "2px 6px", borderRadius: 999, border: "1px solid " + (id === target ? s.color : "#E5E7EB"), background: id === target ? "#fff" : "#FAFAFA", fontWeight: id === target ? 600 : 400 }}>
+          <span style={{ width: 6, height: 6, borderRadius: 999, background: s.color }}/>{s.name}
+        </span>); })}
+    </div>
+  );
+}
+
+const dcUrg = { Urgent: "badge-high", High: "badge-mid", Medium: "badge-low" };
+
+function DcActionCard({ a, status, onAct, compact }) {
+  const sc = a.scenario ? dcScen(a.scenario) : null;
+  const ev = dcEvent(a.evidence) || window.FM_DECISIONS.inbox.find(n => n.id === a.evidence);
+  const done = status !== "pending";
+  return (
+    <div style={{ border: "1px solid #E5E7EB", borderRadius: 10, padding: 14, background: done ? "#FAFAFA" : "#fff", display: "flex", flexDirection: "column", gap: 8, opacity: status === "dismissed" ? .6 : 1 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+        <span className={"badge " + dcUrg[a.urgency]} style={{ fontSize: 10 }}>{a.urgency}</span>
+        <span style={dcMono}>{a.trigger}</span>
+        <span style={{ ...dcMono, marginLeft: "auto" }}>For {a.audience}</span>
+      </div>
+      <div style={{ fontSize: 14, fontWeight: 600, color: "#1E1B2E", lineHeight: 1.35 }}>{a.title}</div>
+      {!compact && <div style={{ fontSize: 12.5, color: "#4B5563", lineHeight: 1.55 }}>{a.body}</div>}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 11.5, color: "#6B7280" }}>
+        {sc && <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: 999, background: sc.color }}/>{sc.name}</span>}
+        {ev && <span>· Evidence: {ev.title}</span>}
+      </div>
+      {onAct && (done ? (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, color: "#6B7280" }}>
+          <span>{status === "accepted" ? "Accepted · added to route" : status === "deferred" ? "Deferred to next review" : "Dismissed"}</span>
+          <button className="btn btn-ghost btn-sm" onClick={() => onAct(a, "pending")}>Undo</button>
+        </div>
+      ) : (
+        <div style={{ display: "flex", gap: 6 }}>
+          <button className="btn btn-primary btn-sm" onClick={() => onAct(a, "accepted")}>Accept</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => onAct(a, "deferred")}>Defer</button>
+          <button className="btn btn-ghost btn-sm" style={{ border: "none" }} onClick={() => onAct(a, "dismissed")}>Dismiss</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DcBriefing({ onClose }) {
+  const D = window.FM_DECISIONS, M = window.DecisionModel, store = window.FM.useStore();
+  const [ds] = window.useDecisions();
+  const [aud, setAud] = React.useState("CEO");
+  const [sent, setSent] = React.useState(false);
+  const target = dcScen(ds.target), h = M.health(ds.target);
+  const movers = D.tracked.filter(t => t.change && M.delta(t) !== 0).sort((a, b) => Math.abs(M.delta(b) * b.impact) - Math.abs(M.delta(a) * a.impact));
+  const decisions = D.actions.filter(a => ds.actions[a.id] === "pending" && (aud === "CSO" || a.audience === "CEO"));
+  const H = ({ children }) => <div style={{ ...dcMono, margin: "20px 0 8px", color: "#6B7280" }}>{children}</div>;
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.45)", zIndex: 100, display: "flex", justifyContent: "center", padding: "32px 20px", overflowY: "auto" }}>
+      <div onClick={e => e.stopPropagation()} className="card slide-up" style={{ maxWidth: 720, width: "100%", padding: 0, alignSelf: "flex-start" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 20px", borderBottom: "1px solid #E5E7EB", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", border: "1px solid #E5E7EB", borderRadius: 8, overflow: "hidden" }}>
+            {["CEO", "CSO"].map(x => <button key={x} onClick={() => setAud(x)} style={{ border: "none", padding: "6px 12px", fontSize: 12.5, fontWeight: 500, cursor: "pointer", background: aud === x ? "#1E1B2E" : "#fff", color: aud === x ? "#fff" : "#374151" }}>{x} brief</button>)}
+          </div>
+          <span style={{ fontSize: 12, color: "#9CA3AF" }}>Auto-sent Mondays 07:00 · and when a signpost fires</span>
+          <button className="btn btn-primary btn-sm" style={{ marginLeft: "auto" }} onClick={() => setSent(true)}>{sent ? <><Icons.Check size={12}/> Sent</> : "Send now"}</button>
+          <button onClick={onClose} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#6B7280" }}><Icons.X size={16}/></button>
+        </div>
+        <div style={{ padding: "24px 28px 28px" }}>
+          <div style={dcMono}>{store.project.name} · Week of Sep 28 – Oct 4, 2026</div>
+          <h2 style={{ margin: "6px 0 8px", fontSize: 22, fontWeight: 600, letterSpacing: "-0.015em", lineHeight: 1.25, textWrap: "pretty" }}>
+            Route to {target.name} is {h.label.toLowerCase()}.
+          </h2>
+          {(h.weakening[0] || h.blockersRising[0]) && <div style={{ fontSize: 13.5, color: "#374151", lineHeight: 1.6, marginBottom: 4 }}>
+            {h.weakening[0] && <div><b>Weakened:</b> {h.weakening[0].title}</div>}
+            {h.blockersRising[0] && <div><b>Gaining against you:</b> {h.blockersRising[0].title}</div>}
+          </div>}
+          <div style={{ fontSize: 13.5, color: "#4B5563", lineHeight: 1.6 }}>Evidence is building fastest toward {[...window.FM_DATA.scenarios].sort((a, b) => M.momentum(b.id).score - M.momentum(a.id).score)[0].name}. {decisions.length} decision{decisions.length === 1 ? "" : "s"} below.</div>
+          <H>Decisions needed</H>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {decisions.length ? decisions.map(a => (
+              <div key={a.id} style={{ display: "grid", gridTemplateColumns: "70px 1fr", gap: 10, fontSize: 13.5, lineHeight: 1.5 }}>
+                <span className={"badge " + dcUrg[a.urgency]} style={{ fontSize: 10, alignSelf: "start", justifySelf: "start" }}>{a.urgency}</span>
+                <div><b>{a.title}.</b> <span style={{ color: "#4B5563" }}>{a.body}</span></div>
+              </div>)) : <div style={{ fontSize: 13, color: "#6B7280" }}>Nothing pending. All recommendations have been handled in Strategy.</div>}
+          </div>
+          <H>What moved</H>
+          {movers.slice(0, aud === "CEO" ? 3 : 6).map(t => (
+            <div key={t.evId} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, padding: "8px 0", borderTop: "1px solid #F3F4F6", fontSize: 13 }}>
+              <div><div style={{ fontWeight: 500 }}>{t.title}</div><div style={{ color: "#6B7280", fontSize: 12, marginTop: 2 }}>{t.change.cite} <i>({t.change.source}, {t.change.date})</i></div></div>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#374151", whiteSpace: "nowrap" }}>{M.lvl(t.hist[0])} → {M.lvl(t.hist[t.hist.length - 1])}</div>
+            </div>))}
+          <H>Scenario momentum</H>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 8 }}>
+            {window.FM_DATA.scenarios.map(s => { const m = M.momentum(s.id); return (
+              <div key={s.id} style={{ border: "1px solid " + (s.id === ds.target ? s.color : "#E5E7EB"), borderRadius: 8, padding: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 600 }}><span style={{ width: 7, height: 7, borderRadius: 999, background: s.color }}/>{s.name}</div>
+                <div style={{ fontSize: 12, color: "#6B7280", marginTop: 3 }}>{m.label}{s.id === ds.target ? " · target" : ""}</div>
+              </div>); })}
+          </div>
+          {aud === "CSO" && <>
+            <H>Frame health</H>
+            <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.55 }}>{D.inbox.filter(n => !n.fits).length} of the last {D.inbox.length} discoveries fit no existing force, and both point at sovereign compute capital. Recommend adding the force and testing it in the Matrix. If it proves high-impact and two-sided, re-axis.</div>
+            <H>Pending revision to strategy</H>
+            {D.revision.items.map((r, i) => <div key={i} style={{ fontSize: 13, lineHeight: 1.55, marginBottom: 4 }}><b>{r.kind}:</b> {r.text}</div>)}
+          </>}
+          <div style={{ marginTop: 22, paddingTop: 12, borderTop: "1px solid #E5E7EB", fontSize: 11.5, color: "#9CA3AF", lineHeight: 1.5 }}>Momentum shows the relative evidence for each future. It is not a probability, and all four futures stay plausible. Every claim above cites the event or source behind it.</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Accept/defer/dismiss an action card; accepted cards update the route move they point at.
+window.dcAct = function (a, status) {
+  window.DecisionStore.set(s => {
+    const moves = Object.assign({}, s.moves);
+    if (a.effect && a.effect.move) { if (status === "accepted") moves[a.effect.move] = a.effect.status; else delete moves[a.effect.move]; }
+    return { actions: Object.assign({}, s.actions, { [a.id]: status }), moves };
+  });
+};
+
+Object.assign(window, { DcSpark, DcTrend, DcScenarioDots, DcActionCard, DcBriefing, dcMono, dcScen, dcEvent });
+
+</script>
+<script type="text/babel" data-presets="react">
+// ─── PAGE (components/page-strategy.jsx)
+// Strategy v2: choose a target future → map levers → route of moves → act on Monitoring's recommendations.
+function PageStrategy({ navigate }) {
+  const D = window.FM_DECISIONS, M = window.DecisionModel;
+  const store = window.FM.useStore();
+  const scenarios = window.FM_DATA.scenarios;
+  const [ds, set] = window.useDecisions();
+  const [briefing, setBriefing] = React.useState(false);
+  const [showDone, setShowDone] = React.useState(false);
+  const target = dcScen(ds.target), health = M.health(ds.target), lev = M.levers(ds.target);
+  const route = (D.routes[ds.target] || []).map(m => Object.assign({}, m, { status: ds.moves[m.id] || m.status }));
+  const pending = D.actions.filter(a => ds.actions[a.id] === "pending");
+  const handled = D.actions.filter(a => ds.actions[a.id] !== "pending");
+  const toneCol = { low: "#10B981", mid: "#F59E0B", high: "#EF4444" }[health.tone];
+  const card = { padding: 20 };
+  const H = (t, sub, right) => (
+    <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+      <div><div style={{ fontSize: 14, fontWeight: 600, color: "#1E1B2E" }}>{t}</div>{sub && <div style={{ fontSize: 12.5, color: "#6B7280", marginTop: 2, maxWidth: 640 }}>{sub}</div>}</div>{right}
+    </div>);
+  const linkLabel = (l) => {
+    if (l.kind === "event") { const e = dcEvent(l.ref); return { k: "Event", v: e ? e.title : l.ref }; }
+    if (l.kind === "signpost") { const p = D.signposts.find(x => x.id === l.ref); return { k: "Trigger", v: p ? p.name : l.ref }; }
+    const o = (store.strategies || window.FM_DATA.strategies).find(x => x.id === l.ref); return { k: "Option", v: o ? o.name : l.ref };
+  };
+  const stStyle = {
+    active: { bg: "#ECFDF5", fg: "#065F46" }, planned: { bg: "#F3F4F6", fg: "#374151" }, held: { bg: "#F9FAFB", fg: "#6B7280" },
+    armed: { bg: "#FFFBEB", fg: "#B45309" }, paused: { bg: "#EFF6FF", fg: "#1D4ED8" },
+  };
+  const lanes = [
+    { id: "noregret", name: "No-regret", sub: "Do now. Pays off in all four futures." },
+    { id: "shaping", name: "Shaping", sub: "Make the events that lead to the target more likely." },
+    { id: "hedge", name: "Hedges", sub: "Held in reserve. Triggered if another future gains ground." },
+  ];
+  const whens = ["Now", "2027", "2028", "2029–30"];
+
+  const LeverCol = ({ title, sub, items, kind }) => (
+    <div style={{ border: "1px solid #E5E7EB", borderRadius: 12, padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+      <div><div style={{ fontSize: 13, fontWeight: 600 }}>{title} <span style={{ color: "#9CA3AF", fontWeight: 400 }}>{items.length}</span></div><div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>{sub}</div></div>
+      {items.map(t => {
+        const d = M.delta(t), last = t.hist[t.hist.length - 1];
+        const good = kind === "block" ? d < 0 : d > 0;
+        return (
+          <div key={t.evId} style={{ borderTop: "1px solid #F3F4F6", paddingTop: 8, display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: 8, alignItems: "center" }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 500, lineHeight: 1.4 }}>{t.title}</div>
+              <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>{M.lvl(last)}{kind === "block" ? (t.lever === "influence" ? " · reduce" : " · hedge") : ""}</div>
+            </div>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 600, color: d === 0 ? "#9CA3AF" : good ? "#047857" : "#B91C1C" }}>{d > 0 ? "↑" : d < 0 ? "↓" : "→"}</span>
+          </div>);
+      })}
+    </div>);
+
+  return (
+    <div style={{ flex: 1, overflowY: "auto", padding: 20 }} className="scroll-y">
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div className="card" style={card}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div>
+              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Strategy</h2>
+              <div style={{ fontSize: 13, color: "#6B7280", marginTop: 2 }}>Steer toward the future you want, and be ready for the other three.</div>
+            </div>
+            <button className="btn btn-ghost btn-sm" onClick={() => setBriefing(true)}><Icons.File size={12}/> Executive briefing</button>
+          </div>
+          <div style={{ ...dcMono, margin: "18px 0 8px" }}>Target future</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 8 }}>
+            {scenarios.map(s => { const on = s.id === ds.target, m = M.momentum(s.id); return (
+              <button key={s.id} onClick={() => set({ target: s.id })} style={{ textAlign: "left", cursor: "pointer", borderRadius: 10, padding: "10px 12px", background: on ? "#fff" : "#FAFAFA", border: on ? "1.5px solid " + s.color : "1px solid #E5E7EB" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13.5, fontWeight: 600, color: "#1E1B2E" }}><span style={{ width: 8, height: 8, borderRadius: 999, background: s.color }}/>{s.name}</div>
+                <div style={{ fontSize: 11.5, color: "#6B7280", marginTop: 3 }}>{s.tagline} · {m.label}</div>
+              </button>); })}
+          </div>
+          <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 8 }}>The target is your strategic choice, not a score on the scenario. All four futures stay on the board, and every move below is still tested against each one.</div>
+          <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 12 }}>
+            <div style={{ borderLeft: "3px solid " + toneCol, paddingLeft: 12 }}>
+              <div style={dcMono}>Route health</div>
+              <div style={{ fontSize: 20, fontWeight: 600, marginTop: 2 }}>{health.label}</div>
+            </div>
+            <div><div style={dcMono}>Gaining</div><div style={{ fontSize: 12.5, color: "#374151", marginTop: 4, lineHeight: 1.45 }}>{health.gaining.map(t => t.title).join(" · ") || "None"}</div></div>
+            <div><div style={dcMono}>Pulling you off course</div><div style={{ fontSize: 12.5, color: "#374151", marginTop: 4, lineHeight: 1.45 }}>{[...health.weakening, ...health.blockersRising].map(t => t.title).join(" · ") || "None"}</div></div>
+          </div>
+        </div>
+
+        <div className="card" style={card}>
+          {H("Recommended actions", `${pending.length} waiting · sent from Monitoring when the evidence crossed a threshold`,
+            handled.length > 0 && <button className="btn btn-ghost btn-sm" onClick={() => setShowDone(!showDone)}>{showDone ? "Hide" : "Show"} {handled.length} handled</button>)}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(min(100%,300px),1fr))", gap: 10 }}>
+            {pending.map(a => <DcActionCard key={a.id} a={a} status="pending" onAct={(x, st) => { window.dcAct(x, st); if (st === "accepted" && x.effect.navigate) navigate(x.effect.navigate); }}/>)}
+            {showDone && handled.map(a => <DcActionCard key={a.id} a={a} status={ds.actions[a.id]} onAct={window.dcAct} compact/>)}
+          </div>
+          {!pending.length && !showDone && <div style={{ fontSize: 13, color: "#6B7280" }}>Nothing waiting. New recommendations arrive after each daily scan.</div>}
+        </div>
+
+        <div className="card" style={card}>
+          {H(`Levers toward ${target.name}`, "The events that lead to your target, grouped by what you can do about each one.")}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: 12 }}>
+            <LeverCol title="Influence" sub="Push these with your own moves." items={lev.influence} kind="sup"/>
+            <LeverCol title="Watch" sub="Outside your control. Prepare for them." items={lev.watch} kind="sup"/>
+            <LeverCol title="Blockers" sub="These pull toward other futures. Reduce or hedge." items={lev.block} kind="block"/>
+          </div>
+        </div>
+
+        <div className="card" style={card}>
+          {H(`Route to ${target.name}`, "Every move is tied to the event it pushes or the signpost that triggers it. Accepted actions update this map.")}
+          {route.length ? (
+            <div style={{ overflowX: "auto" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "170px repeat(4,minmax(170px,1fr))", minWidth: 860, border: "1px solid #E5E7EB", borderRadius: 12, overflow: "hidden" }}>
+                <div style={{ background: "#F9FAFB", borderBottom: "1px solid #E5E7EB" }}/>
+                {whens.map(w => <div key={w} style={{ ...dcMono, color: "#6B7280", padding: "10px 12px", background: "#F9FAFB", borderBottom: "1px solid #E5E7EB", borderLeft: "1px solid #F3F4F6" }}>{w}</div>)}
+                {lanes.map((ln, li) => <React.Fragment key={ln.id}>
+                  <div style={{ padding: 12, borderTop: li ? "1px solid #F3F4F6" : "none" }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{ln.name}</div>
+                    <div style={{ fontSize: 11.5, color: "#6B7280", marginTop: 2, lineHeight: 1.4 }}>{ln.sub}</div>
+                  </div>
+                  {whens.map(w => (
+                    <div key={w} style={{ padding: 8, borderTop: li ? "1px solid #F3F4F6" : "none", borderLeft: "1px solid #F3F4F6", display: "flex", flexDirection: "column", gap: 6 }}>
+                      {route.filter(m => m.lane === ln.id && m.when === w).map(m => { const l = linkLabel(m.link), c = stStyle[m.status]; return (
+                        <div key={m.id} style={{ border: "1px solid " + (m.status === "armed" ? "#FDE68A" : m.status === "paused" ? "#BFDBFE" : "#E5E7EB"), borderStyle: m.status === "held" ? "dashed" : "solid", borderRadius: 8, padding: "8px 10px", background: "#fff" }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.35 }}>{m.title}</div>
+                          <div style={{ fontSize: 11, color: "#6B7280", marginTop: 4, lineHeight: 1.4 }}><span style={{ color: "#9CA3AF" }}>{m.push ? "Pushes" : l.k}:</span> {l.v}</div>
+                          <span className="badge" style={{ marginTop: 6, background: c.bg, color: c.fg, fontSize: 10, textTransform: "capitalize" }}>{m.status}</span>
+                        </div>); })}
+                    </div>))}
+                </React.Fragment>)}
+              </div>
+            </div>
+          ) : (
+            <div style={{ border: "1px dashed #E5E7EB", borderRadius: 12, padding: 24, textAlign: "center" }}>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>No route to {target.name} yet</div>
+              <div style={{ fontSize: 12.5, color: "#6B7280", margin: "4px auto 12px", maxWidth: 420 }}>AI drafts no-regret, shaping and hedge moves from this future's levers and signposts. You review the draft before anything is added.</div>
+              <button className="btn btn-primary btn-sm"><Icons.Sparkle size={12}/> Draft route</button>
+            </div>)}
+        </div>
+
+        {ds.revision === "proposed" && (
+          <div className="card" style={{ ...card, border: "1px solid #FED7AA", background: "#FFFBF5" }}>
+            {H("Proposed strategy revision", `The evidence has moved since this strategy was set on ${D.revision.since}.`,
+              <div style={{ display: "flex", gap: 6 }}>
+                <button className="btn btn-primary btn-sm" onClick={() => set({ revision: "applied" })}>Apply revision</button>
+                <button className="btn btn-ghost btn-sm" style={{ background: "#fff" }} onClick={() => navigate("/app/matrix")}>Rebuild scenarios</button>
+                <button className="btn btn-ghost btn-sm" style={{ border: "none" }} onClick={() => set({ revision: "dismissed" })}>Dismiss</button>
+              </div>)}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {D.revision.items.map((r, i) => <div key={i} style={{ display: "grid", gridTemplateColumns: "96px 1fr", gap: 10, fontSize: 13, lineHeight: 1.5 }}><span style={{ ...dcMono, color: "#C2410C", paddingTop: 2 }}>{r.kind}</span><span>{r.text}</span></div>)}
+            </div>
+            <div style={{ fontSize: 12, color: "#9A3412", marginTop: 10 }}>Rebuilding scenarios opens the re-axis review in the Matrix. Your current scenarios and route are saved as a snapshot.</div>
+          </div>)}
+
+        <div className="card" style={card}>
+          {H("Wind tunnel", "How each option performs in all four futures. A route that only works in the target leaves you exposed.")}
+          <div style={{ overflowX: "auto" }}>
+            <div style={{ minWidth: 720, border: "1px solid #E5E7EB", borderRadius: 12, overflow: "hidden" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(240px,2fr) repeat(4,1fr) 130px", background: "#F9FAFB", borderBottom: "1px solid #E5E7EB", padding: "10px 14px", ...dcMono, color: "#6B7280" }}>
+                <div>Option</div>
+                {scenarios.map(s => <div key={s.id} style={{ textAlign: "center", color: s.id === ds.target ? s.color : undefined, fontWeight: s.id === ds.target ? 600 : 500 }}>{s.name}</div>)}
+                <div style={{ textAlign: "center" }}>Verdict</div>
+              </div>
+              {(store.strategies || window.FM_DATA.strategies).map((st, i) => {
+                const n = st.robustIn.length, inT = st.robustIn.includes(target.name);
+                const verdict = n >= 3 ? ["Robust", "badge-low"] : inT ? ["Depends on target", "badge-mid"] : ["Hedge", "badge-mid"];
+                return (
+                  <div key={st.id} style={{ display: "grid", gridTemplateColumns: "minmax(240px,2fr) repeat(4,1fr) 130px", padding: "12px 14px", alignItems: "center", borderTop: i ? "1px solid #F3F4F6" : "none" }}>
+                    <div><div style={{ fontSize: 13.5, fontWeight: 600 }}>{st.name}</div><div style={{ fontSize: 12, color: "#6B7280", marginTop: 2, lineHeight: 1.45 }}>{st.notes}</div></div>
+                    {scenarios.map(s => { const ok = st.robustIn.includes(s.name); return (
+                      <div key={s.id} style={{ display: "flex", justifyContent: "center", background: s.id === ds.target ? "#FAFAFA" : "transparent", alignSelf: "stretch", alignItems: "center" }}>
+                        <span style={{ width: 22, height: 22, borderRadius: 999, background: ok ? "#ECFDF5" : "#FEF2F2", color: ok ? "#10B981" : "#EF4444", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 600 }}>{ok ? "✓" : "·"}</span>
+                      </div>); })}
+                    <div style={{ textAlign: "center" }}><span className={"badge " + verdict[1]} style={{ fontSize: 10 }}>{verdict[0]}</span></div>
+                  </div>);
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+      {briefing && <DcBriefing onClose={() => setBriefing(false)}/>}
+    </div>
+  );
+}
+
+window.PageStrategy = PageStrategy;
+
+</script>
+<script type="text/babel" data-presets="react">
+// ─── HOST — reference harness. Navigation is stubbed. Claude Code: mount the page inside the real AppShell.
+function Host() {
+  const [toast, setToast] = React.useState(null);
+  const navigate = (p) => { setToast("Would navigate to " + p); setTimeout(() => setToast(null), 1800); };
+  return (
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "#F7F7F5" }}>
+      <div style={{ fontSize: 12, color: "#7C2D12", background: "#FFF7ED", borderBottom: "1px solid #FED7AA", padding: "8px 20px", lineHeight: 1.5, flexShrink: 0 }}>
+        <b>Reference build · Strategy.</b> Mock data; choices persist in localStorage key "scenaric.decisions.v1". UI is final — replace the seed, store shim and DecisionStore with the backend.
+      </div>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}><PageStrategy navigate={navigate}/></div>
+      {toast && <div style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", background: "#1E1B2E", color: "#fff", fontSize: 12.5, padding: "8px 14px", borderRadius: 8 }}>{toast}</div>}
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<Host/>);
+</script>
+</body>
+</html>
