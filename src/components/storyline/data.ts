@@ -22,8 +22,12 @@ export interface StoryNode {
   uncertainty?: "High" | "Medium" | "Low";
   impact?: number;
   // The real signals.id this node is grounded in — null only for the "realized" capstone
-  // node. Lets the UI link a card back to its originating signal.
+  // node, or an event-grounded node (see eventId below). Lets the UI link a card back to its
+  // originating signal.
   signalId?: string | null;
+  // The real events.id this node is grounded in, via the event-picker-modal. New nodes set
+  // this instead of signalId going forward (0042_decision_layer.sql's storyline_nodes.event_id).
+  eventId?: string | null;
 }
 export interface StoryEdge {
   // Real storyline_edges.id once persisted — undefined only for the brief window between an

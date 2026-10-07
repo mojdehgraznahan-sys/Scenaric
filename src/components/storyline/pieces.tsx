@@ -372,7 +372,7 @@ export function StorylineEmptyState({ status, errorMessage, onGenerate, onBrowse
           Build your scenario storyline
         </h3>
         <p className="m-0 max-w-[420px] text-sm leading-[1.55] text-muted-foreground [text-wrap:pretty]">
-          Drag signals from your library to show how this future unfolds. Connect them with arrows to map cause and
+          Drag events from your library to show how this future unfolds. Connect them with arrows to map cause and
           effect.
         </p>
         <div className="mt-[22px] flex flex-wrap justify-center gap-2.5">
@@ -384,7 +384,7 @@ export function StorylineEmptyState({ status, errorMessage, onGenerate, onBrowse
               <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
               <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
             </svg>
-            Browse Signals Library
+            Browse Events Library
           </button>
           <button
             onClick={onGenerate}

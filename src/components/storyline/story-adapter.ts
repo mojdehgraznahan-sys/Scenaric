@@ -4,7 +4,7 @@
 // (never re-minted), so a card's id can go straight into updateStorylineNode/deleteStorylineEdge
 // etc. without any lookup table.
 import type { Database } from "@/lib/supabase/types";
-import type { Signal } from "@/lib/types";
+import type { EventItem, Signal } from "@/lib/types";
 import { PHASES, type Phase } from "@/lib/storyline-mapping";
 import type { StoryNode, StoryEdge, StoryPhase } from "./data";
 
@@ -31,7 +31,7 @@ const STRENGTH_WEIGHT: Record<string, number> = {
   Weak: 0.3,
 };
 
-export function toStoryNode(row: StorylineNodeRow, signal: Signal | undefined): StoryNode {
+export function toStoryNode(row: StorylineNodeRow, signal: Signal | undefined, event?: EventItem | undefined): StoryNode {
   return {
     id: row.id,
     phase: row.phase,
@@ -41,12 +41,13 @@ export function toStoryNode(row: StorylineNodeRow, signal: Signal | undefined): 
     year: row.year != null ? String(row.year) : "—",
     strength: STRENGTH_WEIGHT[row.strength ?? ""] ?? 0.65,
     signalId: row.signal_id,
-    // No real per-node source/impact/uncertainty — pulled from the originating signal when
-    // this node is grounded in one (the "realized" capstone node has none, same graceful
-    // defaults signal-card.tsx already falls back to).
-    source: signal?.source,
-    impact: signal?.impact ?? undefined,
-    uncertainty: signal?.uncertainty ?? undefined,
+    eventId: row.event_id,
+    // No real per-node source/impact/uncertainty — pulled from the originating signal or
+    // event when this node is grounded in one (the "realized" capstone node has none, same
+    // graceful defaults signal-card.tsx already falls back to).
+    source: signal?.source ?? event?.source ?? undefined,
+    impact: signal?.impact ?? event?.impact ?? undefined,
+    uncertainty: signal?.uncertainty ?? event?.likelihood ?? undefined,
   };
 }
 
@@ -78,7 +79,7 @@ export function toBackendPhase(phaseId: string): Phase {
 // connected relative to a minimally-connected chain (nodes - 1 edges).
 export function computeChainConfidence(nodes: StoryNode[], edges: StoryEdge[]): number {
   if (nodes.length === 0) return 0;
-  const groundedRatio = nodes.filter((n) => n.signalId).length / nodes.length;
+  const groundedRatio = nodes.filter((n) => n.signalId || n.eventId).length / nodes.length;
   const avgImpact = nodes.reduce((sum, n) => sum + (n.impact ?? 3), 0) / nodes.length / 5;
   const edgeRatio = Math.min(1, edges.length / Math.max(1, nodes.length - 1));
   return Math.round(100 * (0.5 * groundedRatio + 0.3 * avgImpact + 0.2 * edgeRatio));

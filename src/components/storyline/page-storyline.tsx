@@ -15,7 +15,7 @@ import { DEFAULT_COLUMN_LABELS, edgeKey, type StoryNode, type StoryEdge } from "
 import { ScenarioContextHeader } from "./scenario-context-header";
 import { StorylineCanvas } from "./canvas";
 import { StorylineSidePanel, StorylineToast, type StorylineToastState } from "./pieces";
-import { SignalPickerModal } from "./signal-picker-modal";
+import { EventPickerModal } from "./event-picker-modal";
 
 type ScenarioStorylineRow = Database["public"]["Tables"]["scenario_storylines"]["Row"];
 type PlausibilityCheckRow = Database["public"]["Tables"]["plausibility_checks"]["Row"];
@@ -92,11 +92,19 @@ export function PageStoryline() {
   const [edges, setEdges] = React.useState<StoryEdge[]>([]);
   React.useEffect(() => {
     if (!loaded) return;
-    setNodes(loaded.nodes.map((n) => toStoryNode(n, n.signal_id ? store.signals.find((s) => s.id === n.signal_id) : undefined)));
+    setNodes(
+      loaded.nodes.map((n) =>
+        toStoryNode(
+          n,
+          n.signal_id ? store.signals.find((s) => s.id === n.signal_id) : undefined,
+          n.event_id ? store.events.find((e) => e.id === n.event_id) : undefined
+        )
+      )
+    );
     setEdges(loaded.edges.map(toStoryEdge));
     setSelected(null);
-    // Deliberately not depending on store.signals — an unrelated global signals refresh
-    // shouldn't clobber in-progress local edits between reloads.
+    // Deliberately not depending on store.signals/store.events — an unrelated global
+    // signals/events refresh shouldn't clobber in-progress local edits between reloads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded]);
 
@@ -292,8 +300,8 @@ export function PageStoryline() {
       {/* Page-level toast */}
       <StorylineToast toast={toast} />
 
-      {/* Add-signal modal */}
-      <SignalPickerModal
+      {/* Add-event modal */}
+      <EventPickerModal
         open={addModalOpen}
         onClose={() => setAddModalOpen(false)}
         initialPlacement={modalInitialPhase}

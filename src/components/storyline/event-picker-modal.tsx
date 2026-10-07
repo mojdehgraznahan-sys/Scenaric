@@ -1,9 +1,12 @@
 "use client";
 
-// Signal picker modal — surfaces from Storyline's "+ Add Signal to Chain".
-// Two tabs: pick from library OR create new. Both converge on a "place in column" +
-// "connect from" selector, then commit through the canvas callbacks. Faithful port of
-// signal-picker-modal.jsx (uses the store's signals as the library).
+// Event picker modal — surfaces from Storyline's "+ Add event" slots. Two tabs: pick an
+// event from the Signals Library's Events view, OR create a new one (which also links it to
+// a force/pole, exactly like add-event-modal.tsx's flow — so the new event shows up in
+// Signals and is tracked by Monitoring, not just in this one chain). Both tabs converge on a
+// "place in column" + "connect from" selector, then commit through the canvas callbacks.
+// Renamed from signal-picker-modal.tsx/SignalPickerModal (design/2026-10-05/05-nav-and-labels):
+// a storyline is a chain of events, and events — not forces — are what Monitoring tracks.
 import * as React from "react";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
@@ -11,17 +14,18 @@ import { Chip } from "@/components/chip";
 import { ImpactStars } from "./signal-card";
 import { toBackendPhase } from "./story-adapter";
 import { createStorylineNode, updateStorylineNode, createStorylineEdge } from "@/lib/actions/storyline";
-import type { Signal, SteepCategory } from "@/lib/types";
+import { eventCategory, slPole } from "@/components/signals/pole";
+import type { EventItem, Signal, SteepCategory } from "@/lib/types";
 import type { StoryNode, StoryEdge, StoryPhase } from "./data";
 
 const STEEP_CATS: SteepCategory[] = ["Social", "Technology", "Economic", "Ecological", "Political"];
-const UNCERTAINTY_BADGE: Record<string, { bg: string; fg: string }> = {
+const LIKELIHOOD_BADGE: Record<string, { bg: string; fg: string }> = {
   High: { bg: "#FEF2F2", fg: "#EF4444" },
   Medium: { bg: "#FFFBEB", fg: "#F59E0B" },
   Low: { bg: "#ECFDF5", fg: "#10B981" },
 };
 
-export interface SignalPickerModalProps {
+export interface EventPickerModalProps {
   open: boolean;
   onClose: () => void;
   scenarioId: string;
@@ -32,22 +36,41 @@ export interface SignalPickerModalProps {
   setNodes: (updater: StoryNode[] | ((prev: StoryNode[]) => StoryNode[])) => void;
   setEdges: (updater: StoryEdge[] | ((prev: StoryEdge[]) => StoryEdge[])) => void;
   showToast: (msg: string, kind?: "success" | "error") => void;
-  // Set when opened from a specific phase column's "+ Add signal" slot — wins over
+  // Set when opened from a specific phase column's "+ Add event" slot — wins over
   // defaultColumn's fewest-nodes heuristic below, but still just seeds the same editable
   // dropdown rather than skipping it.
   initialPlacement?: string;
 }
 
-interface NewSignalForm {
+interface NewEventForm {
   title: string;
   body: string;
   category: SteepCategory;
+  status: "observed" | "possible";
+  occurredOn: string;
+  windowLabel: string;
   source: string;
+  likelihood: "Low" | "Medium" | "High";
   impact: number;
-  uncertainty: "Low" | "Medium" | "High";
+  forceId: string;
+  forceSide: "a" | "b";
 }
 
-export function SignalPickerModal({ open, onClose, scenarioId, nodes, phases, columnLabels, setNodes, setEdges, showToast, initialPlacement }: SignalPickerModalProps) {
+const EMPTY_FORM: NewEventForm = {
+  title: "",
+  body: "",
+  category: "Technology",
+  status: "possible",
+  occurredOn: "",
+  windowLabel: "",
+  source: "",
+  likelihood: "Medium",
+  impact: 3,
+  forceId: "",
+  forceSide: "b",
+};
+
+export function EventPickerModal({ open, onClose, scenarioId, nodes, phases, columnLabels, setNodes, setEdges, showToast, initialPlacement }: EventPickerModalProps) {
   const store = useStore();
   const [tab, setTab] = React.useState<"library" | "create">("library");
   const [search, setSearch] = React.useState("");
@@ -62,7 +85,7 @@ export function SignalPickerModal({ open, onClose, scenarioId, nodes, phases, co
   const [placement, setPlacement] = React.useState(defaultColumn);
   const [connectFrom, setConnectFrom] = React.useState("");
 
-  const [form, setForm] = React.useState<NewSignalForm>({ title: "", body: "", category: "Technology", source: "", impact: 3, uncertainty: "Medium" });
+  const [form, setForm] = React.useState<NewEventForm>(EMPTY_FORM);
   const [formError, setFormError] = React.useState<string | null>(null);
   const [submitting, setSubmitting] = React.useState(false);
 
@@ -74,7 +97,7 @@ export function SignalPickerModal({ open, onClose, scenarioId, nodes, phases, co
       setSelected(new Set());
       setPlacement(initialPlacement ?? defaultColumn);
       setConnectFrom("");
-      setForm({ title: "", body: "", category: "Technology", source: "", impact: 3, uncertainty: "Medium" });
+      setForm(EMPTY_FORM);
       setFormError(null);
     }
   }, [open, defaultColumn, initialPlacement]);
@@ -95,14 +118,16 @@ export function SignalPickerModal({ open, onClose, scenarioId, nodes, phases, co
 
   if (!open) return null;
 
-  const library = store.signals;
+  const library = store.events;
+  const signals = store.signals;
   const chainTitles = new Set(nodes.map((n) => (n.title || "").toLowerCase()));
 
-  const filtered = library.filter((s) => {
-    if (filterCat !== "All" && s.category !== filterCat) return false;
+  const filtered = library.filter((e) => {
+    const cat = eventCategory(e, signals);
+    if (filterCat !== "All" && cat !== filterCat) return false;
     if (!search.trim()) return true;
     const q = search.trim().toLowerCase();
-    return (s.title || "").toLowerCase().includes(q) || (s.source || "").toLowerCase().includes(q) || (s.body || "").toLowerCase().includes(q);
+    return (e.title || "").toLowerCase().includes(q) || (e.source || "").toLowerCase().includes(q) || (e.body || "").toLowerCase().includes(q);
   });
 
   const toggleSelect = (id: string) => {
@@ -140,32 +165,32 @@ export function SignalPickerModal({ open, onClose, scenarioId, nodes, phases, co
     const colLabelIdx = phases.findIndex((p) => p.id === placement);
     const colLabel = columnLabels[colLabelIdx] || (phases[colLabelIdx] && phases[colLabelIdx].id) || placement;
     const total = newChainNodes.length + movedIds.size;
-    showToast(total === 1 ? `Added 1 signal to ${colLabel}` : `Added ${total} signals to ${colLabel}`);
+    showToast(total === 1 ? `Added 1 event to ${colLabel}` : `Added ${total} events to ${colLabel}`);
     onClose();
   };
 
   const handleAddFromLibrary = async () => {
     if (selected.size === 0) return;
-    const picked = library.filter((s) => selected.has(s.id));
-    // Signals already represented in the chain (matched by whether a node already links to
-    // this signal_id) move to the new placement instead of creating a duplicate node.
-    const alreadyInChain = new Map(nodes.filter((n) => n.signalId).map((n) => [n.signalId as string, n.id]));
-    const toMove = picked.filter((s) => alreadyInChain.has(s.id));
-    const toCreate = picked.filter((s) => !alreadyInChain.has(s.id));
+    const picked = library.filter((e) => selected.has(e.id));
+    // Events already represented in the chain (matched by whether a node already links to
+    // this event_id) move to the new placement instead of creating a duplicate node.
+    const alreadyInChain = new Map(nodes.filter((n) => n.eventId).map((n) => [n.eventId as string, n.id]));
+    const toMove = picked.filter((e) => alreadyInChain.has(e.id));
+    const toCreate = picked.filter((e) => !alreadyInChain.has(e.id));
 
     setSubmitting(true);
     try {
       const movedIds = new Set<string>();
-      for (const s of toMove) {
-        const nodeId = alreadyInChain.get(s.id)!;
+      for (const e of toMove) {
+        const nodeId = alreadyInChain.get(e.id)!;
         await updateStorylineNode({ id: nodeId, phase: toBackendPhase(placement) });
         movedIds.add(nodeId);
       }
 
       const newChainNodes: StoryNode[] = [];
       const newEdges: StoryEdge[] = [];
-      for (const s of toCreate) {
-        const created = await createStorylineNode({ scenarioId, phase: toBackendPhase(placement), signalId: s.id });
+      for (const e of toCreate) {
+        const created = await createStorylineNode({ scenarioId, phase: toBackendPhase(placement), eventId: e.id });
         if (connectFrom) {
           const edge = await createStorylineEdge({ scenarioId, fromNodeId: connectFrom, toNodeId: created.id, relationship: "Leads to", confidence: "Moderate" });
           newEdges.push({ id: edge.id, from: connectFrom, to: created.id, relationship: edge.relationship, confidence: edge.confidence });
@@ -177,17 +202,17 @@ export function SignalPickerModal({ open, onClose, scenarioId, nodes, phases, co
           title: created.title,
           body: created.body || "",
           year: created.year != null ? String(created.year) : "—",
-          source: s.source,
-          impact: s.impact ?? undefined,
-          uncertainty: s.uncertainty ?? undefined,
+          source: e.source ?? undefined,
+          impact: e.impact ?? undefined,
+          uncertainty: e.likelihood ?? undefined,
           strength: 0.65,
-          signalId: s.id,
+          eventId: e.id,
         });
       }
       commitAdd(newChainNodes, movedIds, newEdges);
     } catch (err) {
-      console.error("[signal-picker] failed to add signal(s) to chain", err);
-      showToast("Couldn't add those signals", "error");
+      console.error("[event-picker] failed to add event(s) to chain", err);
+      showToast("Couldn't add those events", "error");
     } finally {
       setSubmitting(false);
     }
@@ -205,20 +230,22 @@ export function SignalPickerModal({ open, onClose, scenarioId, nodes, phases, co
     setFormError(null);
     setSubmitting(true);
     try {
-      const newSignal = await store.createSignal({
+      const newEvent = await store.createEvent({
         projectId: store.activeProjectId,
-        category: form.category,
-        source: form.source.trim() || "Internal research",
         title: form.title.trim(),
-        // This modal doesn't collect poles (it's Storyline's node-creation form, not the
-        // Signals Library) — same honest placeholder the 0038 migration backfills.
-        poleA: "Doesn't happen",
-        poleB: form.title.trim(),
-        body: form.body.trim(),
+        description: form.body.trim() || undefined,
+        // An event linked to a force borrows that force's category for display elsewhere
+        // (pole.ts's eventCategory) — only set an explicit category when left unlinked.
+        category: form.forceId ? null : form.category,
+        status: form.status,
+        occurredOn: form.status === "observed" ? form.occurredOn.trim() || new Date().toISOString().slice(0, 10) : null,
+        windowLabel: form.status === "possible" ? form.windowLabel.trim() || "Within horizon" : null,
+        source: form.status === "observed" ? form.source.trim() || undefined : undefined,
+        likelihood: form.status === "possible" ? form.likelihood : null,
         impact: form.impact,
-        uncertainty: form.uncertainty,
+        links: form.forceId ? [{ signalId: form.forceId, side: form.forceSide }] : [],
       });
-      const created = await createStorylineNode({ scenarioId, phase: toBackendPhase(placement), signalId: newSignal.id });
+      const created = await createStorylineNode({ scenarioId, phase: toBackendPhase(placement), eventId: newEvent.id });
       const newEdges: StoryEdge[] = [];
       if (connectFrom) {
         const edge = await createStorylineEdge({ scenarioId, fromNodeId: connectFrom, toNodeId: created.id, relationship: "Leads to", confidence: "Moderate" });
@@ -233,19 +260,19 @@ export function SignalPickerModal({ open, onClose, scenarioId, nodes, phases, co
             title: created.title,
             body: created.body || "",
             year: "—",
-            source: newSignal.source,
-            impact: newSignal.impact ?? undefined,
-            uncertainty: newSignal.uncertainty ?? undefined,
+            source: newEvent.source ?? undefined,
+            impact: newEvent.impact ?? undefined,
+            uncertainty: newEvent.likelihood ?? undefined,
             strength: 0.65,
-            signalId: newSignal.id,
+            eventId: newEvent.id,
           },
         ],
         new Set(),
         newEdges
       );
     } catch (err) {
-      console.error("[signal-picker] failed to create signal", err);
-      setFormError("Couldn't create the signal — try again.");
+      console.error("[event-picker] failed to create event", err);
+      setFormError("Couldn't create the event — try again.");
     } finally {
       setSubmitting(false);
     }
@@ -258,7 +285,7 @@ export function SignalPickerModal({ open, onClose, scenarioId, nodes, phases, co
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Add signal to storyline"
+      aria-label="Add event to storyline"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -280,8 +307,8 @@ export function SignalPickerModal({ open, onClose, scenarioId, nodes, phases, co
         </button>
 
         <div className="pr-8">
-          <h2 className="text-xl font-semibold tracking-[-0.01em] text-brand-dark">Add signal to storyline</h2>
-          <div className="mt-1 text-[13.5px] text-muted-foreground">Pick from your Signals Library or create a new one.</div>
+          <h2 className="text-xl font-semibold tracking-[-0.01em] text-brand-dark">Add event to storyline</h2>
+          <div className="mt-1 text-[13.5px] text-muted-foreground">Pick an event from your Signals Library, or create a new one.</div>
         </div>
 
         {/* Tabs */}
@@ -306,9 +333,9 @@ export function SignalPickerModal({ open, onClose, scenarioId, nodes, phases, co
         {/* Body */}
         <div className="mt-4 flex flex-1 flex-col overflow-hidden">
           {tab === "library" ? (
-            <LibraryTab search={search} setSearch={setSearch} filterCat={filterCat} setFilterCat={setFilterCat} filtered={filtered} selected={selected} toggleSelect={toggleSelect} chainTitles={chainTitles} />
+            <LibraryTab search={search} setSearch={setSearch} filterCat={filterCat} setFilterCat={setFilterCat} filtered={filtered} signals={signals} selected={selected} toggleSelect={toggleSelect} chainTitles={chainTitles} />
           ) : (
-            <CreateTab form={form} setForm={setForm} error={formError} />
+            <CreateTab form={form} setForm={setForm} error={formError} signals={signals} />
           )}
         </div>
 
@@ -317,7 +344,7 @@ export function SignalPickerModal({ open, onClose, scenarioId, nodes, phases, co
           <PickerField label="Add to column">
             <PickerSelect value={placement} onChange={setPlacement} options={phases.map((p, i) => ({ value: p.id, label: columnLabels[i] || p.id }))} />
           </PickerField>
-          <PickerField label="Connect from existing signal (optional)">
+          <PickerField label="Connect from existing event (optional)">
             <PickerSelect
               value={connectFrom}
               onChange={setConnectFrom}
@@ -331,8 +358,8 @@ export function SignalPickerModal({ open, onClose, scenarioId, nodes, phases, co
           <span className="text-[13px] text-muted-foreground">
             {tab === "library"
               ? totalSelectedCount === 1
-                ? "1 signal selected"
-                : `${totalSelectedCount} signals selected`
+                ? "1 event selected"
+                : `${totalSelectedCount} events selected`
               : form.title.trim()
                 ? "Ready to create"
                 : "Fill the form to create"}
@@ -362,6 +389,7 @@ function LibraryTab({
   filterCat,
   setFilterCat,
   filtered,
+  signals,
   selected,
   toggleSelect,
   chainTitles,
@@ -370,7 +398,8 @@ function LibraryTab({
   setSearch: (v: string) => void;
   filterCat: "All" | SteepCategory;
   setFilterCat: (v: "All" | SteepCategory) => void;
-  filtered: Signal[];
+  filtered: EventItem[];
+  signals: Signal[];
   selected: Set<string>;
   toggleSelect: (id: string) => void;
   chainTitles: Set<string>;
@@ -385,7 +414,7 @@ function LibraryTab({
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search signals by name, source, or keyword..."
+          placeholder="Search events by name, source, or keyword..."
           autoFocus
           className="w-full rounded-md border border-border py-[9px] pl-8 pr-3 text-[13.5px] outline-none focus:border-brand-orange focus:shadow-[0_0_0_3px_rgba(249,115,22,0.12)]"
         />
@@ -414,20 +443,21 @@ function LibraryTab({
         })}
       </div>
 
-      {/* Signal list */}
+      {/* Event list */}
       <div className="scroll-y max-h-[400px] flex-1 overflow-auto rounded-[10px] border border-[#F3F4F6] bg-[#FAFAFA]">
         {filtered.length === 0 ? (
-          <div className="p-8 text-center text-[13px] text-text-3">No signals match. Try adjusting filters.</div>
+          <div className="p-8 text-center text-[13px] text-text-3">No events match. Try adjusting filters.</div>
         ) : (
           <ul className="m-0 flex list-none flex-col gap-1 p-1.5">
-            {filtered.map((s) => {
-              const isSelected = selected.has(s.id);
-              const isInChain = chainTitles.has((s.title || "").toLowerCase());
-              const u = UNCERTAINTY_BADGE[s.uncertainty || "Medium"] || UNCERTAINTY_BADGE.Medium;
+            {filtered.map((e) => {
+              const isSelected = selected.has(e.id);
+              const isInChain = chainTitles.has((e.title || "").toLowerCase());
+              const likelihood = e.likelihood || "Medium";
+              const u = LIKELIHOOD_BADGE[likelihood] || LIKELIHOOD_BADGE.Medium;
               return (
                 <li
-                  key={s.id}
-                  onClick={() => toggleSelect(s.id)}
+                  key={e.id}
+                  onClick={() => toggleSelect(e.id)}
                   className={cn(
                     "flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2.5 transition-[background,border-color,opacity] duration-[120ms]",
                     isSelected ? "border-brand-orange bg-brand-orangeLight" : "border-border bg-white",
@@ -435,14 +465,14 @@ function LibraryTab({
                   )}
                 >
                   <PickerCheckbox checked={isSelected} />
-                  <Chip category={s.category} className="flex-shrink-0" />
+                  <Chip category={eventCategory(e, signals)} className="flex-shrink-0" />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13px] font-medium text-brand-dark">{s.title}</div>
-                    <div className="font-mono text-[11px] tracking-[0.02em] text-text-3">{s.source}</div>
+                    <div className="truncate text-[13px] font-medium text-brand-dark">{e.title}</div>
+                    <div className="font-mono text-[11px] tracking-[0.02em] text-text-3">{e.source || e.date}</div>
                   </div>
-                  <ImpactStars value={s.impact || 3} size={10} />
+                  <ImpactStars value={e.impact || 3} size={10} />
                   <span className="flex-shrink-0 rounded-full px-[7px] py-0.5 text-[10px] font-semibold" style={{ background: u.bg, color: u.fg }}>
-                    {s.uncertainty || "Medium"}
+                    {likelihood}
                   </span>
                   {isInChain && (
                     <span className="flex-shrink-0 rounded-full bg-bg px-[7px] py-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.02em] text-muted-foreground">In chain</span>
@@ -458,31 +488,66 @@ function LibraryTab({
 }
 
 /* ─────────── Create-new tab ─────────── */
-function CreateTab({ form, setForm, error }: { form: NewSignalForm; setForm: React.Dispatch<React.SetStateAction<NewSignalForm>>; error: string | null }) {
-  const update = (patch: Partial<NewSignalForm>) => setForm((f) => ({ ...f, ...patch }));
+function CreateTab({ form, setForm, error, signals }: { form: NewEventForm; setForm: React.Dispatch<React.SetStateAction<NewEventForm>>; error: string | null; signals: Signal[] }) {
+  const update = (patch: Partial<NewEventForm>) => setForm((f) => ({ ...f, ...patch }));
   const inputCls = "w-full rounded-[7px] border border-border bg-white px-[11px] py-2 text-[13px] outline-none focus:border-brand-orange";
+  const force = form.forceId ? signals.find((s) => s.id === form.forceId) : undefined;
   return (
     <div className="scroll-y flex max-h-[460px] flex-col gap-3 overflow-auto pr-1">
-      <PickerField label="Signal title" required>
+      <PickerField label="Event title" required>
         <input value={form.title} onChange={(e) => update({ title: e.target.value })} placeholder="e.g. ASEAN ratifies the digital trade pact" autoFocus className={inputCls} />
       </PickerField>
       <PickerField label="Description">
         <textarea value={form.body} onChange={(e) => update({ body: e.target.value })} placeholder="What happens. Why it matters. (1–2 sentences)" rows={3} className={cn(inputCls, "min-h-[70px] resize-y")} />
       </PickerField>
-      <PickerField label="STEEP category" required>
-        <PickerSegmented value={form.category} options={STEEP_CATS} onChange={(v) => update({ category: v as SteepCategory })} />
+      <PickerSegmented
+        value={form.status === "observed" ? "It happened" : "It could happen"}
+        options={["It happened", "It could happen"]}
+        onChange={(v) => update({ status: v === "It happened" ? "observed" : "possible" })}
+      />
+      {form.status === "observed" ? (
+        <div className="grid grid-cols-2 gap-3">
+          <PickerField label="When">
+            <input type="date" value={form.occurredOn} onChange={(e) => update({ occurredOn: e.target.value })} className={inputCls} />
+          </PickerField>
+          <PickerField label="Source">
+            <input value={form.source} onChange={(e) => update({ source: e.target.value })} placeholder="Reuters, internal research, …" className={inputCls} />
+          </PickerField>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-3">
+          <PickerField label="By when">
+            <input value={form.windowLabel} onChange={(e) => update({ windowLabel: e.target.value })} placeholder="e.g. 2027–28" className={inputCls} />
+          </PickerField>
+          <PickerField label="How likely">
+            <PickerSegmented value={form.likelihood} options={["Low", "Medium", "High"]} onChange={(v) => update({ likelihood: v as NewEventForm["likelihood"] })} />
+          </PickerField>
+        </div>
+      )}
+      <PickerField label="Impact (1–5)">
+        <PickerStarPicker value={form.impact} onChange={(v) => update({ impact: v })} />
       </PickerField>
-      <div className="grid grid-cols-2 gap-3">
-        <PickerField label="Source">
-          <input value={form.source} onChange={(e) => update({ source: e.target.value })} placeholder="Reuters, internal research, …" className={inputCls} />
-        </PickerField>
-        <PickerField label="Impact (1–5)">
-          <PickerStarPicker value={form.impact} onChange={(v) => update({ impact: v })} />
-        </PickerField>
+
+      <div className="flex flex-col gap-2.5 rounded-[10px] border border-border bg-[#FAFAF9] p-3">
+        <span className="font-mono text-[10px] tracking-[0.06em] text-text-3">WHICH FORCE DOES IT PULL ON? (OPTIONAL)</span>
+        <PickerSelect
+          value={form.forceId}
+          onChange={(v) => update({ forceId: v })}
+          options={[{ value: "", label: "— No force — use a STEEP category instead —" }, ...signals.map((s) => ({ value: s.id, label: s.title }))]}
+        />
+        {force ? (
+          <PickerSegmented
+            value={slPole(force, form.forceSide)}
+            options={[slPole(force, "a"), slPole(force, "b")]}
+            onChange={(v) => update({ forceSide: v === slPole(force, "a") ? "a" : "b" })}
+          />
+        ) : (
+          <PickerField label="STEEP category" required>
+            <PickerSegmented value={form.category} options={STEEP_CATS} onChange={(v) => update({ category: v as SteepCategory })} />
+          </PickerField>
+        )}
       </div>
-      <PickerField label="Uncertainty">
-        <PickerSegmented value={form.uncertainty} options={["Low", "Medium", "High"]} onChange={(v) => update({ uncertainty: v as NewSignalForm["uncertainty"] })} />
-      </PickerField>
+
       {error && <div className="rounded-[7px] border border-[#FECACA] bg-[#FEF2F2] px-[11px] py-2 text-[12.5px] text-[#EF4444]">{error}</div>}
     </div>
   );

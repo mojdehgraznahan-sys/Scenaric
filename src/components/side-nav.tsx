@@ -60,8 +60,8 @@ export function SideNav({ navigate, page }: { navigate: Navigate; page: string }
     {
       label: "DECISIONS",
       items: [
-        { id: "strategy", label: "Strategy", icon: <Icons.Target size={14} /> },
         { id: "monitoring", label: "Monitoring", icon: <Icons.Activity size={14} /> },
+        { id: "strategy", label: "Strategy", icon: <Icons.Target size={14} /> },
       ],
     },
   ];

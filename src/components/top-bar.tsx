@@ -18,7 +18,7 @@ const TITLES: Record<string, string> = {
   storyline: "Storyline",
   canvas: "Scenario Canvas",
   narrative: "Narrative",
-  strategy: "Strategic Options",
+  strategy: "Strategy",
   monitoring: "Monitoring",
   settings: "Settings",
 };

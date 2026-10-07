@@ -877,7 +877,7 @@ export function StorylineCanvas({
                   ev.currentTarget.style.background = "transparent";
                 }}
               >
-                <Icons.Plus size={12} /> Add signal
+                <Icons.Plus size={12} /> Add event
               </button>
             </div>
           );
