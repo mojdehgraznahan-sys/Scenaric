@@ -110,7 +110,15 @@ export async function setStrategyTarget(projectId: string, scenarioId: string, c
 // see set_primary_strategic_option for the one case here that does). Setting a card back to
 // 'pending' (Undo) restores the move's effect.previous_status, captured when the card was
 // created — see decision-scan.ts's raiseActionCards.
-export async function actOnActionCard(cardId: string, status: "accepted" | "deferred" | "dismissed" | "pending", decidedBy: string | null): Promise<void> {
+export async function actOnActionCard(
+  cardId: string,
+  status: "accepted" | "deferred" | "dismissed" | "pending",
+  decidedBy: string | null,
+  // Strategy's Accept popover (design/2026-10-05/03-strategy/PROMPTS.md Prompt 1: "Accepting
+  // should also let the user set an optional owner and due date... isn't in the reference").
+  // Only meaningful on acceptance; ignored otherwise.
+  options?: { ownerId?: string | null; dueOn?: string | null }
+): Promise<void> {
   const supabase = createClient();
 
   const { data: card, error: cardError } = await supabase.from("action_cards").select("effect").eq("id", cardId).single();
@@ -118,7 +126,12 @@ export async function actOnActionCard(cardId: string, status: "accepted" | "defe
 
   const { error: updateError } = await supabase
     .from("action_cards")
-    .update({ status, decided_by: status === "pending" ? null : decidedBy, decided_at: status === "pending" ? null : new Date().toISOString() })
+    .update({
+      status,
+      decided_by: status === "pending" ? null : decidedBy,
+      decided_at: status === "pending" ? null : new Date().toISOString(),
+      ...(status === "accepted" ? { owner_id: options?.ownerId ?? null, due_on: options?.dueOn ?? null } : {}),
+    })
     .eq("id", cardId);
   if (updateError) throw updateError;
 
@@ -192,5 +205,23 @@ export async function reviewDiscoveredEvent(discoveryId: string, status: "confir
 export async function setStrategyRevisionStatus(revisionId: string, status: "applied" | "dismissed"): Promise<void> {
   const supabase = createClient();
   const { error } = await supabase.from("strategy_revisions").update({ status }).eq("id", revisionId);
+  if (error) throw error;
+}
+
+export type RouteMoveDraft = Pick<
+  Database["public"]["Tables"]["route_moves"]["Insert"],
+  "lane" | "horizon" | "title" | "link_kind" | "link_id" | "pushes"
+>;
+
+// Inserts a reviewed "Draft route" (src/lib/actions/ai-strategy-route.ts) wholesale — the
+// draft itself is never persisted mid-review (no staging table), it's held in the Strategy
+// page's own state until the user confirms, same spirit as this app's other
+// AI-proposes/human-confirms flows but without a DB round-trip for something this
+// short-lived and single-user.
+export async function createRouteMoves(projectId: string, scenarioId: string, moves: RouteMoveDraft[]): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase.from("route_moves").insert(
+    moves.map((m) => ({ ...m, project_id: projectId, scenario_id: scenarioId, status: "planned" as const }))
+  );
   if (error) throw error;
 }

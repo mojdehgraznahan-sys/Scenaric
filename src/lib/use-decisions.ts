@@ -19,7 +19,16 @@
 // like every other entity in this app today. Revisit once Matrix v2's realtime question is
 // resolved; the .channel()/postgres_changes shape to copy is at src/lib/store.tsx:955-963.
 import * as React from "react";
-import { actOnActionCard, getDecisionsData, reviewDiscoveredEvent, setStrategyRevisionStatus, setStrategyTarget, type DecisionsData } from "@/lib/actions/decisions";
+import {
+  actOnActionCard,
+  createRouteMoves,
+  getDecisionsData,
+  reviewDiscoveredEvent,
+  setStrategyRevisionStatus,
+  setStrategyTarget,
+  type DecisionsData,
+  type RouteMoveDraft,
+} from "@/lib/actions/decisions";
 
 const EVENT_NAME = "fm:decisions-updated";
 
@@ -32,9 +41,15 @@ export interface UseDecisionsResult {
   loading: boolean;
   refresh: () => Promise<void>;
   setTarget: (scenarioId: string, userId: string | null) => Promise<void>;
-  actOnCard: (cardId: string, status: "accepted" | "deferred" | "dismissed" | "pending", userId: string | null) => Promise<void>;
+  actOnCard: (
+    cardId: string,
+    status: "accepted" | "deferred" | "dismissed" | "pending",
+    userId: string | null,
+    options?: { ownerId?: string | null; dueOn?: string | null }
+  ) => Promise<void>;
   reviewDiscovery: (discoveryId: string, status: "confirmed" | "sent_to_signals" | "rejected", userId: string | null) => Promise<void>;
   setRevision: (revisionId: string, status: "applied" | "dismissed") => Promise<void>;
+  createRoute: (scenarioId: string, moves: RouteMoveDraft[]) => Promise<void>;
 }
 
 export function useDecisions(projectId: string | null): UseDecisionsResult {
@@ -84,9 +99,23 @@ export function useDecisions(projectId: string | null): UseDecisionsResult {
   );
 
   const actOnCard = React.useCallback(
-    async (cardId: string, status: "accepted" | "deferred" | "dismissed" | "pending", userId: string | null) => {
+    async (
+      cardId: string,
+      status: "accepted" | "deferred" | "dismissed" | "pending",
+      userId: string | null,
+      options?: { ownerId?: string | null; dueOn?: string | null }
+    ) => {
       if (!projectId) return;
-      await actOnActionCard(cardId, status, userId);
+      await actOnActionCard(cardId, status, userId, options);
+      dispatchUpdated(projectId);
+    },
+    [projectId]
+  );
+
+  const createRoute = React.useCallback(
+    async (scenarioId: string, moves: RouteMoveDraft[]) => {
+      if (!projectId) return;
+      await createRouteMoves(projectId, scenarioId, moves);
       dispatchUpdated(projectId);
     },
     [projectId]
@@ -114,5 +143,5 @@ export function useDecisions(projectId: string | null): UseDecisionsResult {
     [projectId]
   );
 
-  return { data, loading, refresh, setTarget, actOnCard, reviewDiscovery, setRevision };
+  return { data, loading, refresh, setTarget, actOnCard, reviewDiscovery, setRevision, createRoute };
 }

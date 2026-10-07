@@ -132,9 +132,12 @@ export interface DcActionCardProps {
   scenario: ScenarioLite | null;
   onAct?: (card: ActionCardRow, status: ActionCardRow["status"]) => void;
   compact?: boolean;
+  /** Strategy's owner/due-date Accept popover (no reference markup for this — new UI, not a
+   *  porting gap). When given, replaces the plain Accept button; Defer/Dismiss stay as-is. */
+  acceptControl?: (card: ActionCardRow) => React.ReactNode;
 }
 
-export function DcActionCard({ card, status, evidenceTitle, scenario, onAct, compact }: DcActionCardProps) {
+export function DcActionCard({ card, status, evidenceTitle, scenario, onAct, compact, acceptControl }: DcActionCardProps) {
   const done = status !== "pending";
   return (
     <div
@@ -177,9 +180,13 @@ export function DcActionCard({ card, status, evidenceTitle, scenario, onAct, com
           </div>
         ) : (
           <div style={{ display: "flex", gap: 6 }}>
-            <Button variant="primary" size="sm" onClick={() => onAct(card, "accepted")}>
-              Accept
-            </Button>
+            {acceptControl ? (
+              acceptControl(card)
+            ) : (
+              <Button variant="primary" size="sm" onClick={() => onAct(card, "accepted")}>
+                Accept
+              </Button>
+            )}
             <Button variant="ghost" size="sm" onClick={() => onAct(card, "deferred")}>
               Defer
             </Button>
