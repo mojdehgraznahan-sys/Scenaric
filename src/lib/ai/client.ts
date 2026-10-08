@@ -13,7 +13,18 @@ export { AIGenerationFailedError, ResearchModeNotAllowedError };
 
 const anthropic = new Anthropic(); // reads ANTHROPIC_API_KEY from the environment
 
-const MODEL = "claude-opus-4-8";
+// Was Opus (Anthropic's most expensive tier) for every one of this app's ~80 AI call sites —
+// including trivial classification/narration tasks and a background classifier that runs on
+// every page load app-wide (ai-matrix.ts's classifyMatrixBuckets). Sonnet is the standard
+// mid-tier model for structured-output workloads like this one and costs a fraction of Opus
+// per token; swapping it here (the one shared call site every `runStructured()` caller goes
+// through) cuts cost across the whole app without touching any of the 37 action files
+// themselves. If a specific call later turns out to need Opus-tier reasoning quality (the
+// handful that already set `thinking: true`/`effort: "high"` — scenario building, narrative
+// expansion, focal-question synthesis, strategy stress-testing — are the most likely
+// candidates), that's a `model` override added to RunStructuredOptions for just those call
+// sites, not a global change back.
+const MODEL = "claude-sonnet-5";
 
 // SCHWARTZ_METHODOLOGY_SKILL.md's "Where research mode (live web/news) is allowed vs.
 // forbidden" section is the source of truth this enforces — live web/news access may only
