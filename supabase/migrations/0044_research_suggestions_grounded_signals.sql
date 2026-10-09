@@ -1,0 +1,12 @@
+-- Ask AI audit fix: Signals' "Suggest signals" task (ai-signals.ts's suggestSignals) used to
+-- insert new `signals` + `signal_insight_links` rows directly, with no human review step —
+-- the one task on this page that violated the same "never auto-insert research findings"
+-- rule this table (0029_research_suggestions.sql) was built specifically to enforce for every
+-- other Step 2/3 research task. Moved to stage into research_suggestions like its siblings.
+--
+-- The one thing those siblings don't need that this one does: which existing insight(s) a
+-- proposed signal is grounded in (`origin:"insight"` signals cite real insight ids; an
+-- `origin:"external_pattern"` signal cites none). No existing column carries that — it's
+-- consumed only on confirm, to recreate the `signal_insight_links` rows
+-- confirmResearchSuggestion would otherwise have no way to write.
+alter table public.research_suggestions add column grounded_in_insight_ids uuid[] not null default '{}';

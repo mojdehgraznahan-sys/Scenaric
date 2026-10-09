@@ -83,7 +83,13 @@ export interface StressTestOptionResult {
   findings: StressTestFinding[];
 }
 
-// POST .../projects/:id/strategy/ask-ai { task: "stress_test_option", optionId }
+// POST .../projects/:id/strategy/ask-ai { task: "stress_test_option", optionId } — read-only:
+// reports findings but never writes. A genuine failure mode found here used to flip the
+// score's robust flag immediately, with no human confirmation — the one Ask AI task in this
+// app that mutated real strategy data on a single click (Ask AI audit, design/2026-10-05
+// follow-up). Applying a revision now requires the separate, explicit applyStressTestFindings
+// call below, fired only from a "Apply changes" button after the user has seen the findings —
+// same confirm-before-write contract as every other proposal in this app.
 export async function stressTestOption(optionId: string): Promise<StressTestOptionResult> {
   const supabase = createClient();
 
@@ -150,23 +156,12 @@ export async function stressTestOption(optionId: string): Promise<StressTestOpti
 
   const scoreByScenarioId = new Map(robustScores.map((s) => [s.scenario_id, s]));
   const findings: StressTestFinding[] = [];
-  let anyRevised = false;
 
   for (const finding of output.findings) {
     const score = scoreByScenarioId.get(finding.scenario_id);
     if (!score) continue; // not one of this option's own robust scenarios — ignore
     const groundedIn = finding.grounded_in.filter((id) => validGroundingIds.has(id));
-    if (groundedIn.length === 0) continue; // never persist or report an ungrounded finding
-
-    const revised = !finding.still_robust;
-    if (revised) {
-      const { error: updateError } = await supabase
-        .from("strategy_scenario_scores")
-        .update({ robust: false, rationale: finding.rationale, grounded_in: groundedIn })
-        .eq("id", score.id);
-      if (updateError) throw updateError;
-      anyRevised = true;
-    }
+    if (groundedIn.length === 0) continue; // never report an ungrounded finding
 
     findings.push({
       scenarioId: finding.scenario_id,
@@ -174,14 +169,54 @@ export async function stressTestOption(optionId: string): Promise<StressTestOpti
       stillRobust: finding.still_robust,
       rationale: finding.rationale,
       groundedIn,
-      revised,
+      revised: !finding.still_robust,
     });
   }
 
-  if (anyRevised) {
-    // Ground truth actually changed — the option's own risk (derived from robust count at
-    // generation time, ai-strategy.ts's riskFromRobustCount) and the project's cached
-    // recommendation (ai-strategy-recommendation.ts) are both now stale.
+  return { optionId, optionName: option.name, findings };
+}
+
+// POST .../projects/:id/strategy/ask-ai { task: "apply_stress_test_findings", optionId,
+// findings } — fired only from the "Apply changes" button once the user has reviewed
+// stressTestOption's report. Re-derives which findings are real revisions itself
+// (revised === false entries are silently ignored, never trusted blindly from the client) and
+// performs the same writes stressTestOption used to make unprompted: flips the affected
+// scores' robust flag, recomputes the option's risk, and invalidates the project's cached
+// recommendation.
+export async function applyStressTestFindings(
+  optionId: string,
+  findings: { scenarioId: string; rationale: string; groundedIn: string[] }[]
+): Promise<{ applied: number }> {
+  const supabase = createClient();
+  if (findings.length === 0) return { applied: 0 };
+
+  const { data: option, error: optionError } = await supabase.from("strategic_options").select("id, project_id").eq("id", optionId).single();
+  if (optionError) throw new NotFoundError(`Strategic option ${optionId} could not be loaded.`);
+
+  const { data: scores, error: scoresError } = await supabase
+    .from("strategy_scenario_scores")
+    .select("id, scenario_id")
+    .eq("strategy_id", optionId)
+    .in(
+      "scenario_id",
+      findings.map((f) => f.scenarioId)
+    );
+  if (scoresError) throw scoresError;
+  const scoreIdByScenarioId = new Map(scores.map((s) => [s.scenario_id, s.id]));
+
+  let applied = 0;
+  for (const finding of findings) {
+    const scoreId = scoreIdByScenarioId.get(finding.scenarioId);
+    if (!scoreId) continue; // stale client state (e.g. scenario archived since) — skip, don't throw
+    const { error: updateError } = await supabase
+      .from("strategy_scenario_scores")
+      .update({ robust: false, rationale: finding.rationale, grounded_in: finding.groundedIn })
+      .eq("id", scoreId);
+    if (updateError) throw updateError;
+    applied += 1;
+  }
+
+  if (applied > 0) {
     const { data: freshScores, error: freshScoresError } = await supabase.from("strategy_scenario_scores").select("robust").eq("strategy_id", optionId);
     if (freshScoresError) throw freshScoresError;
     const newRobustCount = freshScores.filter((s) => s.robust).length;
@@ -195,7 +230,7 @@ export async function stressTestOption(optionId: string): Promise<StressTestOpti
     if (invalidateError) throw invalidateError;
   }
 
-  return { optionId, optionName: option.name, findings };
+  return { applied };
 }
 
 // ─────────────────────── Task 2: Why is this not robust here? ───────────────────────

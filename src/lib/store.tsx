@@ -27,13 +27,7 @@ import {
   type SignalRow,
   type SignalOrigin,
 } from "./actions/signals";
-import {
-  suggestSignals as suggestSignalsAction,
-  scoreUnscoredSignals as scoreUnscoredSignalsAction,
-  scoreOneSignal,
-  type SuggestSignalsResult,
-  type ScoreSignalsResult,
-} from "./actions/ai-signals";
+import { scoreOneSignal } from "./actions/ai-signals";
 import {
   listEventsWithLinks,
   createEvent as createEventAction,
@@ -409,8 +403,6 @@ export interface Store {
   deleteEvent: (id: string) => Promise<void>;
   linkEvent: (eventId: string, signalId: string, side: "a" | "b") => Promise<void>;
   unlinkEvent: (eventId: string, signalId: string) => Promise<void>;
-  suggestSignals: (projectId: string) => Promise<SuggestSignalsResult>;
-  scoreUnscoredSignals: (projectId: string) => Promise<ScoreSignalsResult>;
   scoreSignal: (projectId: string, signalId: string) => Promise<void>;
   matrixDots: MatrixDot[];
   setMatrixDots: (v: MatrixDot[]) => void;
@@ -448,8 +440,8 @@ export interface Store {
   // Narrative's own Ask AI scoping — simpler than Storyline's (no node-highlight concept on
   // this page), kept as its own context rather than overloading storylineAskAiContext's
   // nodeIds/nodeTitleById shape, which is specifically about chain-path highlighting.
-  narrativeAskAiContext: { scenarioId: string } | null;
-  setNarrativeAskAiContext: (v: { scenarioId: string } | null) => void;
+  narrativeAskAiContext: { scenarioId: string; hasImplications: boolean } | null;
+  setNarrativeAskAiContext: (v: { scenarioId: string; hasImplications: boolean } | null) => void;
   // Strategy's own Ask AI scoping — "Stress-test this option" needs selectedOption (set while
   // the detail modal is open), "Why is this not robust here?" needs selectedCell (set by
   // clicking one option x scenario robustness dot in the grid); "Suggest a hedge" needs
@@ -719,10 +711,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // ---- Matrix (real, Supabase) — Matrix backend build, Step 4 (§7) ----
-  // Declared before Signals below so createSignal/updateSignal/scoreUnscoredSignals can call
-  // refreshMatrixData (which classifies buckets) right after their scoring completes, mirroring
-  // the on-demand scoreSignal path further down — the Matrix page should never show a scored,
-  // dot-positioned signal that's still bucket-null just because the user never revisited it.
+  // Declared before Signals below so createSignal/updateSignal can call refreshMatrixData
+  // (which classifies buckets) right after their scoring completes, mirroring the on-demand
+  // scoreSignal path further down — the Matrix page should never show a scored, dot-positioned
+  // signal that's still bucket-null just because the user never revisited it.
   const [matrixDots, setMatrixDots] = useState<MatrixDot[]>([]);
   const [matrixDotsLoading, setMatrixDotsLoading] = useState(true);
   const [pendingScoringCount, setPendingScoringCount] = useState(0);
@@ -1044,28 +1036,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [activeProjectId, refreshEvents]
   );
 
-  const suggestSignals = useCallback(
-    async (projectId: string) => {
-      const result = await suggestSignalsAction(projectId);
-      await refreshSignals(projectId);
-      return result;
-    },
-    [refreshSignals]
-  );
-
-  const scoreUnscoredSignals = useCallback(
-    async (projectId: string) => {
-      const result = await scoreUnscoredSignalsAction(projectId);
-      // Batch scoring (the Build Plan's POST /signals/score) needs to trigger classification
-      // the same way the on-demand scoreSignal path already does below — otherwise a batch of
-      // newly-scored signals sits dot-positioned but bucket-null until the user happens to
-      // revisit the Matrix page.
-      await Promise.all([refreshSignals(projectId), refreshMatrixData(projectId)]);
-      return result;
-    },
-    [refreshSignals, refreshMatrixData]
-  );
-
   // On-demand single-signal scoring — Signals Library's "Add to Matrix" on an unscored
   // signal. Unlike createSignal/updateSignal's fire-and-forget scoring, this awaits and lets
   // AIGenerationFailedError propagate: the caller navigates to the Matrix only on success, so
@@ -1134,7 +1104,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     nodeIds: string[];
     nodeTitleById: Record<string, string>;
   } | null>(null);
-  const [narrativeAskAiContext, setNarrativeAskAiContext] = useState<{ scenarioId: string } | null>(null);
+  const [narrativeAskAiContext, setNarrativeAskAiContext] = useState<{ scenarioId: string; hasImplications: boolean } | null>(null);
   const [strategyAskAiContext, setStrategyAskAiContext] = useState<{
     selectedOption: { id: string; name: string } | null;
     selectedCell: { optionId: string; optionName: string; scenarioId: string; scenarioName: string } | null;
@@ -1213,8 +1183,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     deleteEvent,
     linkEvent,
     unlinkEvent,
-    suggestSignals,
-    scoreUnscoredSignals,
     scoreSignal,
     matrixDots,
     setMatrixDots,

@@ -73,14 +73,15 @@ export function PageNarrative() {
   }, [current?.id]);
 
   // Keeps the Ask AI drawer (mounted in AppShell, a sibling of this page) current on which
-  // scenario its fixed narrative task menu is scoped to — same pattern page-storyline.tsx
-  // uses for storylineAskAiContext.
+  // scenario its fixed narrative task menu is scoped to, and whether it has implications yet
+  // (gates "Stress-test implications" — that task has nothing to stress-test otherwise) —
+  // same pattern page-storyline.tsx uses for storylineAskAiContext.
   React.useEffect(() => {
     if (!current) return;
-    store.setNarrativeAskAiContext({ scenarioId: current.id });
+    store.setNarrativeAskAiContext({ scenarioId: current.id, hasImplications: implications.length > 0 });
     return () => store.setNarrativeAskAiContext(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current?.id]);
+  }, [current?.id, implications.length]);
 
   const toast = (message: string) => {
     const w = window as FmWindow;

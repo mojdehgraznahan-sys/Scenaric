@@ -1,17 +1,19 @@
 "use server";
 
 // §6 — Step 3: Driving forces (build order §14 item 4c Phase 2). Four calls:
-// suggestSignals (candidate generation from insights), scoreUnscoredSignals
-// (impact/uncertainty scoring for any signal missing either), suggestSignalCategory
-// (single-item STEEP classification, used to pre-fill the category field when drafting a
-// new signal from a Knowledge Base insight — see page-signals.tsx's merge-into-signal
-// flow), and askSignalsChat (the Signals Library's grounded "Ask AI" mode — see
-// ask-ai.tsx's context: "signals" path). Fires from the Signals Library's "Suggest
-// signals" button, manually per-signal via the "Score" action, automatically when the
-// merge modal opens, or from the Ask AI chat drawer on the Signals page.
+// suggestSignals (candidate generation from insights — stages into research_suggestions for
+// review, same discipline every other Steps 2/3 research task holds to; see that function's
+// own comment), scoreUnscoredSignals (impact/uncertainty scoring for any signal missing
+// either), suggestSignalCategory (single-item STEEP classification, used to pre-fill the
+// category field when drafting a new signal from a Knowledge Base insight — see
+// page-signals.tsx's merge-into-signal flow), and askSignalsChat (the Signals Library's
+// grounded "Ask AI" mode — see ask-ai.tsx's context: "signals" path). suggestSignals fires
+// from the Signals page's Ask AI "Suggest signals" task; scoreUnscoredSignals fires manually
+// per-signal via the "Score" action, automatically when the merge modal opens, or in a batch
+// right after a research_suggestions confirm.
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { runStructured, AIGenerationFailedError } from "@/lib/ai/client";
+import { runStructured } from "@/lib/ai/client";
 import { createClient } from "@/lib/supabase/server";
 import type { Database } from "@/lib/supabase/types";
 import type { SteepCategory } from "./signals";
@@ -83,9 +85,18 @@ Output schema:
 { impact: 1|2|3|4|5, uncertainty: "Low"|"Medium"|"High",
   rationale: string /* one sentence, cites the mechanism, not a vibe */ }`;
 
+// Same shape as ai-research-suggestions.ts's RunScanResult — deliberately, so ask-ai.tsx's
+// Signals task runner can dispatch this alongside runMacroTrendSweep/runFindScan etc. through
+// one shared code path instead of a special case. Staged into research_suggestions for review
+// (Signals page's Suggestions tab) — never inserted as real signals directly, same discipline
+// every other Steps 2/3 research task already holds to. This task is closed-book (no web
+// search — it only reads the project's own insights), but "closed-book" doesn't mean
+// "safe to auto-commit": a hallucinated grounding or a misjudged duplicate is exactly the
+// kind of mistake a human review step exists to catch.
 export interface SuggestSignalsResult {
-  created: number;
-  signals: SignalRow[];
+  sufficientEvidence: boolean;
+  gap: string | null;
+  suggestionsCreated: number;
 }
 
 export async function suggestSignals(projectId: string): Promise<SuggestSignalsResult> {
@@ -126,48 +137,39 @@ export async function suggestSignals(projectId: string): Promise<SuggestSignalsR
     effort: "medium",
   });
 
-  if (output.signals.length === 0) return { created: 0, signals: [] };
-
-  const { data: inserted, error: insertError } = await supabase
-    .from("signals")
-    .insert(
-      output.signals.map((s) => ({
-        project_id: projectId,
-        category: s.category,
-        source: s.source,
-        title: s.title,
-        body: s.body,
-        origin: s.origin,
-      }))
-    )
-    .select();
-  if (insertError) throw insertError;
-
-  // A single multi-row INSERT...RETURNING preserves input order, so output.signals[i]
-  // corresponds to inserted[i]. Never grounded for "external_pattern" signals — those are
-  // explicitly not insight-sourced. Link-row failures (e.g. a hallucinated insight id
-  // that fails the FK constraint) are logged, not thrown — the signals themselves already
-  // inserted successfully and shouldn't be undone by a grounding-metadata problem.
-  const linkRows = output.signals.flatMap((s, i) =>
-    s.origin === "insight" ? s.grounded_in.map((insightId) => ({ project_id: projectId, signal_id: inserted[i].id, insight_id: insightId })) : []
-  );
-  if (linkRows.length > 0) {
-    const { error: linkError } = await supabase.from("signal_insight_links").insert(linkRows);
-    if (linkError) console.error("[ai-signals] failed to persist grounded_in links", linkError);
+  if (output.signals.length === 0) {
+    return { sufficientEvidence: false, gap: "No new signal candidates found in your current insights.", suggestionsCreated: 0 };
   }
 
+  const { data: inserted, error: insertError } = await supabase
+    .from("research_suggestions")
+    .upsert(
+      output.signals.map((s) => ({
+        project_id: projectId,
+        step: "driving_forces" as const,
+        source: "insight_pattern",
+        title: s.title,
+        body: s.body,
+        category: s.category,
+        citation_title: s.source,
+        // Never grounded for "external_pattern" signals — those are explicitly not
+        // insight-sourced. A hallucinated insight id here just fails confirm's FK insert
+        // later (logged, not fatal) rather than blocking the suggestion from being staged.
+        grounded_in_insight_ids: s.origin === "insight" ? s.grounded_in : [],
+      })),
+      { onConflict: "project_id,step,title", ignoreDuplicates: true }
+    )
+    .select("id");
+  if (insertError) throw insertError;
+
   revalidatePath("/signals");
-  return { created: inserted.length, signals: inserted };
+  return { sufficientEvidence: true, gap: null, suggestionsCreated: inserted.length };
 }
 
-export interface ScoreSignalsResult {
-  scored: number;
-  failures: { signalId: string; title: string }[];
-}
-
-// Shared by scoreUnscoredSignals (batch) and scoreOneSignal (single-item, called right
-// after a signal is created — see store.tsx's createSignal, which fires this
-// fire-and-forget so "Add Signal"/merge-into-signal submit stays instant).
+// Shared by scoreOneSignal's two callers: store.tsx's createSignal (fire-and-forget right
+// after a signal is created, so "Add Signal"/merge-into-signal submit stays instant) and
+// confirmResearchSuggestion (ai-research-suggestions.ts, awaited — a confirmed suggestion
+// should never sit unscored).
 async function scoreSignalRow(
   supabase: ReturnType<typeof createClient>,
   projectId: string,
@@ -213,43 +215,6 @@ export async function scoreOneSignal(projectId: string, signalId: string): Promi
 
   await scoreSignalRow(supabase, projectId, focalQuestion, signal);
   revalidatePath("/signals");
-}
-
-export async function scoreUnscoredSignals(projectId: string): Promise<ScoreSignalsResult> {
-  const supabase = createClient();
-
-  const { data: project, error: projectError } = await supabase
-    .from("projects")
-    .select("focal_question, refined_focal_question")
-    .eq("id", projectId)
-    .single();
-  if (projectError) throw projectError;
-  const focalQuestion = project.refined_focal_question ?? project.focal_question;
-
-  const { data: unscored, error: unscoredError } = await supabase
-    .from("signals")
-    .select("id, title, body, category")
-    .eq("project_id", projectId)
-    .or("impact.is.null,uncertainty.is.null");
-  if (unscoredError) throw unscoredError;
-
-  const result: ScoreSignalsResult = { scored: 0, failures: [] };
-
-  for (const signal of unscored) {
-    try {
-      await scoreSignalRow(supabase, projectId, focalQuestion, signal);
-      result.scored += 1;
-    } catch (err) {
-      if (err instanceof AIGenerationFailedError) {
-        result.failures.push({ signalId: signal.id, title: signal.title });
-      } else {
-        throw err;
-      }
-    }
-  }
-
-  revalidatePath("/signals");
-  return result;
 }
 
 const CategorizeSignalSchema = z.object({

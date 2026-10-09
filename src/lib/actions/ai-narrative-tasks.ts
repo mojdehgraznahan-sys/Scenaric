@@ -1,17 +1,18 @@
 "use server";
 
 // Narrative's "Ask AI" — a fixed task menu (ask-ai.tsx's context="narrative" branch), never
-// a freeform chat, same convention as ai-storyline-tasks.ts. All four tasks reason ONLY over
-// this project's own scenario/storyline/implications data — no web search, no general
-// external knowledge.
+// a freeform chat, same convention as ai-storyline-tasks.ts. Both tasks reason ONLY over this
+// project's own scenario/storyline/implications data — no web search, no general external
+// knowledge. "Regenerate implications"/"Suggest indicators from this narrative" used to live
+// here too — removed (Ask AI audit, design/2026-10-05 follow-up): both were thin,
+// zero-added-logic wrappers around functions the Narrative page already exposes as its own
+// primary buttons, so they only duplicated existing page functionality.
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
 import { StorylineScenarioNotFoundError } from "@/lib/ai/errors";
 import { z } from "zod";
 import { getStoryline } from "./storyline";
 import { listImplications } from "./implications";
-import { generateImplicationsForScenario, type GenerateImplicationsResult } from "./ai-implications";
-import { generateIndicatorsForScenario, type GenerateIndicatorsResult } from "./ai-indicators";
 import { PHASE_ORDER, type Phase } from "../storyline-mapping";
 
 async function loadScenario(supabase: ReturnType<typeof createClient>, scenarioId: string) {
@@ -128,15 +129,7 @@ export async function checkNarrativeFidelity(scenarioId: string): Promise<CheckN
   };
 }
 
-// ─────────────────────── Task 2: Regenerate implications ───────────────────────
-
-// No new AI call — thin wrapper around the exact same action "Regenerate" on the Implications
-// block itself calls (ai-implications.ts), exposed here as an Ask AI menu entry too.
-export async function regenerateImplicationsTask(scenarioId: string): Promise<GenerateImplicationsResult> {
-  return generateImplicationsForScenario(scenarioId);
-}
-
-// ─────────────────────── Task 3: Stress-test implications ───────────────────────
+// ─────────────────────── Task 2: Stress-test implications ───────────────────────
 
 const StressTestSchema = z.object({
   results: z.array(
@@ -222,11 +215,3 @@ export async function stressTestImplications(scenarioId: string): Promise<Stress
   return { results };
 }
 
-// ─────────────────────── Task 4: Suggest indicators from this narrative ───────────────────────
-
-// No new AI call — thin wrapper around the same action "Track indicators" calls
-// (ai-indicators.ts), exposed here as an Ask AI menu entry too. Not the same feature as
-// Signpost (ai-grounding.ts) — see SCHWARTZ_METHODOLOGY_SKILL.md's "Signpost" section.
-export async function suggestIndicatorsTask(scenarioId: string): Promise<GenerateIndicatorsResult> {
-  return generateIndicatorsForScenario(scenarioId);
-}

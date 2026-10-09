@@ -1,14 +1,19 @@
 "use server";
 
 // Knowledge Base's "Ask AI" — a fixed task menu (ask-ai.tsx's context="knowledge" branch), never
-// freeform (freeform is the separate /knowledge/chat route). All six tasks are thin wrappers
-// around the existing Step 2 (runLocalForceScan) / Step 3 (runMacroTrendSweep) / Step 8-adjacent
-// (pullNewsFeed) research actions in ai-research-suggestions.ts / ai-news-feed.ts — the two
-// relocated tasks (scan/pull) call them with no options, byte-identical to the old toolbar
-// buttons; the four new "cold start" tasks pass a `focus` hint that steers (never restricts)
-// the same underlying web_search-backed scan. Every task normalizes to one shared
-// { summary, itemsFound } shape so the Ask AI panel renders all six the same way.
-import { runLocalForceScan, runMacroTrendSweep } from "./ai-research-suggestions";
+// freeform (freeform is the separate /knowledge/chat route). All four tasks are thin wrappers
+// around the existing Step 2 (runLocalForceScan) / Step 8-adjacent (pullNewsFeed) research
+// actions in ai-research-suggestions.ts / ai-news-feed.ts — scan/pull call them with no
+// options, byte-identical to the old toolbar buttons; the two "cold start" competitor/
+// regulation tasks pass a `focus` hint that steers (never restricts) the same underlying
+// web_search-backed scan. Every task normalizes to one shared { summary, itemsFound } shape
+// so the Ask AI panel renders all four the same way.
+//
+// The two Step-3 STEEP-trend variants that used to live here (supply chain/geopolitics,
+// international markets) moved to ai-research-suggestions.ts and the Signals page's own task
+// menu (Ask AI audit, design/2026-10-05 follow-up) — they stage driving-force candidates
+// reviewed on the Signals page, which is a Signals-page job, not a Knowledge Base one.
+import { runLocalForceScan } from "./ai-research-suggestions";
 import { pullNewsFeed } from "./ai-news-feed";
 
 export interface KnowledgeTaskResult {
@@ -48,21 +53,4 @@ const REGULATION_FOCUS =
 
 export async function researchRegulations(projectId: string): Promise<KnowledgeTaskResult> {
   return summarizeScan(await runLocalForceScan(projectId, { focus: REGULATION_FOCUS }));
-}
-
-const SUPPLY_CHAIN_GEOPOLITICS_FOCUS =
-  "Prioritize supply-chain dynamics (sourcing, logistics, tariffs, trade routes) and geopolitical " +
-  "(Political category) developments relevant to the focal question.";
-
-export async function researchSupplyChainGeopolitics(projectId: string): Promise<KnowledgeTaskResult> {
-  return summarizeScan(await runMacroTrendSweep(projectId, { focus: SUPPLY_CHAIN_GEOPOLITICS_FOCUS }));
-}
-
-const INTERNATIONAL_MARKETS_FOCUS =
-  "Prioritize US, North American, and other internationally-relevant market conditions (Economic " +
-  "category) — market size, growth, competitive dynamics, trade policy — bringing in other " +
-  "regions only where genuinely relevant to the focal question.";
-
-export async function researchInternationalMarkets(projectId: string): Promise<KnowledgeTaskResult> {
-  return summarizeScan(await runMacroTrendSweep(projectId, { focus: INTERNATIONAL_MARKETS_FOCUS }));
 }

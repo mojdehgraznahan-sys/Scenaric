@@ -116,6 +116,20 @@ export function PageStoryline() {
     }
   }, [scenarioId]);
 
+  // The Ask AI drawer's "find_missing_links" → "Use this" button (ask-ai.tsx) writes a new
+  // node directly via createStorylineNode, from outside this component's own state — same
+  // fm:*-updated convention every other page uses for an out-of-tree write (fm:signals-updated
+  // etc.), scoped by scenarioId since the drawer may be acting on a different scenario than
+  // whichever one is currently open if the user switched tabs mid-review.
+  React.useEffect(() => {
+    const onUpdated = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.scenarioId === scenarioId) reload();
+    };
+    window.addEventListener("fm:storyline-updated", onUpdated);
+    return () => window.removeEventListener("fm:storyline-updated", onUpdated);
+  }, [scenarioId, reload]);
+
   const runGenerate = React.useCallback(async () => {
     setGenerating(true);
     try {

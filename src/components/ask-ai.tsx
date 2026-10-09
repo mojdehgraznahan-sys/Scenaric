@@ -14,9 +14,11 @@ import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/chip";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
-import { askSignalsChat, type SignalsChatResult } from "@/lib/actions/ai-signals";
+import { askSignalsChat, suggestSignals, type SignalsChatResult } from "@/lib/actions/ai-signals";
 import {
   runMacroTrendSweep,
+  researchSupplyChainGeopolitics,
+  researchInternationalMarkets,
   runFindScan,
   runFindOracleQuestions,
   runFindActorProfile,
@@ -49,6 +51,8 @@ import {
   type TestWildcardsResult,
 } from "@/lib/actions/ai-signals-test";
 import { AIGenerationFailedError } from "@/lib/ai/errors";
+import { createStorylineNode } from "@/lib/actions/storyline";
+import type { Phase } from "@/lib/storyline-mapping";
 import type {
   ValidatePlausibilityResult,
   ValidateChainResult,
@@ -58,8 +62,6 @@ import type {
   CheckNarrativeFidelityResult,
   StressTestImplicationsResult,
 } from "@/lib/actions/ai-narrative-tasks";
-import type { GenerateImplicationsResult } from "@/lib/actions/ai-implications";
-import type { GenerateIndicatorsResult } from "@/lib/actions/ai-indicators";
 import type { StressTestOptionResult, SuggestHedgeResult } from "@/lib/actions/ai-strategy-tasks";
 import type { StrategyChatResult } from "@/lib/actions/ai-strategy-chat";
 import { createManualStrategicOption } from "@/lib/actions/strategy";
@@ -68,12 +70,7 @@ import type { MonitoringChatResult } from "@/lib/actions/ai-monitoring-chat";
 import { createManualIndicator } from "@/lib/actions/indicators";
 import type { NextStepsResult, SummarizeWeekSignalsResult, WhatsChangedResult, ExplainProgressResult } from "@/lib/actions/ai-home-tasks";
 import type { HomeChatResult } from "@/lib/actions/ai-home-chat";
-import type {
-  DraftFocalQuestionResult,
-  SharpenFocalQuestionResult,
-  CritiqueFocalQuestionResult,
-  RefreshIndustryResearchResult,
-} from "@/lib/actions/ai-settings-tasks";
+import type { DraftFocalQuestionResult, SharpenFocalQuestionResult, CritiqueFocalQuestionResult } from "@/lib/actions/ai-settings-tasks";
 import type { SettingsChatResult } from "@/lib/actions/ai-settings-chat";
 import type { KnowledgeChatResult } from "@/lib/actions/ai-knowledge-chat";
 import type { ExplainDotResult, CoverageGapsResult, AlternateAxisPairResult, BucketSummaryResult } from "@/lib/actions/ai-matrix-tasks";
@@ -146,15 +143,25 @@ interface StorylineResultEntry {
   chain?: ValidateChainResult;
   missing?: MissingLinksResult;
   explanation?: string;
+  // find_missing_links candidates used to be a dead end — surfaced, never actionable from
+  // here (the side panel's own single-gap "Find signals" flow was the only way to act on
+  // one). Tracks which gap phases have had a candidate added to the chain from this result
+  // card (Ask AI audit, design/2026-10-05 follow-up).
+  usedGapPhases?: Set<string>;
 }
 
-type NarrativeTaskId = "check_fidelity" | "regenerate_implications" | "stress_test_implications" | "suggest_indicators";
+// "Regenerate implications" and "Suggest indicators from this narrative" used to live here
+// too — removed (Ask AI audit, design/2026-10-05 follow-up): both were thin, zero-added-logic
+// pass-throughs to functions the Narrative page already exposes as its own primary buttons
+// ("Regenerate" on the Implications card, "Track indicators"), so they only duplicated
+// existing page functionality rather than adding anything Ask AI-specific. Monitoring's own
+// `suggest_indicator` task (ai-monitoring-tasks.ts) is the better version of the indicator one
+// anyway — it picks the weakest-covered scenario and has a safety gate this one never had.
+type NarrativeTaskId = "check_fidelity" | "stress_test_implications";
 
 const NARRATIVE_TASKS: { id: NarrativeTaskId; label: string; needsImplications: boolean }[] = [
   { id: "check_fidelity", label: "Check narrative fidelity to storyline", needsImplications: false },
-  { id: "regenerate_implications", label: "Regenerate implications", needsImplications: false },
   { id: "stress_test_implications", label: "Stress-test implications", needsImplications: true },
-  { id: "suggest_indicators", label: "Suggest indicators from this narrative", needsImplications: false },
 ];
 
 interface NarrativeResultEntry {
@@ -163,9 +170,7 @@ interface NarrativeResultEntry {
   ok: boolean;
   error?: string;
   fidelity?: CheckNarrativeFidelityResult;
-  implications?: GenerateImplicationsResult;
   stressTest?: StressTestImplicationsResult;
-  indicators?: GenerateIndicatorsResult;
 }
 
 type StrategyTaskId = "stress_test_option" | "explain_non_robust" | "suggest_hedge";
@@ -184,6 +189,10 @@ interface StrategyResultEntry {
   stressTest?: StressTestOptionResult;
   explanation?: string;
   hedge?: SuggestHedgeResult;
+  // Set once "Apply changes" (stress_test_option) or "+ Add as option" (suggest_hedge)
+  // succeeds, so the button can't fire twice — same convention as ChatMsg's `added` flag.
+  applied?: boolean;
+  added?: boolean;
 }
 
 type MonitoringTaskId = "most_likely_scenario" | "explain_indicator" | "recent_changes" | "suggest_indicator";
@@ -206,21 +215,17 @@ interface MonitoringResultEntry {
   suggestion?: SuggestIndicatorForScenarioResult;
 }
 
-type KnowledgeTaskId =
-  | "scan_local_actors"
-  | "pull_recent_news"
-  | "research_competitors"
-  | "research_regulations"
-  | "research_supply_chain_geopolitics"
-  | "research_international_markets";
+// The STEEP-trend-focused variants that used to live here (supply chain/geopolitics,
+// international markets) moved to the Signals page's task menu below — they stage
+// driving-force candidates reviewed on the Signals page, not Knowledge Base's (Ask AI audit,
+// design/2026-10-05 follow-up).
+type KnowledgeTaskId = "scan_local_actors" | "pull_recent_news" | "research_competitors" | "research_regulations";
 
 const KNOWLEDGE_TASKS: { id: KnowledgeTaskId; label: string }[] = [
   { id: "scan_local_actors", label: "Scan for local actors (web)" },
   { id: "pull_recent_news", label: "Pull recent news" },
   { id: "research_competitors", label: "Research competitors' recent moves" },
   { id: "research_regulations", label: "Research regulations" },
-  { id: "research_supply_chain_geopolitics", label: "Research supply chain & geopolitics" },
-  { id: "research_international_markets", label: "Research US & international markets" },
 ];
 
 // All six tasks normalize to one shared result shape (ai-knowledge-tasks.ts) — unlike Home's
@@ -236,6 +241,8 @@ interface KnowledgeResultEntry {
 type SignalsTaskId =
   | "suggest_signals"
   | "scan_driving_forces"
+  | "research_supply_chain_geopolitics"
+  | "research_international_markets"
   | "find_scan"
   | "find_oracle"
   | "find_actors"
@@ -265,6 +272,8 @@ type SignalsTaskId =
 const SIGNALS_TASKS: { id: SignalsTaskId; label: string; group: "find" | "rank" | "sharpen" | "test" | null; requiresSignals?: boolean }[] = [
   { id: "suggest_signals", label: "Suggest signals", group: null },
   { id: "scan_driving_forces", label: "Scan for driving forces (web)", group: null },
+  { id: "research_supply_chain_geopolitics", label: "Research supply chain & geopolitics (web)", group: null },
+  { id: "research_international_markets", label: "Research US & international markets (web)", group: null },
   { id: "find_scan", label: "Scan for missing forces", group: "find" },
   { id: "find_oracle", label: "From my open questions", group: "find" },
   { id: "find_actors", label: "Profile my dependencies", group: "find" },
@@ -370,13 +379,17 @@ interface HomeResultEntry {
   progress?: ExplainProgressResult;
 }
 
-type SettingsTaskId = "draft_focal_question" | "sharpen_focal_question" | "critique_focal_question" | "refresh_industry_research";
+// "Refresh industry research" used to live here too — removed (Ask AI audit, design/
+// 2026-10-05 follow-up): it just re-ran Knowledge Base's own news-pull + local-actor-scan
+// under a different label, bundled onto Settings only because the industry field happens to
+// live on this page. That's Knowledge Base's job — use its own "Pull recent news"/"Scan for
+// local actors" tasks instead.
+type SettingsTaskId = "draft_focal_question" | "sharpen_focal_question" | "critique_focal_question";
 
 const SETTINGS_TASKS: { id: SettingsTaskId; label: string }[] = [
   { id: "draft_focal_question", label: "Draft a focal question from my project description" },
   { id: "sharpen_focal_question", label: "Sharpen my focal question" },
   { id: "critique_focal_question", label: "Is this focal question too broad/narrow?" },
-  { id: "refresh_industry_research", label: "Refresh industry research" },
 ];
 
 interface SettingsResultEntry {
@@ -387,7 +400,6 @@ interface SettingsResultEntry {
   draft?: DraftFocalQuestionResult;
   sharpen?: SharpenFocalQuestionResult;
   critique?: CritiqueFocalQuestionResult;
-  refresh?: RefreshIndustryResearchResult;
   // Set once "Accept"/"Use this" succeeds, so the button can't fire twice — same convention
   // as ChatMsg's `added` flag on the other suggestion cards.
   applied?: boolean;
@@ -692,6 +704,24 @@ export function AskAI({
     }
   };
 
+  // Backing action for find_missing_links's "Use this" button — the confirm-before-write step
+  // that candidate list never had a way to act on at all (the side panel's own "Find signals"
+  // gap-filler was the only real path). Places the chosen signal in the gap phase exactly like
+  // the event-picker-modal's library-tab flow does, then tells the Storyline page to refetch.
+  const onUseGapCandidate = async (resultIndex: number, phase: string, signalId: string) => {
+    const ctx = store.storylineAskAiContext;
+    if (!ctx) return;
+    try {
+      await createStorylineNode({ scenarioId: ctx.scenarioId, phase: phase as Phase, signalId });
+      setStorylineResults((r) =>
+        r.map((e, i) => (i === resultIndex ? { ...e, usedGapPhases: new Set(e.usedGapPhases).add(phase) } : e))
+      );
+      window.dispatchEvent(new CustomEvent("fm:storyline-updated", { detail: { scenarioId: ctx.scenarioId } }));
+    } catch (err) {
+      console.error("[ask-ai] failed to add signal to storyline gap", err);
+    }
+  };
+
   // Narrative mode — fixed task menu, never freeform, same convention as storyline mode
   // above. Results are ephemeral for the same reason (structured diagnostics tied to the
   // current live scenario, not a conversation worth keeping).
@@ -701,6 +731,7 @@ export function AskAI({
   const runNarrativeTask = async (taskId: NarrativeTaskId) => {
     const ctx = store.narrativeAskAiContext;
     if (!ctx) return;
+    if (taskId === "stress_test_implications" && !ctx.hasImplications) return;
     setRunningNarrativeTask(taskId);
     try {
       const res = await fetch(`/api/scenarios/${ctx.scenarioId}/narrative/ask-ai`, {
@@ -712,9 +743,7 @@ export function AskAI({
       const data = await res.json();
       const entry: NarrativeResultEntry = { task: taskId, ts: Date.now(), ok: true };
       if (taskId === "check_fidelity") entry.fidelity = data as CheckNarrativeFidelityResult;
-      else if (taskId === "regenerate_implications") entry.implications = data as GenerateImplicationsResult;
-      else if (taskId === "stress_test_implications") entry.stressTest = data as StressTestImplicationsResult;
-      else entry.indicators = data as GenerateIndicatorsResult;
+      else entry.stressTest = data as StressTestImplicationsResult;
       setNarrativeResults((r) => [entry, ...r]);
     } catch (err) {
       console.error("[ask-ai] narrative task failed", err);
@@ -764,6 +793,54 @@ export function AskAI({
       setStrategyResults((r) => [{ task: taskId, ts: Date.now(), ok: false, error: "Something went wrong running that task." }, ...r]);
     } finally {
       setRunningStrategyTask(null);
+    }
+  };
+
+  // Backing action for stress_test_option's "Apply changes" button — the confirm-before-write
+  // step that result used to skip entirely (see ai-strategy-tasks.ts's applyStressTestFindings
+  // comment). Only ever sends the findings already shown in this exact result card, not a
+  // re-fetch, so what the user clicked "Apply" on is exactly what gets written.
+  const onApplyStressTestFindings = async (index: number) => {
+    const entry = strategyResults[index];
+    const projectId = store.activeProjectId;
+    if (!entry.stressTest || entry.applied || !projectId) return;
+    const revised = entry.stressTest.findings.filter((f) => f.revised);
+    if (revised.length === 0) return;
+    try {
+      const res = await fetch(`/api/projects/${projectId}/strategy/ask-ai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          task: "apply_stress_test_findings",
+          optionId: entry.stressTest.optionId,
+          findings: revised.map((f) => ({ scenarioId: f.scenarioId, rationale: f.rationale, groundedIn: f.groundedIn })),
+        }),
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      setStrategyResults((r) => r.map((e, i) => (i === index ? { ...e, applied: true } : e)));
+      window.dispatchEvent(new CustomEvent("fm:decisions-updated", { detail: { projectId } }));
+    } catch (err) {
+      console.error("[ask-ai] failed to apply stress-test findings", err);
+    }
+  };
+
+  // Backing action for suggest_hedge's "+ Add as option" button — same confirm-before-write
+  // contract as the Strategy chat's own suggestedOption card (onAddStrategyOption above);
+  // suggest_hedge used to generate a real, grounded suggestion with no way to act on it at all.
+  const onAddHedgeOption = async (index: number) => {
+    const entry = strategyResults[index];
+    const projectId = store.activeProjectId;
+    const suggestion = entry.hedge?.suggestion;
+    if (!suggestion || entry.added || !projectId) return;
+    try {
+      await createManualStrategicOption({
+        projectId,
+        name: suggestion.name,
+        notes: `${suggestion.notes}\n\nRationale: ${suggestion.rationale}`,
+      });
+      setStrategyResults((r) => r.map((e, i) => (i === index ? { ...e, added: true } : e)));
+    } catch (err) {
+      console.error("[ask-ai] failed to add suggested hedge option", err);
     }
   };
 
@@ -930,11 +1007,17 @@ export function AskAI({
   const [signalsResults, setSignalsResults] = React.useState<SignalsResultEntry[]>([]);
   const [runningSignalsTask, setRunningSignalsTask] = React.useState<SignalsTaskId | null>(null);
 
-  // Shared by "Scan for driving forces (web)" and all 5 Group 1 "Find" prompts — every one of
-  // them stages results into research_suggestions (never writes signals directly) and reports
-  // back the same { sufficientEvidence, gap, suggestionsCreated } shape.
+  // Shared by "Suggest signals", "Scan for driving forces (web)", and all 5 Group 1 "Find"
+  // prompts — every one of them stages results into research_suggestions (never writes
+  // signals directly) and reports back the same { sufficientEvidence, gap, suggestionsCreated }
+  // shape. suggestSignals is closed-book (reads only the project's own insights, no web
+  // search) but gets the identical review-before-commit treatment — see that function's own
+  // comment for why "closed-book" isn't the same thing as "safe to auto-commit."
   const FIND_RUNNERS: Partial<Record<SignalsTaskId, (projectId: string) => Promise<RunScanResult>>> = {
+    suggest_signals: suggestSignals,
     scan_driving_forces: runMacroTrendSweep,
+    research_supply_chain_geopolitics: researchSupplyChainGeopolitics,
+    research_international_markets: researchInternationalMarkets,
     find_scan: runFindScan,
     find_oracle: runFindOracleQuestions,
     find_actors: runFindActorProfile,
@@ -949,20 +1032,7 @@ export function AskAI({
     try {
       const findRunner = FIND_RUNNERS[taskId];
       let entry: SignalsResultEntry;
-      if (taskId === "suggest_signals") {
-        // Same combined suggest-then-score logic page-signals.tsx's old onSuggestSignals had —
-        // store.suggestSignals/scoreUnscoredSignals both call refreshSignals internally, so
-        // store.signals (and every page reading it) updates with no extra event needed.
-        const suggestion = await store.suggestSignals(projectId);
-        let summary: string;
-        if (suggestion.created === 0) {
-          summary = "No new signals to suggest right now.";
-        } else {
-          const scoring = await store.scoreUnscoredSignals(projectId);
-          summary = `Suggested ${suggestion.created} signal(s), scored ${scoring.scored}.`;
-        }
-        entry = { task: taskId, ts: Date.now(), ok: true, summary };
-      } else if (findRunner) {
+      if (findRunner) {
         const result = await findRunner(projectId);
         const summary = result.sufficientEvidence
           ? `Found ${result.suggestionsCreated} candidate(s) to review below.`
@@ -1310,8 +1380,7 @@ export function AskAI({
       const entry: SettingsResultEntry = { task: taskId, ts: Date.now(), ok: true };
       if (taskId === "draft_focal_question") entry.draft = data as DraftFocalQuestionResult;
       else if (taskId === "sharpen_focal_question") entry.sharpen = data as SharpenFocalQuestionResult;
-      else if (taskId === "critique_focal_question") entry.critique = data as CritiqueFocalQuestionResult;
-      else entry.refresh = data as RefreshIndustryResearchResult;
+      else entry.critique = data as CritiqueFocalQuestionResult;
       setSettingsResults((r) => [entry, ...r]);
     } catch (err) {
       console.error("[ask-ai] settings task failed", err);
@@ -1607,11 +1676,21 @@ export function AskAI({
                                     <div className="font-semibold">{g.phase.replace("_", "-")}</div>
                                     {!g.sufficientEvidence || g.candidates.length === 0 ? (
                                       <p className="m-0 text-muted-foreground">{g.gap || "No matching signals found."}</p>
+                                    ) : r.usedGapPhases?.has(g.phase) ? (
+                                      <div className="text-[#065F46]">✓ Added to chain.</div>
                                     ) : (
-                                      <ul className="m-0 flex list-none flex-col gap-1 p-0">
+                                      <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
                                         {g.candidates.map((c) => (
-                                          <li key={c.signalId}>
-                                            — {c.title}: {c.rationale}
+                                          <li key={c.signalId} className="flex items-start justify-between gap-2">
+                                            <span>
+                                              — {c.title}: {c.rationale}
+                                            </span>
+                                            <button
+                                              onClick={() => onUseGapCandidate(i, g.phase, c.signalId)}
+                                              className="flex-shrink-0 whitespace-nowrap font-medium text-brand-orange hover:text-brand-orange700"
+                                            >
+                                              Use this
+                                            </button>
                                           </li>
                                         ))}
                                       </ul>
@@ -1644,7 +1723,8 @@ export function AskAI({
                 <div className="flex flex-col gap-1.5">
                   <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">TASKS</div>
                   {NARRATIVE_TASKS.map((t) => {
-                    const disabled = !!runningNarrativeTask || !store.narrativeAskAiContext;
+                    const disabled =
+                      !!runningNarrativeTask || !store.narrativeAskAiContext || (t.needsImplications && !store.narrativeAskAiContext.hasImplications);
                     return (
                       <button
                         key={t.id}
@@ -1712,16 +1792,6 @@ export function AskAI({
                             </div>
                           )}
 
-                          {r.ok && r.implications && (
-                            <div className="text-[12.5px] leading-[1.5]">
-                              {r.implications.sufficientEvidence ? (
-                                <p className="m-0 text-muted-foreground">Regenerated {r.implications.count} implication(s).</p>
-                              ) : (
-                                <p className="m-0 text-[#92400E]">{r.implications.gap}</p>
-                              )}
-                            </div>
-                          )}
-
                           {r.ok && r.stressTest && (
                             <div className="text-[12.5px] leading-[1.5]">
                               {r.stressTest.results.length === 0 ? (
@@ -1735,16 +1805,6 @@ export function AskAI({
                                     </li>
                                   ))}
                                 </ul>
-                              )}
-                            </div>
-                          )}
-
-                          {r.ok && r.indicators && (
-                            <div className="text-[12.5px] leading-[1.5]">
-                              {r.indicators.sufficientEvidence ? (
-                                <p className="m-0 text-muted-foreground">Generated {r.indicators.count} indicator(s) — see Monitoring.</p>
-                              ) : (
-                                <p className="m-0 text-[#92400E]">{r.indicators.gap}</p>
                               )}
                             </div>
                           )}
@@ -1812,14 +1872,24 @@ export function AskAI({
                               {r.stressTest.findings.length === 0 ? (
                                 <p className="m-0 text-muted-foreground">This option isn&apos;t marked robust in any scenario yet — nothing to stress-test.</p>
                               ) : (
-                                <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
-                                  {r.stressTest.findings.map((f, j) => (
-                                    <li key={j} className={f.revised ? "text-[#92400E]" : "text-[#065F46]"}>
-                                      {f.revised ? "⚠ now flagged not robust —" : "✓ confirmed robust —"} {f.scenarioName}
-                                      <div className="text-[11.5px] text-muted-foreground">{f.rationale}</div>
-                                    </li>
-                                  ))}
-                                </ul>
+                                <>
+                                  <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+                                    {r.stressTest.findings.map((f, j) => (
+                                      <li key={j} className={f.revised ? "text-[#92400E]" : "text-[#065F46]"}>
+                                        {f.revised ? "⚠ now flagged not robust —" : "✓ confirmed robust —"} {f.scenarioName}
+                                        <div className="text-[11.5px] text-muted-foreground">{f.rationale}</div>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                  {r.stressTest.findings.some((f) => f.revised) &&
+                                    (r.applied ? (
+                                      <div className="mt-2 text-[11.5px] font-medium text-[#065F46]">Applied — scores updated.</div>
+                                    ) : (
+                                      <Button variant="primary" size="sm" className="mt-2" onClick={() => onApplyStressTestFindings(i)}>
+                                        Apply changes
+                                      </Button>
+                                    ))}
+                                </>
                               )}
                             </div>
                           )}
@@ -1841,7 +1911,14 @@ export function AskAI({
                                   )}
                                   <div className="mb-1 text-[13px] font-semibold">{r.hedge.suggestion.name}</div>
                                   <p className="m-0 mb-1 text-muted-foreground">{r.hedge.suggestion.notes}</p>
-                                  <p className="m-0 italic text-muted-foreground">{r.hedge.suggestion.rationale}</p>
+                                  <p className="m-0 mb-2 italic text-muted-foreground">{r.hedge.suggestion.rationale}</p>
+                                  {r.added ? (
+                                    <div className="text-[11.5px] font-medium text-[#065F46]">Added ✓</div>
+                                  ) : (
+                                    <Button variant="primary" size="sm" onClick={() => onAddHedgeOption(i)}>
+                                      + Add as option
+                                    </Button>
+                                  )}
                                 </>
                               )}
                             </div>
@@ -2641,7 +2718,6 @@ export function AskAI({
                             </div>
                           )}
 
-                          {r.ok && r.refresh && <p className="m-0 text-[12.5px] leading-[1.5] text-muted-foreground">{r.refresh.summary}</p>}
                         </div>
                       );
                     })}

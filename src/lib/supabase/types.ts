@@ -1257,6 +1257,7 @@ export interface Database {
           citation_url: string | null;
           confirmed_signal_id: string | null;
           confirmed_insight_id: string | null;
+          grounded_in_insight_ids: string[];
           created_at: string;
         };
         Insert: {
@@ -1273,6 +1274,7 @@ export interface Database {
           citation_url?: string | null;
           confirmed_signal_id?: string | null;
           confirmed_insight_id?: string | null;
+          grounded_in_insight_ids?: string[];
           created_at?: string;
         };
         Update: {
@@ -1289,6 +1291,7 @@ export interface Database {
           citation_url?: string | null;
           confirmed_signal_id?: string | null;
           confirmed_insight_id?: string | null;
+          grounded_in_insight_ids?: string[];
           created_at?: string;
         };
         Relationships: [];

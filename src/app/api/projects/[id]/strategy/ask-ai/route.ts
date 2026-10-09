@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { stressTestOption, explainNonRobustCell, suggestHedge } from "@/lib/actions/ai-strategy-tasks";
+import { stressTestOption, applyStressTestFindings, explainNonRobustCell, suggestHedge } from "@/lib/actions/ai-strategy-tasks";
 import { errorResponse } from "@/lib/api/error-response";
 
 // Fixed task menu — never freeform (see ask-ai.tsx's context="strategy" branch; freeform is the
@@ -7,12 +7,17 @@ import { errorResponse } from "@/lib/api/error-response";
 // options/scores/scenarios/implications, no general external knowledge.
 export const maxDuration = 120;
 
-type Task = "stress_test_option" | "explain_non_robust" | "suggest_hedge";
+type Task = "stress_test_option" | "apply_stress_test_findings" | "explain_non_robust" | "suggest_hedge";
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
   const projectId = params.id;
 
-  let body: { task?: Task; optionId?: string; scenarioId?: string };
+  let body: {
+    task?: Task;
+    optionId?: string;
+    scenarioId?: string;
+    findings?: { scenarioId: string; rationale: string; groundedIn: string[] }[];
+  };
   try {
     body = await request.json();
   } catch {
@@ -26,6 +31,12 @@ export async function POST(request: Request, { params }: { params: { id: string 
           return NextResponse.json({ error: "optionId is required for stress_test_option." }, { status: 400 });
         }
         return NextResponse.json(await stressTestOption(body.optionId));
+
+      case "apply_stress_test_findings":
+        if (!body.optionId || !body.findings) {
+          return NextResponse.json({ error: "optionId and findings are required for apply_stress_test_findings." }, { status: 400 });
+        }
+        return NextResponse.json(await applyStressTestFindings(body.optionId, body.findings));
 
       case "explain_non_robust":
         if (!body.optionId || !body.scenarioId) {

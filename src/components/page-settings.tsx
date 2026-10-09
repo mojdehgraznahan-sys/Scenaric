@@ -18,11 +18,7 @@ import type { ProjectSettings } from "@/lib/actions/project-settings";
 import type { ProjectAiSettings } from "@/lib/actions/project-ai-settings";
 import type { IntegrationCard } from "@/lib/actions/project-integrations";
 import type { ProjectBilling } from "@/lib/actions/billing";
-import type {
-  SharpenFocalQuestionResult,
-  CritiqueFocalQuestionResult,
-  RefreshIndustryResearchResult,
-} from "@/lib/actions/ai-settings-tasks";
+import type { SharpenFocalQuestionResult, CritiqueFocalQuestionResult } from "@/lib/actions/ai-settings-tasks";
 import type { SettingsChatResult } from "@/lib/actions/ai-settings-chat";
 
 const TABS = ["Project", "Team", "AI Analyst", "Integrations", "Billing"];
@@ -196,7 +192,10 @@ export function PageSettings() {
   // design, rather than only reachable via the floating ⌘I drawer. Kept as its own local state
   // block rather than sharing ask-ai.tsx's — every context in that file already keeps its own
   // local result/chat state rather than one shared blob, so this follows the same convention.
-  type SettingsAskAiTask = "sharpen_focal_question" | "critique_focal_question" | "refresh_industry_research";
+  // "Refresh industry research" used to be a third chip here — removed (Ask AI audit,
+  // design/2026-10-05 follow-up): it just re-ran Knowledge Base's own news-pull/local-actor-
+  // scan under a different label. That capability lives on Knowledge Base's own Ask AI menu.
+  type SettingsAskAiTask = "sharpen_focal_question" | "critique_focal_question";
 
   interface SettingsAskAiResultEntry {
     task: SettingsAskAiTask;
@@ -205,7 +204,6 @@ export function PageSettings() {
     error?: string;
     sharpen?: SharpenFocalQuestionResult;
     critique?: CritiqueFocalQuestionResult;
-    refresh?: RefreshIndustryResearchResult;
     applied?: boolean;
     appliedIndex?: number;
   }
@@ -213,7 +211,6 @@ export function PageSettings() {
   const ASK_AI_CHIPS: { id: SettingsAskAiTask; label: string }[] = [
     { id: "sharpen_focal_question", label: "Sharpen my focal question" },
     { id: "critique_focal_question", label: "Is this too broad or narrow?" },
-    { id: "refresh_industry_research", label: "Refresh industry research" },
   ];
 
   const [askAiResults, setAskAiResults] = React.useState<SettingsAskAiResultEntry[]>([]);
@@ -232,8 +229,7 @@ export function PageSettings() {
       const data = await res.json();
       const entry: SettingsAskAiResultEntry = { task, ts: Date.now(), ok: true };
       if (task === "sharpen_focal_question") entry.sharpen = data as SharpenFocalQuestionResult;
-      else if (task === "critique_focal_question") entry.critique = data as CritiqueFocalQuestionResult;
-      else entry.refresh = data as RefreshIndustryResearchResult;
+      else entry.critique = data as CritiqueFocalQuestionResult;
       setAskAiResults((r) => [entry, ...r]);
     } catch (err) {
       console.error("[settings] ask-ai task failed", err);
@@ -550,7 +546,6 @@ export function PageSettings() {
                             </div>
                           )}
 
-                          {r.ok && r.refresh && <p className="m-0 text-[12.5px] leading-[1.5] text-muted-foreground">{r.refresh.summary}</p>}
                         </div>
                       );
                     })}

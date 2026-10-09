@@ -254,6 +254,28 @@ export async function runMacroTrendSweep(projectId: string, options: RunScanOpti
   return { sufficientEvidence: true, gap: null, suggestionsCreated: inserted.length };
 }
 
+// Two focused variants of the sweep above — moved here from ai-knowledge-tasks.ts (Ask AI
+// audit, design/2026-10-05 follow-up): both stage the exact same kind of driving-force
+// candidate the unfocused sweep does, reviewed in the exact same place (Signals page's
+// Suggestions tab), so they belong with the Signals-page task menu, not Knowledge Base's —
+// Knowledge Base's own job is sources/insights, not STEEP trend candidates.
+const SUPPLY_CHAIN_GEOPOLITICS_FOCUS =
+  "Prioritize supply-chain dynamics (sourcing, logistics, tariffs, trade routes) and geopolitical " +
+  "(Political category) developments relevant to the focal question.";
+
+export async function researchSupplyChainGeopolitics(projectId: string): Promise<RunScanResult> {
+  return runMacroTrendSweep(projectId, { focus: SUPPLY_CHAIN_GEOPOLITICS_FOCUS });
+}
+
+const INTERNATIONAL_MARKETS_FOCUS =
+  "Prioritize US, North American, and other internationally-relevant market conditions (Economic " +
+  "category) — market size, growth, competitive dynamics, trade policy — bringing in other " +
+  "regions only where genuinely relevant to the focal question.";
+
+export async function researchInternationalMarkets(projectId: string): Promise<RunScanResult> {
+  return runMacroTrendSweep(projectId, { focus: INTERNATIONAL_MARKETS_FOCUS });
+}
+
 export async function listResearchSuggestions(
   projectId: string,
   step: "key_forces" | "driving_forces" | ("key_forces" | "driving_forces" | "find")[]
@@ -715,6 +737,11 @@ export async function confirmResearchSuggestion(projectId: string, id: string): 
   }
 
   if (suggestion.step === "driving_forces" || suggestion.step === "find") {
+    // suggestSignals (ai-signals.ts) stages its insight-derived candidates through this same
+    // table (source:"insight_pattern") rather than a live web scan — distinguish its origin
+    // from the web-sourced producers' "external_research" so a signal's own provenance stays
+    // honest. grounded_in_insight_ids is only ever populated by that producer.
+    const origin = suggestion.source === "insight_pattern" ? (suggestion.grounded_in_insight_ids.length > 0 ? "insight" : "external_pattern") : "external_research";
     const signal = await createSignal({
       projectId,
       category: suggestion.category ?? "Social",
@@ -725,8 +752,18 @@ export async function confirmResearchSuggestion(projectId: string, id: string): 
       poleA: "Doesn't happen",
       poleB: suggestion.title,
       body: suggestion.body,
-      origin: "external_research",
+      origin,
     });
+
+    if (suggestion.grounded_in_insight_ids.length > 0) {
+      const { error: linkError } = await supabase
+        .from("signal_insight_links")
+        .insert(suggestion.grounded_in_insight_ids.map((insightId) => ({ project_id: projectId, signal_id: signal.id, insight_id: insightId })));
+      // Logged, not thrown — a hallucinated insight id failing the FK constraint shouldn't
+      // undo the signal itself, same precedent as the old pre-staging code this replaced.
+      if (linkError) console.error("[ai-research-suggestions] failed to persist grounded_in links", linkError);
+    }
+
     await scoreOneSignal(projectId, signal.id);
     const { data: scoredSignal, error: scoredSignalError } = await supabase.from("signals").select("*").eq("id", signal.id).single();
     if (scoredSignalError) throw scoredSignalError;
