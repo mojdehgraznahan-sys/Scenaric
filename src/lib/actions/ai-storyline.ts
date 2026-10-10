@@ -17,6 +17,7 @@ import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
 import { StorylineScenarioNotFoundError, ValidationError } from "@/lib/ai/errors";
 import { getProjectAiSettings } from "./project-ai-settings";
+import { listEventsWithLinks } from "./events";
 import { z } from "zod";
 import type { Database } from "@/lib/supabase/types";
 import { PHASES, isPhaseOrderValid, type Phase } from "../storyline-mapping";
@@ -508,6 +509,132 @@ export async function findSignalForGap(input: { scenarioId: string; phase: Phase
     .map((c) => {
       const s = signalById.get(c.signal_id)!;
       return { signalId: c.signal_id, title: s.title, category: s.category, rationale: c.rationale };
+    });
+
+  return { sufficientEvidence: candidates.length > 0, candidates };
+}
+
+// Event-grounded counterpart to findSignalForGap above, for the same gap-filling UI once
+// Storyline nodes are event-grounded (design/2026-10-09) — SELECTS from the project's real
+// tracked events instead of its forces. Same "never invent, only rank" contract.
+const FindEventSchema = z.object({
+  sufficient_evidence: z.boolean(),
+  gap: z.string().optional(),
+  candidates: z
+    .array(
+      z.object({
+        event_id: z.string(),
+        rationale: z.string(),
+      })
+    )
+    .max(5),
+});
+
+const FIND_EVENT_TASK_PROMPT = `Task: The user is filling a gap in one scenario's storyline causal
+chain at a specific phase. Search the project's real tracked events below
+and SELECT the ones that plausibly cause or connect to the surrounding
+chain at that point — you are not inventing a new event, only ranking
+which of the existing ones best fit this gap.
+
+Input: { scenario: {name, logic}, phase: string, gap_description: string,
+         surrounding_nodes: [{phase, title, event_id}] /* the scenario's
+         existing chain, for causal context — what comes immediately
+         before/after this gap */,
+         candidate_events: [{id, title, body, category, status, likelihood}]
+         /* events not already used in this scenario's chain */ }
+
+Rules:
+- Only select from candidate_events — never invent an event or describe
+  one that isn't in the list.
+- A candidate is a good fit only if it plausibly causes, enables, or is
+  caused/enabled by nodes adjacent to this phase in surrounding_nodes —
+  respect one-directional causality (a Precursors-phase gap shouldn't be
+  filled by something that only makes sense as an effect of a later node).
+- rationale is one sentence: why this event causally connects to what's
+  immediately before/after this gap, citing the specific mechanism.
+- Rank best-fit first. Return at most 5 candidates.
+- If nothing in candidate_events plausibly fits, return
+  sufficient_evidence:false and an empty candidates array — do not force
+  a weak match just to return something.
+
+Output schema:
+{ sufficient_evidence: boolean, gap?: string,
+  candidates: [{ event_id: string, rationale: string }] }`;
+
+export interface FindEventCandidate {
+  eventId: string;
+  title: string;
+  category: SteepCategory | null;
+  likelihood: "Low" | "Medium" | "High" | null;
+  rationale: string;
+}
+
+export interface FindEventForGapResult {
+  sufficientEvidence: boolean;
+  gap?: string;
+  candidates: FindEventCandidate[];
+}
+
+export async function findEventForGap(input: { scenarioId: string; phase: Phase; gapDescription: string }): Promise<FindEventForGapResult> {
+  const supabase = createClient();
+
+  const { data: scenario, error: scenarioError } = await supabase
+    .from("scenarios")
+    .select("id, project_id, name, logic")
+    .eq("id", input.scenarioId)
+    .single();
+  if (scenarioError) throw scenarioError;
+
+  const { data: existingNodes, error: nodesError } = await supabase
+    .from("storyline_nodes")
+    .select("phase, title, event_id")
+    .eq("scenario_id", input.scenarioId);
+  if (nodesError) throw nodesError;
+  const usedEventIds = new Set(existingNodes.map((n) => n.event_id).filter((id): id is string => id != null));
+
+  const events = await listEventsWithLinks(scenario.project_id);
+  const eventById = new Map(events.map((e) => [e.id, e]));
+
+  const candidateEvents = events.filter((e) => !usedEventIds.has(e.id));
+  if (candidateEvents.length === 0) {
+    return { sufficientEvidence: false, gap: "No unused project events are available to fill this gap.", candidates: [] };
+  }
+  const candidateIds = new Set(candidateEvents.map((e) => e.id));
+
+  const output = await runStructured({
+    step: "storyline.find_event",
+    projectId: scenario.project_id,
+    taskPrompt: FIND_EVENT_TASK_PROMPT,
+    input: {
+      scenario: { name: scenario.name, logic: scenario.logic },
+      phase: input.phase,
+      gap_description: input.gapDescription,
+      surrounding_nodes: existingNodes,
+      candidate_events: candidateEvents.map((e) => ({
+        id: e.id,
+        title: e.title,
+        body: e.description,
+        category: e.category,
+        status: e.status,
+        likelihood: e.likelihood,
+      })),
+    },
+    schema: FindEventSchema,
+    effort: "medium",
+    thinking: false,
+  });
+
+  if (!output.sufficient_evidence) {
+    return { sufficientEvidence: false, gap: output.gap, candidates: [] };
+  }
+
+  // Validate before returning — defense in depth beyond the prompt's own instructions, same
+  // as findSignalForGap: never surface a hallucinated id.
+  const candidates: FindEventCandidate[] = output.candidates
+    .filter((c) => candidateIds.has(c.event_id))
+    .map((c) => {
+      const e = eventById.get(c.event_id)!;
+      return { eventId: c.event_id, title: e.title, category: e.category, likelihood: e.likelihood, rationale: c.rationale };
     });
 
   return { sufficientEvidence: candidates.length > 0, candidates };

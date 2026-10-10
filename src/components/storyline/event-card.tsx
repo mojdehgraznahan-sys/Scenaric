@@ -1,9 +1,9 @@
 "use client";
 
-// SignalCard — the timeline node component used on the Storyline canvas.
+// EventCard — the timeline node component used on the Storyline canvas.
 // States: default, hover, selected, dragging, placeholder, dimmed. Drag/arrow
-// protocol is pointer-driven and owned by the canvas. Faithful port of signal-card.jsx;
-// dynamic per-state border/shadow stay inline.
+// protocol is pointer-driven and owned by the canvas. Renamed from signal-card.tsx
+// (design/2026-10-09): chain nodes are event-grounded going forward.
 import * as React from "react";
 import { Chip } from "@/components/chip";
 import { CARD_W, type StoryNode } from "./data";
@@ -28,7 +28,7 @@ export function ImpactStars({ value = 0, max = 5, size = 11 }: { value?: number;
   );
 }
 
-export interface SignalCardProps {
+export interface EventCardProps {
   node: StoryNode;
   selected?: boolean;
   dim?: boolean;
@@ -41,7 +41,7 @@ export interface SignalCardProps {
   accentColor?: string;
 }
 
-export const SignalCard = React.forwardRef<HTMLDivElement, SignalCardProps>(function SignalCard(props, ref) {
+export const EventCard = React.forwardRef<HTMLDivElement, EventCardProps>(function EventCard(props, ref) {
   const {
     node,
     selected = false,
@@ -97,7 +97,7 @@ export const SignalCard = React.forwardRef<HTMLDivElement, SignalCardProps>(func
           if (onClick) onClick();
         }
       }}
-      data-signal-card={node.id}
+      data-event-card={node.id}
       className="relative flex select-none flex-col gap-2 rounded-[10px] bg-white"
       style={{
         width: CARD_W,
@@ -130,7 +130,7 @@ export const SignalCard = React.forwardRef<HTMLDivElement, SignalCardProps>(func
 
       {/* Right-edge connector "+" — start a new outgoing arrow */}
       <button
-        title="Drag to connect to another signal"
+        title="Drag to connect to another event"
         aria-label="Create connection"
         onPointerDown={(e) => {
           e.stopPropagation();
@@ -151,13 +151,45 @@ export const SignalCard = React.forwardRef<HTMLDivElement, SignalCardProps>(func
         </svg>
       </button>
 
-      {/* Row 1 — STEEP pill + source */}
+      {/* Row 1 — STEEP pill + source, status/likelihood badge */}
       <div className="flex items-center justify-between gap-2" style={{ paddingRight: hover ? 14 : 0 }}>
-        {node.cat && <Chip category={node.cat} />}
-        <span className="max-w-[100px] truncate font-mono text-[10px] tracking-[0.02em] text-muted-foreground">
-          {node.source || node.year}
-        </span>
+        <div className="flex min-w-0 items-center gap-1.5">
+          {node.cat && <Chip category={node.cat} />}
+          <span className="max-w-[70px] truncate font-mono text-[10px] tracking-[0.02em] text-muted-foreground">
+            {node.source || node.year}
+          </span>
+        </div>
+        {node.status === "observed" && (
+          <span className="flex flex-shrink-0 items-center gap-1 rounded-full bg-bg px-[7px] py-0.5 text-[10px] font-semibold text-muted-foreground">
+            <span className="h-1.5 w-1.5 rounded-full bg-text-3" /> Observed
+          </span>
+        )}
+        {node.status === "possible" && (
+          <span
+            className="flex flex-shrink-0 items-center gap-1 rounded-full px-[7px] py-0.5 text-[10px] font-semibold"
+            style={{ background: u.bg, color: u.fg }}
+          >
+            <span className="h-1.5 w-1.5 rounded-full border" style={{ borderColor: u.fg }} /> {node.uncertainty || "Medium"}
+          </span>
+        )}
       </div>
+
+      {/* Force tag — which pole this event pulls toward */}
+      {node.forcePole && (
+        <div
+          className="-mt-1.5 truncate text-[11px] font-medium text-muted-foreground"
+          title={node.forcePole.forceTitle}
+        >
+          ↗ {node.forcePole.toward}
+          {node.forcePole.extraForces > 0 && ` +${node.forcePole.extraForces}`}
+          {node.wildcard && <span className="ml-1.5 rounded-full bg-[#F5F3FF] px-[6px] py-0.5 text-[9.5px] font-semibold text-[#8B5CF6]">Wildcard</span>}
+        </div>
+      )}
+      {!node.forcePole && node.wildcard && (
+        <div className="-mt-1.5">
+          <span className="rounded-full bg-[#F5F3FF] px-[6px] py-0.5 text-[9.5px] font-semibold text-[#8B5CF6]">Wildcard</span>
+        </div>
+      )}
 
       {/* Row 2 — title (2 lines) */}
       <div className="overflow-hidden text-sm font-semibold leading-[1.3] tracking-[-0.005em] text-brand-dark [-webkit-box-orient:vertical] [-webkit-line-clamp:2] [display:-webkit-box]">
@@ -182,7 +214,7 @@ export const SignalCard = React.forwardRef<HTMLDivElement, SignalCardProps>(func
 
       {/* Hover-revealed action row */}
       <div
-        className="-mt-0.5 overflow-hidden transition-[height,opacity] duration-[120ms]"
+        className="-mt-0.5 flex items-center justify-between overflow-hidden transition-[height,opacity] duration-[120ms]"
         style={{ height: hover && !dragging ? 20 : 0, opacity: hover && !dragging ? 1 : 0 }}
       >
         <button
@@ -199,12 +231,22 @@ export const SignalCard = React.forwardRef<HTMLDivElement, SignalCardProps>(func
             <polyline points="12 5 19 12 12 19" />
           </svg>
         </button>
+        {node.eventId && (
+          <a
+            href={`/signals?openEvent=${node.eventId}`}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center gap-1 border-0 bg-transparent p-0 text-[11.5px] font-medium text-muted-foreground hover:text-brand-orange"
+          >
+            View in Signals
+          </a>
+        )}
       </div>
     </div>
   );
 });
 
-export function SignalCardPlaceholder({ label = "Drop signal here" }: { label?: string }) {
+export function EventCardPlaceholder({ label = "Drop event here" }: { label?: string }) {
   return (
     <div
       className="flex items-center justify-center rounded-[10px] border-[1.5px] border-dashed border-brand-orange100 bg-[rgba(255,247,237,0.4)] text-xs font-medium tracking-[0.02em] text-brand-orange700"

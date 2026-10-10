@@ -11,10 +11,10 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 import { Chip } from "@/components/chip";
-import { ImpactStars } from "./signal-card";
+import { ImpactStars } from "./event-card";
 import { toBackendPhase } from "./story-adapter";
 import { createStorylineNode, updateStorylineNode, createStorylineEdge } from "@/lib/actions/storyline";
-import { eventCategory, slPole } from "@/components/signals/pole";
+import { eventCategory, eventForcePole, slPole } from "@/components/signals/pole";
 import type { EventItem, Signal, SteepCategory } from "@/lib/types";
 import type { StoryNode, StoryEdge, StoryPhase } from "./data";
 
@@ -75,6 +75,7 @@ export function EventPickerModal({ open, onClose, scenarioId, nodes, phases, col
   const [tab, setTab] = React.useState<"library" | "create">("library");
   const [search, setSearch] = React.useState("");
   const [filterCat, setFilterCat] = React.useState<"All" | SteepCategory>("All");
+  const [filterStatus, setFilterStatus] = React.useState<"All" | "observed" | "possible">("All");
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
 
   const defaultColumn = React.useMemo(() => {
@@ -94,6 +95,7 @@ export function EventPickerModal({ open, onClose, scenarioId, nodes, phases, col
       setTab("library");
       setSearch("");
       setFilterCat("All");
+      setFilterStatus("All");
       setSelected(new Set());
       setPlacement(initialPlacement ?? defaultColumn);
       setConnectFrom("");
@@ -120,11 +122,12 @@ export function EventPickerModal({ open, onClose, scenarioId, nodes, phases, col
 
   const library = store.events;
   const signals = store.signals;
-  const chainTitles = new Set(nodes.map((n) => (n.title || "").toLowerCase()));
+  const chainEventIds = new Set(nodes.filter((n) => n.eventId).map((n) => n.eventId as string));
 
   const filtered = library.filter((e) => {
     const cat = eventCategory(e, signals);
     if (filterCat !== "All" && cat !== filterCat) return false;
+    if (filterStatus !== "All" && e.status !== filterStatus) return false;
     if (!search.trim()) return true;
     const q = search.trim().toLowerCase();
     return (e.title || "").toLowerCase().includes(q) || (e.source || "").toLowerCase().includes(q) || (e.body || "").toLowerCase().includes(q);
@@ -207,6 +210,9 @@ export function EventPickerModal({ open, onClose, scenarioId, nodes, phases, col
           uncertainty: e.likelihood ?? undefined,
           strength: 0.65,
           eventId: e.id,
+          forcePole: eventForcePole(e, signals),
+          status: e.status,
+          wildcard: e.wildcard,
         });
       }
       commitAdd(newChainNodes, movedIds, newEdges);
@@ -265,6 +271,9 @@ export function EventPickerModal({ open, onClose, scenarioId, nodes, phases, col
             uncertainty: newEvent.likelihood ?? undefined,
             strength: 0.65,
             eventId: newEvent.id,
+            forcePole: eventForcePole(newEvent, signals),
+            status: newEvent.status,
+            wildcard: newEvent.wildcard,
           },
         ],
         new Set(),
@@ -333,7 +342,19 @@ export function EventPickerModal({ open, onClose, scenarioId, nodes, phases, col
         {/* Body */}
         <div className="mt-4 flex flex-1 flex-col overflow-hidden">
           {tab === "library" ? (
-            <LibraryTab search={search} setSearch={setSearch} filterCat={filterCat} setFilterCat={setFilterCat} filtered={filtered} signals={signals} selected={selected} toggleSelect={toggleSelect} chainTitles={chainTitles} />
+            <LibraryTab
+              search={search}
+              setSearch={setSearch}
+              filterCat={filterCat}
+              setFilterCat={setFilterCat}
+              filterStatus={filterStatus}
+              setFilterStatus={setFilterStatus}
+              filtered={filtered}
+              signals={signals}
+              selected={selected}
+              toggleSelect={toggleSelect}
+              chainEventIds={chainEventIds}
+            />
           ) : (
             <CreateTab form={form} setForm={setForm} error={formError} signals={signals} />
           )}
@@ -383,27 +404,55 @@ export function EventPickerModal({ open, onClose, scenarioId, nodes, phases, col
 }
 
 /* ─────────── Library tab ─────────── */
+const STATUS_FILTERS = [
+  { id: "All", label: "All" },
+  { id: "observed", label: "Observed" },
+  { id: "possible", label: "Possible" },
+] as const;
+
+const UNASSIGNED_GROUP = "__unassigned__";
+
 function LibraryTab({
   search,
   setSearch,
   filterCat,
   setFilterCat,
+  filterStatus,
+  setFilterStatus,
   filtered,
   signals,
   selected,
   toggleSelect,
-  chainTitles,
+  chainEventIds,
 }: {
   search: string;
   setSearch: (v: string) => void;
   filterCat: "All" | SteepCategory;
   setFilterCat: (v: "All" | SteepCategory) => void;
+  filterStatus: "All" | "observed" | "possible";
+  setFilterStatus: (v: "All" | "observed" | "possible") => void;
   filtered: EventItem[];
   signals: Signal[];
   selected: Set<string>;
   toggleSelect: (id: string) => void;
-  chainTitles: Set<string>;
+  chainEventIds: Set<string>;
 }) {
+  // Group by the first force each event links to — an event linked to several forces
+  // appears under each one; unlinked events land in a trailing "Unassigned" group.
+  const groups = React.useMemo(() => {
+    const byForce = new Map<string, EventItem[]>();
+    for (const e of filtered) {
+      const forceIds = e.links.length > 0 ? e.links.map((l) => l.signalId) : [UNASSIGNED_GROUP];
+      for (const fid of forceIds) {
+        if (!byForce.has(fid)) byForce.set(fid, []);
+        byForce.get(fid)!.push(e);
+      }
+    }
+    const ordered = signals.filter((s) => byForce.has(s.id)).map((s) => ({ id: s.id, title: s.title, events: byForce.get(s.id)! }));
+    if (byForce.has(UNASSIGNED_GROUP)) ordered.push({ id: UNASSIGNED_GROUP, title: "Unassigned", events: byForce.get(UNASSIGNED_GROUP)! });
+    return ordered;
+  }, [filtered, signals]);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       <div className="relative">
@@ -420,67 +469,97 @@ function LibraryTab({
         />
       </div>
 
-      {/* STEEP filter pills */}
-      <div className="flex flex-wrap gap-1.5">
-        {(["All", ...STEEP_CATS] as const).map((cat) => {
-          const active = filterCat === cat;
-          if (cat === "All") {
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {/* STEEP filter pills */}
+        <div className="flex flex-wrap gap-1.5">
+          {(["All", ...STEEP_CATS] as const).map((cat) => {
+            const active = filterCat === cat;
+            if (cat === "All") {
+              return (
+                <button
+                  key="All"
+                  onClick={() => setFilterCat("All")}
+                  className={cn("rounded-full border px-[11px] py-1 text-[11.5px] font-medium", active ? "border-brand-orange bg-brand-orangeLight text-brand-orange700" : "border-border bg-white text-muted-foreground")}
+                >
+                  All
+                </button>
+              );
+            }
             return (
-              <button
-                key="All"
-                onClick={() => setFilterCat("All")}
-                className={cn("rounded-full border px-[11px] py-1 text-[11.5px] font-medium", active ? "border-brand-orange bg-brand-orangeLight text-brand-orange700" : "border-border bg-white text-muted-foreground")}
-              >
-                All
+              <button key={cat} onClick={() => setFilterCat(cat)}>
+                <Chip category={cat} className={active ? "outline outline-2 outline-offset-1 outline-brand-orange" : ""} />
               </button>
             );
-          }
-          return (
-            <button key={cat} onClick={() => setFilterCat(cat)}>
-              <Chip category={cat} className={active ? "outline outline-2 outline-offset-1 outline-brand-orange" : ""} />
-            </button>
-          );
-        })}
+          })}
+        </div>
+
+        {/* Status segmented control */}
+        <div className="flex rounded-md border border-border bg-white p-0.5">
+          {STATUS_FILTERS.map((s) => {
+            const active = filterStatus === s.id;
+            return (
+              <button
+                key={s.id}
+                onClick={() => setFilterStatus(s.id)}
+                className={cn(
+                  "rounded-[5px] px-2.5 py-1 text-[11.5px] font-medium",
+                  active ? "bg-brand-orangeLight text-brand-orange700" : "text-muted-foreground"
+                )}
+              >
+                {s.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      {/* Event list */}
+      {/* Event list, grouped by force */}
       <div className="scroll-y max-h-[400px] flex-1 overflow-auto rounded-[10px] border border-[#F3F4F6] bg-[#FAFAFA]">
         {filtered.length === 0 ? (
           <div className="p-8 text-center text-[13px] text-text-3">No events match. Try adjusting filters.</div>
         ) : (
-          <ul className="m-0 flex list-none flex-col gap-1 p-1.5">
-            {filtered.map((e) => {
-              const isSelected = selected.has(e.id);
-              const isInChain = chainTitles.has((e.title || "").toLowerCase());
-              const likelihood = e.likelihood || "Medium";
-              const u = LIKELIHOOD_BADGE[likelihood] || LIKELIHOOD_BADGE.Medium;
-              return (
-                <li
-                  key={e.id}
-                  onClick={() => toggleSelect(e.id)}
-                  className={cn(
-                    "flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2.5 transition-[background,border-color,opacity] duration-[120ms]",
-                    isSelected ? "border-brand-orange bg-brand-orangeLight" : "border-border bg-white",
-                    isInChain && !isSelected && "opacity-60"
-                  )}
-                >
-                  <PickerCheckbox checked={isSelected} />
-                  <Chip category={eventCategory(e, signals)} className="flex-shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13px] font-medium text-brand-dark">{e.title}</div>
-                    <div className="font-mono text-[11px] tracking-[0.02em] text-text-3">{e.source || e.date}</div>
-                  </div>
-                  <ImpactStars value={e.impact || 3} size={10} />
-                  <span className="flex-shrink-0 rounded-full px-[7px] py-0.5 text-[10px] font-semibold" style={{ background: u.bg, color: u.fg }}>
-                    {likelihood}
-                  </span>
-                  {isInChain && (
-                    <span className="flex-shrink-0 rounded-full bg-bg px-[7px] py-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.02em] text-muted-foreground">In chain</span>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+          <div className="flex flex-col gap-2 p-1.5">
+            {groups.map((group) => (
+              <div key={group.id}>
+                <div className="px-1.5 py-1 font-mono text-[10.5px] font-semibold uppercase tracking-[0.04em] text-text-3">
+                  {group.title} <span className="text-[#C9CDD4]">· {group.events.length}</span>
+                </div>
+                <ul className="m-0 flex list-none flex-col gap-1 p-0">
+                  {group.events.map((e) => {
+                    const isSelected = selected.has(e.id);
+                    const isInChain = chainEventIds.has(e.id);
+                    const likelihood = e.likelihood || "Medium";
+                    const u = LIKELIHOOD_BADGE[likelihood] || LIKELIHOOD_BADGE.Medium;
+                    return (
+                      <li
+                        key={group.id + ":" + e.id}
+                        onClick={() => toggleSelect(e.id)}
+                        className={cn(
+                          "flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2.5 transition-[background,border-color,opacity] duration-[120ms]",
+                          isSelected ? "border-brand-orange bg-brand-orangeLight" : "border-border bg-white",
+                          isInChain && !isSelected && "opacity-60"
+                        )}
+                      >
+                        <PickerCheckbox checked={isSelected} />
+                        <Chip category={eventCategory(e, signals)} className="flex-shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-[13px] font-medium text-brand-dark">{e.title}</div>
+                          <div className="font-mono text-[11px] tracking-[0.02em] text-text-3">{e.source || e.date}</div>
+                        </div>
+                        <ImpactStars value={e.impact || 3} size={10} />
+                        <span className="flex-shrink-0 rounded-full px-[7px] py-0.5 text-[10px] font-semibold" style={{ background: u.bg, color: u.fg }}>
+                          {likelihood}
+                        </span>
+                        {isInChain && (
+                          <span className="flex-shrink-0 rounded-full bg-bg px-[7px] py-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.02em] text-muted-foreground">In chain</span>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>

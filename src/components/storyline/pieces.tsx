@@ -7,10 +7,13 @@ import * as React from "react";
 import { Icons } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 import { FM_DATA } from "@/lib/data";
+import { useStore } from "@/lib/store";
+import { eventForcePole } from "@/components/signals/pole";
 import type { Quadrant, Scenario, Signal } from "@/lib/types";
 import type { Database } from "@/lib/supabase/types";
-import { PHASES } from "@/lib/storyline-mapping";
-import { findSignalForGap, type FindSignalCandidate } from "@/lib/actions/ai-storyline";
+import { PHASES, type Phase } from "@/lib/storyline-mapping";
+import { findEventForGap, type FindEventCandidate } from "@/lib/actions/ai-storyline";
+import { createStorylineNode, createStorylineEdge } from "@/lib/actions/storyline";
 import {
   CARD_W,
   RELATIONSHIPS,
@@ -426,9 +429,9 @@ export function OnboardingTooltip({
           </svg>
         </div>
         <div className="min-w-0 flex-1 pr-3.5">
-          <div className="mb-0.5 text-[12.5px] font-semibold text-white">Connect this signal</div>
+          <div className="mb-0.5 text-[12.5px] font-semibold text-white">Connect this event</div>
           <div className="text-[#D1D5DB]">
-            Drag from the right edge to connect this signal to another. Build the causal chain that leads to your
+            Drag from the right edge to connect this event to another. Build the causal chain that leads to your
             scenario.
           </div>
         </div>
@@ -456,6 +459,8 @@ export interface StorylineSidePanelProps {
   scenarioId: string;
   nodes: StoryNode[];
   edges: StoryEdge[];
+  setNodes: (updater: StoryNode[] | ((prev: StoryNode[]) => StoryNode[])) => void;
+  setEdges: (updater: StoryEdge[] | ((prev: StoryEdge[]) => StoryEdge[])) => void;
   plausibility: PlausibilityCheckRow | null;
   onRefreshGrounding: () => void;
   refreshing: boolean;
@@ -480,12 +485,15 @@ export function StorylineSidePanel({
   scenarioId,
   nodes,
   edges,
+  setNodes,
+  setEdges,
   plausibility,
   onRefreshGrounding,
   refreshing,
   signposts,
   showToast,
 }: StorylineSidePanelProps) {
+  const store = useStore();
   const [reaxReview, setReaxReview] = React.useState<string[]>(() => {
     try {
       return JSON.parse(localStorage.getItem("fm.reaxReview") || "[]");
@@ -521,41 +529,95 @@ export function StorylineSidePanel({
   });
 
   // First empty phase that a later, populated phase implies should have had something —
-  // the one gap "Find signals" targets. No interior gap (chain empty, or every phase
+  // the one gap "Find events" targets. No interior gap (chain empty, or every phase
   // populated) means nothing to search for.
   const presentPhases = new Set(nodes.map((n) => n.phase));
   const gapPhaseIdx = PHASES.findIndex((p, i) => !presentPhases.has(p) && PHASES.slice(i + 1).some((later) => presentPhases.has(later)));
   const gapPhase = gapPhaseIdx >= 0 ? PHASES[gapPhaseIdx] : null;
 
   const [gapLoading, setGapLoading] = React.useState(false);
-  const [gapCandidates, setGapCandidates] = React.useState<FindSignalCandidate[] | null>(null);
+  const [gapCandidates, setGapCandidates] = React.useState<FindEventCandidate[] | null>(null);
   const [gapMessage, setGapMessage] = React.useState<string | null>(null);
+  const [addingCandidateId, setAddingCandidateId] = React.useState<string | null>(null);
   React.useEffect(() => {
     setGapCandidates(null);
     setGapMessage(null);
   }, [gapPhase]);
 
-  const runFindSignals = async () => {
+  const runFindEvents = async () => {
     if (!gapPhase) return;
     setGapLoading(true);
     setGapCandidates(null);
     setGapMessage(null);
     try {
-      const result = await findSignalForGap({
+      const result = await findEventForGap({
         scenarioId,
         phase: gapPhase,
-        gapDescription: `No signals are placed in the ${gapPhase.replace("_", "-")} phase yet, between phases that do have signals.`,
+        gapDescription: `No events are placed in the ${gapPhase.replace("_", "-")} phase yet, between phases that do have events.`,
       });
       if (!result.sufficientEvidence || result.candidates.length === 0) {
-        setGapMessage(result.gap || "No matching signals found for this gap.");
+        setGapMessage(result.gap || "No matching events found for this gap.");
       } else {
         setGapCandidates(result.candidates);
       }
     } catch (err) {
-      console.error("[storyline] find-signal-for-gap failed", err);
-      showToast("Couldn't search for signals", "error");
+      console.error("[storyline] find-event-for-gap failed", err);
+      showToast("Couldn't search for events", "error");
     } finally {
       setGapLoading(false);
+    }
+  };
+
+  // Adds a gap candidate as a real event-grounded node in the gap phase, then bridges it to
+  // the nearest existing node on each side (skipping a side silently if the gap sits at the
+  // very start/end of the chain) — same createStorylineNode/createStorylineEdge pattern
+  // event-picker-modal.tsx's handleAddFromLibrary already uses.
+  const addGapCandidate = async (c: FindEventCandidate) => {
+    if (!gapPhase) return;
+    setAddingCandidateId(c.eventId);
+    try {
+      const event = store.events.find((e) => e.id === c.eventId);
+      const created = await createStorylineNode({ scenarioId, phase: gapPhase, eventId: c.eventId });
+
+      const gapIdx = PHASES.indexOf(gapPhase);
+      const before = [...nodes].reverse().find((n) => PHASES.indexOf(n.phase as Phase) < gapIdx);
+      const after = nodes.find((n) => PHASES.indexOf(n.phase as Phase) > gapIdx);
+
+      const newEdges: StoryEdge[] = [];
+      if (before) {
+        const edge = await createStorylineEdge({ scenarioId, fromNodeId: before.id, toNodeId: created.id, relationship: "Leads to", confidence: "Moderate" });
+        newEdges.push({ id: edge.id, from: before.id, to: created.id, relationship: edge.relationship, confidence: edge.confidence });
+      }
+      if (after) {
+        const edge = await createStorylineEdge({ scenarioId, fromNodeId: created.id, toNodeId: after.id, relationship: "Leads to", confidence: "Moderate" });
+        newEdges.push({ id: edge.id, from: created.id, to: after.id, relationship: edge.relationship, confidence: edge.confidence });
+      }
+
+      const newNode: StoryNode = {
+        id: created.id,
+        phase: gapPhase,
+        cat: created.category,
+        title: created.title,
+        body: created.body || "",
+        year: event?.date ?? "—",
+        strength: 0.65,
+        eventId: c.eventId,
+        source: event?.source ?? undefined,
+        impact: event?.impact ?? undefined,
+        uncertainty: event?.likelihood ?? undefined,
+        forcePole: event ? eventForcePole(event, store.signals) : undefined,
+        status: event?.status,
+        wildcard: event?.wildcard,
+      };
+      setNodes((prev) => [...prev, newNode]);
+      if (newEdges.length > 0) setEdges((prev) => [...prev, ...newEdges]);
+      setGapCandidates((prev) => (prev ? prev.filter((x) => x.eventId !== c.eventId) : prev));
+      showToast("Event added and linked");
+    } catch (err) {
+      console.error("[storyline] failed to add gap candidate", err);
+      showToast("Couldn't add that event", "error");
+    } finally {
+      setAddingCandidateId(null);
     }
   };
 
@@ -736,7 +798,7 @@ export function StorylineSidePanel({
               </span>
             </div>
             <div className="text-xs leading-[1.5] text-[#78350F]">
-              These arrows point earlier in causal time. Common when a feedback loop or late-stage signal influences a
+              These arrows point earlier in causal time. Common when a feedback loop or late-stage event influences a
               precursor.
             </div>
             <ul className="m-0 mt-2 flex list-none flex-col gap-1 p-0">
@@ -764,14 +826,14 @@ export function StorylineSidePanel({
               <span className="text-xs font-semibold tracking-[-0.005em] text-brand-orange700">Gap detected</span>
             </div>
             <div className="text-[12.5px] leading-[1.5] text-[#7C2D12] [text-wrap:pretty]">
-              No signals are placed in the <strong className="font-semibold text-brand-dark">{gapPhase.replace("_", "-")}</strong> phase yet.
+              No events are placed in the <strong className="font-semibold text-brand-dark">{gapPhase.replace("_", "-")}</strong> phase yet.
             </div>
             <button
-              onClick={runFindSignals}
+              onClick={runFindEvents}
               disabled={gapLoading}
               className="mt-2.5 inline-flex items-center gap-1 border-0 bg-transparent p-0 text-[13px] font-semibold text-brand-orange disabled:opacity-50"
             >
-              {gapLoading ? "Searching…" : "Find signals"}
+              {gapLoading ? "Searching…" : "Find events"}
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="5" y1="12" x2="19" y2="12" />
                 <polyline points="12 5 19 12 12 19" />
@@ -783,9 +845,18 @@ export function StorylineSidePanel({
             {gapCandidates && gapCandidates.length > 0 && (
               <ul className="m-0 mt-2.5 flex list-none flex-col gap-2 border-t border-brand-orange100 p-0 pt-2.5">
                 {gapCandidates.map((c) => (
-                  <li key={c.signalId}>
-                    <div className="text-[12.5px] font-semibold text-brand-dark">{c.title}</div>
-                    <div className="text-[11.5px] leading-[1.4] text-[#7C2D12]">{c.rationale}</div>
+                  <li key={c.eventId} className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[12.5px] font-semibold text-brand-dark">{c.title}</div>
+                      <div className="text-[11.5px] leading-[1.4] text-[#7C2D12]">{c.rationale}</div>
+                    </div>
+                    <button
+                      onClick={() => addGapCandidate(c)}
+                      disabled={addingCandidateId !== null}
+                      className="flex-shrink-0 rounded-[6px] border-0 bg-white px-2 py-1 text-[11.5px] font-semibold text-brand-orange disabled:opacity-50"
+                    >
+                      {addingCandidateId === c.eventId ? "Adding…" : "Add"}
+                    </button>
                   </li>
                 ))}
               </ul>

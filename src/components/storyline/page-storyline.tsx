@@ -97,7 +97,8 @@ export function PageStoryline() {
         toStoryNode(
           n,
           n.signal_id ? store.signals.find((s) => s.id === n.signal_id) : undefined,
-          n.event_id ? store.events.find((e) => e.id === n.event_id) : undefined
+          n.event_id ? store.events.find((e) => e.id === n.event_id) : undefined,
+          store.signals
         )
       )
     );
@@ -241,7 +242,7 @@ export function PageStoryline() {
       <div className="flex items-center gap-6 border-b border-border bg-white px-6 py-3">
         <div className="ml-auto flex items-center gap-[18px] text-xs text-muted-foreground">
           <div>
-            <div className="font-mono text-[10.5px] tracking-[0.06em] text-text-3">SIGNALS</div>
+            <div className="font-mono text-[10.5px] tracking-[0.06em] text-text-3">EVENTS</div>
             <div className="font-mono text-[18px] font-semibold tracking-[-0.02em] text-brand-dark">{nodes.length}</div>
           </div>
           <div>
@@ -303,6 +304,8 @@ export function PageStoryline() {
           scenarioId={scenarioId}
           nodes={nodes}
           edges={edges}
+          setNodes={setNodes}
+          setEdges={setEdges}
           plausibility={loaded?.plausibility ?? null}
           onRefreshGrounding={runRefreshGrounding}
           refreshing={refreshing}

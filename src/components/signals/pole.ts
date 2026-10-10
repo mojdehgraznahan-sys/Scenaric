@@ -18,3 +18,17 @@ export function eventCategory(ev: EventItem, signals: Signal[]): SteepCategory {
   const linked = first && signals.find((s) => s.id === first.signalId);
   return linked ? linked.category : "Political";
 }
+
+// Storyline's force-tag — the first force an event links to, and the pole text it pulls
+// toward. Undefined when the event has no links (nothing to show).
+export function eventForcePole(
+  ev: Pick<EventItem, "links">,
+  signals: Signal[]
+): { forceTitle: string; toward: string; extraForces: number } | undefined {
+  const first = ev.links[0];
+  if (!first) return undefined;
+  const force = signals.find((s) => s.id === first.signalId);
+  if (!force) return undefined;
+  const uniqueForceIds = new Set(ev.links.map((l) => l.signalId));
+  return { forceTitle: force.title, toward: slPole(force, first.side), extraForces: Math.max(0, uniqueForceIds.size - 1) };
+}

@@ -6,6 +6,7 @@
 import type { Database } from "@/lib/supabase/types";
 import type { EventItem, Signal } from "@/lib/types";
 import { PHASES, type Phase } from "@/lib/storyline-mapping";
+import { eventForcePole } from "@/components/signals/pole";
 import type { StoryNode, StoryEdge, StoryPhase } from "./data";
 
 type StorylineNodeRow = Database["public"]["Tables"]["storyline_nodes"]["Row"];
@@ -31,7 +32,7 @@ const STRENGTH_WEIGHT: Record<string, number> = {
   Weak: 0.3,
 };
 
-export function toStoryNode(row: StorylineNodeRow, signal: Signal | undefined, event?: EventItem | undefined): StoryNode {
+export function toStoryNode(row: StorylineNodeRow, signal: Signal | undefined, event: EventItem | undefined, allSignals: Signal[]): StoryNode {
   return {
     id: row.id,
     phase: row.phase,
@@ -44,10 +45,13 @@ export function toStoryNode(row: StorylineNodeRow, signal: Signal | undefined, e
     eventId: row.event_id,
     // No real per-node source/impact/uncertainty — pulled from the originating signal or
     // event when this node is grounded in one (the "realized" capstone node has none, same
-    // graceful defaults signal-card.tsx already falls back to).
+    // graceful defaults event-card.tsx already falls back to).
     source: signal?.source ?? event?.source ?? undefined,
     impact: signal?.impact ?? event?.impact ?? undefined,
     uncertainty: signal?.uncertainty ?? event?.likelihood ?? undefined,
+    forcePole: event ? eventForcePole(event, allSignals) : undefined,
+    status: event?.status,
+    wildcard: event?.wildcard,
   };
 }
 

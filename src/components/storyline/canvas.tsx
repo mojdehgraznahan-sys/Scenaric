@@ -39,7 +39,7 @@ function asRelationship(v: string): CreateStorylineEdgeInput["relationship"] {
 function asConfidence(v: string): CreateStorylineEdgeInput["confidence"] {
   return v as CreateStorylineEdgeInput["confidence"];
 }
-import { SignalCard, SignalCardPlaceholder } from "./signal-card";
+import { EventCard, EventCardPlaceholder } from "./event-card";
 import { ColumnHeader, ArrowPopover, EndpointHandle, StorylineEmptyState, OnboardingTooltip } from "./pieces";
 
 type NodesUpdater = StoryNode[] | ((prev: StoryNode[]) => StoryNode[]);
@@ -463,7 +463,7 @@ export function StorylineCanvas({
       const created = await createStorylineNode({
         scenarioId,
         phase: toBackendPhase(newPhase),
-        title: "New signal",
+        title: "New event",
         body: "Click Edit to describe how this links the chain.",
         category: fromNode.cat,
       });
@@ -494,10 +494,10 @@ export function StorylineCanvas({
         { id: newToEdge.id, from: created.id, to: edge.to, relationship: newToEdge.relationship, confidence: newToEdge.confidence },
       ]);
       setSelected(created.id);
-      showToast("Signal inserted");
+      showToast("Event inserted");
     } catch (err) {
-      console.error("[storyline] failed to insert signal", err);
-      showToast("Couldn't insert a signal here", "error");
+      console.error("[storyline] failed to insert event", err);
+      showToast("Couldn't insert an event here", "error");
     }
   };
 
@@ -738,7 +738,7 @@ export function StorylineCanvas({
             return (
               <button
                 key={k + "-ins"}
-                title="Insert signal here"
+                title="Insert event here"
                 onClick={(ev) => {
                   ev.stopPropagation();
                   insertBetween(e);
@@ -824,14 +824,14 @@ export function StorylineCanvas({
                 const isEdgeDropTarget = pointerDrag && pointerDrag.kind === "edge" && pointerDrag.overId === node.id && !pointerDrag.invalid;
                 return (
                   <React.Fragment key={node.id}>
-                    {showPlaceholderAt === idx && cardDragging && pointerDrag.id !== node.id && <SignalCardPlaceholder />}
+                    {showPlaceholderAt === idx && cardDragging && pointerDrag.id !== node.id && <EventCardPlaceholder />}
                     <div
                       data-card-slot
                       ref={(el) => {
                         cardRefs.current[node.id] = el;
                       }}
                     >
-                      <SignalCard
+                      <EventCard
                         node={node}
                         selected={isSelected}
                         dim={!!dim}
@@ -846,7 +846,7 @@ export function StorylineCanvas({
                   </React.Fragment>
                 );
               })}
-              {showPlaceholderAt >= items.length && cardDragging && pointerDrag.id && <SignalCardPlaceholder />}
+              {showPlaceholderAt >= items.length && cardDragging && pointerDrag.id && <EventCardPlaceholder />}
 
               {/* Add slot */}
               <button
@@ -905,7 +905,7 @@ export function StorylineCanvas({
                   zIndex: 60,
                 }}
               >
-                <SignalCard node={node} accentColor={scenarioColor} />
+                <EventCard node={node} accentColor={scenarioColor} />
               </div>
             );
           })()}

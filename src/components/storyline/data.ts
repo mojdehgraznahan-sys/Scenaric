@@ -28,6 +28,12 @@ export interface StoryNode {
   // The real events.id this node is grounded in, via the event-picker-modal. New nodes set
   // this instead of signalId going forward (0042_decision_layer.sql's storyline_nodes.event_id).
   eventId?: string | null;
+  // Event-grounded nodes only: the first force this event links to, and the pole text it
+  // pulls toward (pole.ts's slPole()) — drives the card's force tag. Undefined for
+  // signal-grounded or freeform (legacy) nodes.
+  forcePole?: { forceTitle: string; toward: string; extraForces: number };
+  status?: "observed" | "possible";
+  wildcard?: boolean;
 }
 export interface StoryEdge {
   // Real storyline_edges.id once persisted — undefined only for the brief window between an

@@ -111,6 +111,17 @@ export function PageSignals() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
+  /* ─────────────────────────── Deep link: open a specific event's drawer ─────────────────────────── */
+  // Lands here as /signals?openEvent={id} (Storyline's "View in Signals" card link) — same
+  // read-param-then-replace pattern as mergeInsight above.
+  React.useEffect(() => {
+    const eventId = searchParams.get("openEvent");
+    if (!eventId) return;
+    router.replace("/signals");
+    setOpenEventId(eventId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   /* ─────────────────────────── Suggestions (research_suggestions) ─────────────────────────── */
   // "Find" prompts (Ask AI, ⌘I) stage results here — unchanged data model/logic from before the
   // rebuild, just rendered as a panel on this page instead of behind a "Suggestions" tab.
