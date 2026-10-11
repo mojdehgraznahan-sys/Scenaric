@@ -246,7 +246,8 @@ export interface Database {
           likelihood: "Low" | "Medium" | "High" | null;
           precursor: string | null;
           source: string | null;
-          created_via: "manual" | "news_match" | "ai";
+          created_via: "manual" | "news_match" | "ai" | "insight";
+          insight_id: string | null;
           created_at: string;
         };
         Insert: {
@@ -263,7 +264,8 @@ export interface Database {
           likelihood?: "Low" | "Medium" | "High" | null;
           precursor?: string | null;
           source?: string | null;
-          created_via?: "manual" | "news_match" | "ai";
+          created_via?: "manual" | "news_match" | "ai" | "insight";
+          insight_id?: string | null;
           created_at?: string;
         };
         Update: {
@@ -280,7 +282,8 @@ export interface Database {
           likelihood?: "Low" | "Medium" | "High" | null;
           precursor?: string | null;
           source?: string | null;
-          created_via?: "manual" | "news_match" | "ai";
+          created_via?: "manual" | "news_match" | "ai" | "insight";
+          insight_id?: string | null;
           created_at?: string;
         };
         Relationships: [];
@@ -332,6 +335,7 @@ export interface Database {
           status: "proposed" | "confirmed" | "dismissed";
           batch_id: string;
           created_signal_id: string | null;
+          grounded_insight_ids: string[];
           created_at: string;
         };
         Insert: {
@@ -350,6 +354,7 @@ export interface Database {
           status?: "proposed" | "confirmed" | "dismissed";
           batch_id: string;
           created_signal_id?: string | null;
+          grounded_insight_ids?: string[];
           created_at?: string;
         };
         Update: {
@@ -368,6 +373,7 @@ export interface Database {
           status?: "proposed" | "confirmed" | "dismissed";
           batch_id?: string;
           created_signal_id?: string | null;
+          grounded_insight_ids?: string[];
           created_at?: string;
         };
         Relationships: [];
@@ -388,6 +394,10 @@ export interface Database {
           citation_url: string | null;
           status: "proposed" | "added" | "dismissed";
           created_event_id: string | null;
+          event_status: "observed" | "possible";
+          occurred_on: string | null;
+          insight_id: string | null;
+          wildcard: boolean;
           created_at: string;
         };
         Insert: {
@@ -405,6 +415,10 @@ export interface Database {
           citation_url?: string | null;
           status?: "proposed" | "added" | "dismissed";
           created_event_id?: string | null;
+          event_status?: "observed" | "possible";
+          occurred_on?: string | null;
+          insight_id?: string | null;
+          wildcard?: boolean;
           created_at?: string;
         };
         Update: {
@@ -422,6 +436,10 @@ export interface Database {
           citation_url?: string | null;
           status?: "proposed" | "added" | "dismissed";
           created_event_id?: string | null;
+          event_status?: "observed" | "possible";
+          occurred_on?: string | null;
+          insight_id?: string | null;
+          wildcard?: boolean;
           created_at?: string;
         };
         Relationships: [];
@@ -1258,6 +1276,8 @@ export interface Database {
           confirmed_signal_id: string | null;
           confirmed_insight_id: string | null;
           grounded_in_insight_ids: string[];
+          pole_a: string | null;
+          pole_b: string | null;
           created_at: string;
         };
         Insert: {
@@ -1275,6 +1295,8 @@ export interface Database {
           confirmed_signal_id?: string | null;
           confirmed_insight_id?: string | null;
           grounded_in_insight_ids?: string[];
+          pole_a?: string | null;
+          pole_b?: string | null;
           created_at?: string;
         };
         Update: {
@@ -1292,6 +1314,8 @@ export interface Database {
           confirmed_signal_id?: string | null;
           confirmed_insight_id?: string | null;
           grounded_in_insight_ids?: string[];
+          pole_a?: string | null;
+          pole_b?: string | null;
           created_at?: string;
         };
         Relationships: [];

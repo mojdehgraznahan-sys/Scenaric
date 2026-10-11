@@ -16,6 +16,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createSignal, type SteepCategory } from "./signals";
 import { scoreOneSignal } from "./ai-signals";
 import { buildSignalsContext } from "./signals-context";
+import { FORCE_FRAMING_RULES, isValidForceTitle } from "./force-writing-rules";
 import type { Database } from "@/lib/supabase/types";
 
 export type ResearchSuggestionRow = Database["public"]["Tables"]["research_suggestions"]["Row"];
@@ -75,6 +76,8 @@ const MacroTrendSweepSchema = z.object({
     .array(
       z.object({
         title: z.string(),
+        pole_a: z.string(),
+        pole_b: z.string(),
         body: z.string(),
         category: z.enum(["Social", "Technology", "Economic", "Ecological", "Political"]),
         citation_title: z.string(),
@@ -84,23 +87,26 @@ const MacroTrendSweepSchema = z.object({
     .max(8),
 });
 
-const MACRO_TREND_SWEEP_TASK_PROMPT = `Task: Search the live web for REAL, currently-relevant
-macro-environmental STEEP trends (Step 3, Driving forces — Social, Technological, Economic,
+const MACRO_TREND_SWEEP_TASK_PROMPT = `Task: You are helping a CEO map how their business could play
+out — not reporting current events. Search the live web for REAL, currently-relevant
+macro-environmental STEEP forces (Step 3, Driving forces — Social, Technological, Economic,
 Ecological, Political forces outside the org's direct control) relevant to this project's
-focal question, that are not already covered by its existing signals.
+focal question, that are not already covered by its existing signals. Each force must be a
+genuine two-sided uncertainty over the horizon, not a one-directional news trend.
 
 Input: { focal_question: string, industry: string, horizon: string,
          existing_signals: [{ title: string, category: string }]
          /* avoid resurfacing one of these — check semantic overlap, not just exact title match */ }
 
-Rules:
-- Every item must be a real, currently-relevant macro trend you actually found via web_search —
-  never a fabricated statistic, report, or trend.
+${FORCE_FRAMING_RULES}
+
+Further rules:
+- Every item must be grounded in something real and currently-relevant you actually found via
+  web_search — never a fabricated statistic, report, or trend. The force itself is your
+  inference from that evidence, not a restatement of it.
 - Each item needs exactly one STEEP category: Social, Technology, Economic, Ecological, or
   Political.
-- Write \`title\` as a factual trend statement (<=8 words), \`body\` as a 2-sentence
-  explanation of the mechanism connecting it to the focal question.
-- citation_title/citation_url must be the real title/URL you found this trend reported in —
+- citation_title/citation_url must be the real title/URL you found this evidence reported in —
   never invented.
 - Skip anything semantically the same as an existing_signals entry.
 - If web_search turns up nothing genuinely new and relevant, return sufficient_evidence:false
@@ -109,7 +115,7 @@ Rules:
 
 Output schema:
 { sufficient_evidence: boolean, gap: string | null,
-  items: [{ title: string, body: string,
+  items: [{ title: string, pole_a: string, pole_b: string, body: string,
             category: "Social"|"Technology"|"Economic"|"Ecological"|"Political",
             citation_title: string, citation_url: string }] }`;
 
@@ -233,13 +239,19 @@ export async function runMacroTrendSweep(projectId: string, options: RunScanOpti
     return { sufficientEvidence: false, gap: output.gap, suggestionsCreated: 0 };
   }
 
+  // Web-sourced, not insight-sourced — no local source text to run the verbatim-overlap check
+  // against, but the direction-verb/year/pole-distinctness check still applies.
+  const validItems = output.items.filter((item) => isValidForceTitle(item.title, item.pole_a, item.pole_b));
+
   const { data: inserted, error: insertError } = await supabase
     .from("research_suggestions")
     .upsert(
-      output.items.map((item) => ({
+      validItems.map((item) => ({
         project_id: projectId,
         step: "driving_forces" as const,
         title: item.title,
+        pole_a: item.pole_a,
+        pole_b: item.pole_b,
         body: item.body,
         category: item.category,
         citation_title: item.citation_title,
@@ -307,6 +319,10 @@ const STEEP = ["Social", "Technology", "Economic", "Ecological", "Political"] as
 const FindItemBase = z.object({
   force_type: z.enum(["key", "driving"]),
   title: z.string(),
+  // Required when force_type is "driving" (a two-sided macro force — see FORCE_FRAMING_RULES
+  // in each prompt below), null when "key" (a specific actor has no poles).
+  pole_a: z.string().nullable(),
+  pole_b: z.string().nullable(),
   body: z.string(),
   category: z.enum(STEEP).nullable(), // set iff force_type === "driving"
   actor_type: z.enum(ACTOR_TYPES).nullable(), // set iff force_type === "key"
@@ -315,7 +331,10 @@ const FindItemBase = z.object({
 });
 
 interface FindInsertItem {
+  force_type?: "key" | "driving";
   title: string;
+  pole_a?: string | null;
+  pole_b?: string | null;
   body: string;
   category: SteepCategory | null;
   actor_type: (typeof ACTOR_TYPES)[number] | null;
@@ -324,14 +343,23 @@ interface FindInsertItem {
 }
 
 async function insertFindSuggestions(supabase: ReturnType<typeof createClient>, projectId: string, items: FindInsertItem[]): Promise<number> {
-  if (items.length === 0) return 0;
+  // A "driving" item without real, distinct poles is the exact "factual trend statement, no
+  // real two-sided framing" bug this whole file is being fixed for — drop it rather than stage
+  // a force that looks like every pre-fix one. "key" items (actors) never have poles to check.
+  const valid = items.filter((item) => {
+    if (item.category === null) return true; // key force (actor) — poles don't apply
+    return !!item.pole_a && !!item.pole_b && isValidForceTitle(item.title, item.pole_a, item.pole_b);
+  });
+  if (valid.length === 0) return 0;
   const { data: inserted, error } = await supabase
     .from("research_suggestions")
     .upsert(
-      items.map((item) => ({
+      valid.map((item) => ({
         project_id: projectId,
         step: "find" as const,
         title: item.title,
+        pole_a: item.pole_a ?? null,
+        pole_b: item.pole_b ?? null,
         body: item.body,
         category: item.category,
         actor_type: item.actor_type,
@@ -352,7 +380,8 @@ const FindScanSchema = z.object({
   items: z.array(FindItemBase).max(10),
 });
 
-const FIND_SCAN_TASK_PROMPT = `Task: Search the live web for REAL forces relevant to this project's
+const FIND_SCAN_TASK_PROMPT = `Task: You are helping a CEO map how their business could play out —
+not reporting current events. Search the live web for REAL forces relevant to this project's
 focal question that are absent from its existing signals — split across Step 2 (Key forces:
 customers, suppliers, competitors, regulators the org directly interacts with) and Step 3
 (Driving forces: macro Social/Technological/Economic/Ecological/Political forces outside its
@@ -364,8 +393,11 @@ Input: { focal_question: string, industry: string, horizon: string,
 
 Rules:
 - Identify 6-10 forces total, actually found via web_search — never fabricated.
-- Set \`force_type\` to "key" (set \`actor_type\`, leave \`category\` null) or "driving" (set
-  \`category\`, leave \`actor_type\` null).
+- Set \`force_type\` to "key" (set \`actor_type\`, leave \`category\`/\`pole_a\`/\`pole_b\` null — a
+  specific actor isn't a two-sided force) or "driving" (set \`category\`, leave \`actor_type\`
+  null, and set \`pole_a\`/\`pole_b\` following the rules below).
+- For "driving" items only:
+${FORCE_FRAMING_RULES}
 - \`body\` states, in one sentence, why this force bears on THIS SPECIFIC focal question — not
   the industry generally.
 - citation_title/citation_url must be the real title/URL you found this in — never invented.
@@ -375,7 +407,8 @@ Rules:
 
 Output schema:
 { sufficient_evidence: boolean, gap: string | null,
-  items: [{ force_type: "key"|"driving", title: string, body: string,
+  items: [{ force_type: "key"|"driving", title: string, pole_a: string|null, pole_b: string|null,
+            body: string,
             category: "Social"|"Technology"|"Economic"|"Ecological"|"Political"|null,
             actor_type: "competitor"|"regulator"|"customer"|"supplier"|"partner"|
               "internal_capability"|null,
@@ -433,6 +466,9 @@ Rules:
 - For EACH oracle question given, name the underlying force whose outcome is unknown, set
   \`source_question\` to that question's key, and classify \`force_type\` (key vs driving) as in
   the base schema.
+- For "driving" items, set \`pole_a\`/\`pole_b\` following these rules (leave both null for "key"
+  items — a specific actor isn't a two-sided force):
+${FORCE_FRAMING_RULES}
 - \`resolution_paths\` lists 2-3 plausible ways the force could resolve over the horizon.
 - Set \`duplicates_existing\` to the matching title if this force is semantically the same as an
   existing_signal_titles entry, else null — still return the item (do not silently drop it).
@@ -442,6 +478,7 @@ Rules:
 Output schema:
 { sufficient_evidence: boolean, gap: string | null,
   items: [{ source_question: "o1"|"o2"|"o3", force_type: "key"|"driving", title: string,
+            pole_a: string|null, pole_b: string|null,
             body: string, category: (STEEP)|null, actor_type: (actor types)|null,
             resolution_paths: string[], duplicates_existing: string|null,
             citation_title: string, citation_url: string }] }`;
@@ -587,16 +624,18 @@ Input: { focal_question: string, horizon: string, worst_case: string,
 Rules:
 - Identify up to 10 forces whose movement would be necessary for worst_case to happen, grounded
   in web_search where relevant.
+- Classify \`force_type\`/\`category\`/\`actor_type\` as in the base schema. For "driving" items,
+  set \`pole_a\`/\`pole_b\` following these rules (leave both null for "key" items):
+${FORCE_FRAMING_RULES}
 - \`observable_precursor\` states the specific, present-day-visible signal that this force is
   already moving — not a vague "watch for X" generality.
 - Set \`duplicates_existing\` to the matching title if semantically the same as an
   existing_signal_titles entry, else null (still return the item).
-- Classify \`force_type\`/\`category\`/\`actor_type\` as in the base schema.
 
 Output schema:
 { sufficient_evidence: boolean, gap: string | null,
-  items: [{ force_type: "key"|"driving", title: string, body: string,
-            category: (STEEP)|null, actor_type: (actor types)|null,
+  items: [{ force_type: "key"|"driving", title: string, pole_a: string|null, pole_b: string|null,
+            body: string, category: (STEEP)|null, actor_type: (actor types)|null,
             observable_precursor: string, duplicates_existing: string|null,
             citation_title: string, citation_url: string }] }`;
 
@@ -641,6 +680,8 @@ export async function runFindWorstCaseBackcast(projectId: string): Promise<RunSc
 // in the drawer's summary card via `gap`, never inserted as a suggestion row itself.
 const FindBlindSpotItemSchema = z.object({
   title: z.string(),
+  pole_a: z.string(),
+  pole_b: z.string(),
   body: z.string(),
   category: z.enum(STEEP),
   citation_title: z.string(),
@@ -667,11 +708,12 @@ Rules:
   appropriate (not a gap) rather than padding it with filler forces.
 - Every item is driving-force-only (category always set, force is macro/STEEP, not a local
   actor) — grounded in web_search, never fabricated.
+${FORCE_FRAMING_RULES}
 - Cap at 12 items total across all thin categories.
 
 Output schema:
 { sufficient_evidence: boolean, category_notes: string | null,
-  items: [{ title: string, body: string,
+  items: [{ title: string, pole_a: string, pole_b: string, body: string,
             category: "Social"|"Technology"|"Economic"|"Ecological"|"Political",
             citation_title: string, citation_url: string }] }`;
 
@@ -747,10 +789,14 @@ export async function confirmResearchSuggestion(projectId: string, id: string): 
       category: suggestion.category ?? "Social",
       source: suggestion.citation_title ?? "External research",
       title: suggestion.title,
-      // A research suggestion doesn't come with poles — same honest placeholder the 0038
-      // migration backfills for pre-rebuild signals; the user can rename them later.
-      poleA: "Doesn't happen",
-      poleB: suggestion.title,
+      // Every driving-force producer now supplies real poles (pole_a/pole_b) — see
+      // force-writing-rules.ts. This fallback only fires for a suggestion created before that
+      // fix shipped, or a force_type:"key" actor profile (which never has poles; this whole
+      // step/find branch still turns those into a signal too — a separate, pre-existing
+      // question about whether an actor profile belongs in the signals table at all, not
+      // addressed here).
+      poleA: suggestion.pole_a ?? "Doesn't happen",
+      poleB: suggestion.pole_b ?? suggestion.title,
       body: suggestion.body,
       origin,
     });

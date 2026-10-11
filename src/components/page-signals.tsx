@@ -11,7 +11,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 import { useNavigate } from "@/lib/use-navigate";
-import { getInsight } from "@/lib/actions/insights";
+import { getInsight, listInsights } from "@/lib/actions/insights";
+import { getSource } from "@/lib/actions/sources";
 import {
   listResearchSuggestions,
   confirmResearchSuggestion,
@@ -90,10 +91,12 @@ export function PageSignals() {
   const forces = filter === "All" ? signals : signals.filter((s) => s.category === filter);
   const inboxFiltered = filter === "All" ? inbox : inbox.filter((e) => eventCategory(e, signals) === filter);
 
-  /* ─────────────────────────── Knowledge Base "+ Merge into Signal →" ─────────────────────────── */
-  // Lands here as /signals?mergeInsight={id} (page-knowledge.tsx). Instead of the old
-  // merge-or-create modal, prefill the new Add Event modal's "what it would mean" field with
-  // the insight's own text and let its inline suggestForceForEvent debounce do the matching.
+  /* ─────────────────────────── Knowledge Base "+ Add to Signals →" ─────────────────────────── */
+  // Lands here as /signals?mergeInsight={id} (page-knowledge.tsx). Prefill the Add Event
+  // modal's headline with the insight's paraphrase (`text`), body with its raw quote, status
+  // as observed (it already happened — that's what an insight is), and source with the
+  // originating source's name — so suggestForceForEvent's debounce has a real headline to
+  // match on immediately instead of waiting for the user to type one.
   React.useEffect(() => {
     const insightId = searchParams.get("mergeInsight");
     if (!insightId) return;
@@ -102,7 +105,14 @@ export function PageSignals() {
       try {
         const insight = await getInsight(insightId);
         if (!insight) return;
-        setAddingEvent({ title: "", body: insight.quote || insight.text });
+        const source = insight.source_id ? await getSource(insight.source_id) : null;
+        setAddingEvent({
+          title: insight.text,
+          body: insight.quote || insight.text,
+          status: "observed",
+          source: source?.name,
+          insightId: insight.id,
+        });
         setAddEventOpen(true);
       } catch (err) {
         console.error("[signals] failed to load insight for merge", err);
@@ -260,6 +270,26 @@ export function PageSignals() {
     setForceProposals(await listForceProposals(store.activeProjectId));
   }, [store.activeProjectId]);
 
+  /* ─────────────────────────── Knowledge Base provenance banner ─────────────────────────── */
+  // Total project insight count, just for the banner's "{k} of {total} insights used" line —
+  // the pending-batch insight count itself comes straight from kbForceProposals below.
+  const [totalInsightCount, setTotalInsightCount] = React.useState(0);
+  React.useEffect(() => {
+    if (!store.activeProjectId) return;
+    listInsights(store.activeProjectId)
+      .then((rows) => setTotalInsightCount(rows.length))
+      .catch((err) => console.error("[signals] failed to load insight count", err));
+  }, [store.activeProjectId]);
+
+  // deriveForcesFromInsights (ai-signals-derive.ts) always sets grounded_insight_ids on a
+  // Knowledge-Base-sourced force proposal; "Group into forces" (groupInboxIntoForces) never
+  // does — that's the one signal distinguishing the two origins client-side.
+  const kbForceProposals = React.useMemo(() => forceProposals.filter((p) => p.grounded_insight_ids.length > 0), [forceProposals]);
+  const kbGroundedInsightIds = React.useMemo(
+    () => new Set(kbForceProposals.flatMap((p) => p.grounded_insight_ids)),
+    [kbForceProposals]
+  );
+
   React.useEffect(() => {
     refreshForceProposals();
   }, [refreshForceProposals]);
@@ -384,6 +414,8 @@ export function PageSignals() {
       source: input.source ?? undefined,
       likelihood: input.likelihood,
       impact: input.impact,
+      createdVia: input.insightId ? "insight" : undefined,
+      insightId: input.insightId,
       links: input.target ? [{ signalId: input.target.sigId, side: input.target.side }] : [],
     });
   };
@@ -472,6 +504,22 @@ export function PageSignals() {
             </Button>
           </div>
         </div>
+
+        {kbForceProposals.length > 0 && (
+          <div className="rounded-[10px] border border-border bg-bg px-3.5 py-2.5 text-[12.5px] leading-[1.5] text-muted-foreground">
+            <span className="font-medium text-brand-dark">From your Knowledge Base:</span>{" "}
+            {kbForceProposals.length} force{kbForceProposals.length === 1 ? "" : "s"} drawn from {kbGroundedInsightIds.size} of {totalInsightCount}{" "}
+            insights are waiting for review below. Confirm a force to see its suggested events. Check the wording before you place them on the matrix.
+            {totalInsightCount > kbGroundedInsightIds.size && (
+              <>
+                {" "}
+                <button onClick={() => navigate("/knowledge")} className="border-0 bg-transparent p-0 text-brand-orange underline-offset-2 hover:underline">
+                  {totalInsightCount - kbGroundedInsightIds.size} insight{totalInsightCount - kbGroundedInsightIds.size === 1 ? "" : "s"} not used yet →
+                </button>
+              </>
+            )}
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-2">
           {CATEGORIES.map((c) => {

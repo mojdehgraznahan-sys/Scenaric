@@ -105,6 +105,9 @@ export interface EventItem {
   source: string | null;
   indicatorId: string | null;
   precursor: string | null;
+  // The Knowledge Base insight this event was grounded in/derived from, if any — drives the
+  // "✓ In Signals" done-state on the Knowledge Base page.
+  insightId: string | null;
   links: EventLink[];
 }
 

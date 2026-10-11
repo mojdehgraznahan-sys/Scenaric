@@ -44,10 +44,15 @@ export interface AddEventModalPreset {
   sigId?: string;
   side?: "a" | "b";
   title?: string;
-  // Knowledge Base's "+ Merge into Signal →" prefill (page-signals.tsx's mergeInsight flow) —
-  // the insight's own quote/text, landed in "What it would mean" for the user to turn into a
-  // real headline rather than guessing one for them.
+  // Knowledge Base's "+ Add to Signals →" prefill (page-signals.tsx's mergeInsight flow) — the
+  // insight's own quote/text, landed in "What it would mean" for the user to turn into a real
+  // headline rather than guessing one for them.
   body?: string;
+  status?: "observed" | "possible";
+  source?: string;
+  // Set only by the mergeInsight flow — threaded through to onSubmit so the created event
+  // records which insight it came from (events.insight_id).
+  insightId?: string;
 }
 
 export interface AddEventInput {
@@ -61,6 +66,7 @@ export interface AddEventInput {
   impact: number;
   category: SteepCategory | null;
   target: { sigId: string; side: "a" | "b" } | null;
+  insightId: string | null;
 }
 
 export interface AddEventModalProps {
@@ -95,9 +101,9 @@ export function AddEventModal({ open, onOpenChange, signals, preset, onSuggestFo
     if (!open) return;
     setTitle(preset?.title ?? "");
     setBody(preset?.body ?? "");
-    setStatus("possible");
+    setStatus(preset?.status ?? "possible");
     setDate("");
-    setSource("");
+    setSource(preset?.source ?? "");
     setLikelihood("Medium");
     setImpact(3);
     setCategory("Political");
@@ -149,6 +155,7 @@ export function AddEventModal({ open, onOpenChange, signals, preset, onSuggestFo
         impact,
         category: sig ? null : category,
         target: sig && target ? target : null,
+        insightId: preset?.insightId ?? null,
       });
       onAdded(ev);
       onOpenChange(false);

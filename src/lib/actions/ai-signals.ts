@@ -15,6 +15,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { runStructured } from "@/lib/ai/client";
 import { createClient } from "@/lib/supabase/server";
+import { FORCE_FRAMING_RULES, validateForceCandidate } from "./force-writing-rules";
 import type { Database } from "@/lib/supabase/types";
 import type { SteepCategory } from "./signals";
 
@@ -25,6 +26,8 @@ const SuggestSignalsSchema = z.object({
     .array(
       z.object({
         title: z.string(),
+        pole_a: z.string(),
+        pole_b: z.string(),
         body: z.string(),
         category: z.enum(["Social", "Technology", "Economic", "Ecological", "Political"]),
         source: z.string(),
@@ -35,31 +38,33 @@ const SuggestSignalsSchema = z.object({
     .max(6),
 });
 
-const SUGGEST_TASK_PROMPT = `Task: Convert local insights + the focal question into STEEP-classified
-driving-force signals, each representing ONE distinct macro uncertainty
-the scenario set must consider.
+const SUGGEST_TASK_PROMPT = `Task: You are helping a CEO map how their business could play out —
+not reporting what their documents already say. Convert local insights + the focal question
+into STEEP-classified driving forces: forward-looking uncertainties the scenario set must
+consider, each representing ONE distinct macro tension that could resolve two different ways.
 
 Input: { focal_question: string, horizon: string, industry: string,
          insights: [{id, text, actor_type}], existing_signals: [{id,title,category}] }
 
-Rules:
+${FORCE_FRAMING_RULES}
+
+Further rules:
 - Every new signal must be grounded_in >= 1 insight id, OR explicitly
   flagged \`origin:"external_pattern"\` if it names a well-established
   macro trend for this industry/horizon not present in insights (allowed,
   but must be flagged, never presented as sourced from the user's data).
+- An insight with actor_type set (a named customer, supplier, competitor, regulator) is
+  evidence toward a broader force, not a force itself — do not title a force after the actor.
 - Do NOT propose a signal that duplicates an existing_signals title or
   underlying uncertainty — check semantic overlap, not just exact text.
 - Each signal needs exactly one STEEP category: Social, Technology,
   Economic, Ecological, or Political.
-- Write \`title\` as a factual trend statement (<=8 words), \`body\` as a
-  2-sentence explanation of the mechanism connecting it to the focal
-  question, and cite \`source\` as the real originating source name
-  (e.g. "Internal interview — Jan Oosterom") — never a fabricated
-  publication name.
+- Cite \`source\` as the real originating source name (e.g. "Internal interview — Jan
+  Oosterom") — never a fabricated publication name.
 - Cap at 6 new signals per call.
 
 Output schema:
-{ signals: [{ title, body, category, source, grounded_in: string[],
+{ signals: [{ title, pole_a, pole_b, body, category, source, grounded_in: string[],
               origin: "insight"|"external_pattern" }] }`;
 
 const ScoreSignalSchema = z.object({
@@ -122,20 +127,34 @@ export async function suggestSignals(projectId: string): Promise<SuggestSignalsR
     .eq("project_id", projectId);
   if (signalsError) throw signalsError;
 
-  const output = await runStructured({
-    step: "signals.suggest",
-    projectId,
-    taskPrompt: SUGGEST_TASK_PROMPT,
-    input: {
-      focal_question: focalQuestion,
-      horizon: project.horizon,
-      industry: project.industry,
-      insights: insights.map((i) => ({ id: i.id, text: i.text, actor_type: i.actor_type })),
-      existing_signals: existingSignals.map((s) => ({ id: s.id, title: s.title, category: s.category })),
-    },
-    schema: SuggestSignalsSchema,
-    effort: "medium",
-  });
+  const insightTextById = new Map(insights.map((i) => [i.id, i.text]));
+  const runOnce = () =>
+    runStructured({
+      step: "signals.suggest",
+      projectId,
+      taskPrompt: SUGGEST_TASK_PROMPT,
+      input: {
+        focal_question: focalQuestion,
+        horizon: project.horizon,
+        industry: project.industry,
+        insights: insights.map((i) => ({ id: i.id, text: i.text, actor_type: i.actor_type })),
+        existing_signals: existingSignals.map((s) => ({ id: s.id, title: s.title, category: s.category })),
+      },
+      schema: SuggestSignalsSchema,
+      effort: "medium",
+    });
+
+  // Validate against the specific insights each candidate cites — a candidate copying the
+  // wording of its OWN grounding insight is exactly the "restates the KB" failure mode this
+  // guards against. Regenerate once; drop anything still invalid rather than fail the call.
+  const isValid = (s: z.infer<typeof SuggestSignalsSchema>["signals"][number]) =>
+    validateForceCandidate({ title: s.title, body: s.body, poleA: s.pole_a, poleB: s.pole_b }, s.grounded_in.map((id) => insightTextById.get(id) ?? ""));
+
+  let output = await runOnce();
+  if (!output.signals.every(isValid)) {
+    output = await runOnce();
+    output = { ...output, signals: output.signals.filter(isValid) };
+  }
 
   if (output.signals.length === 0) {
     return { sufficientEvidence: false, gap: "No new signal candidates found in your current insights.", suggestionsCreated: 0 };
@@ -149,6 +168,8 @@ export async function suggestSignals(projectId: string): Promise<SuggestSignalsR
         step: "driving_forces" as const,
         source: "insight_pattern",
         title: s.title,
+        pole_a: s.pole_a,
+        pole_b: s.pole_b,
         body: s.body,
         category: s.category,
         citation_title: s.source,

@@ -274,11 +274,22 @@ async function updateSourceStatus(id: string, status: SourceRow["status"], extra
       const settings = await getProjectAiSettings(data.project_id, supabase);
       if (settings.auto_extract_insights) {
         await extractInsightsForProject(data.project_id, { supabaseClient: supabase });
+        // Knowledge Base -> Signals (design/06-kb-to-signals): once insights exist, group them
+        // into driving-force proposals so Signals has a reviewable batch waiting instead of
+        // staying blank. Staged, not written directly — see ai-signals-derive.ts's header
+        // comment. Events for each force are derived once that force's proposal is confirmed
+        // (confirmForceProposal, ai-forces.ts) — a force proposal has no real signal_id yet,
+        // and event_proposals.signal_id is a required FK, so there's nothing to attach a draft
+        // event to before then. Best-effort: a derive failure must never fail the
+        // upload/extraction that already succeeded.
+        const { deriveForcesFromInsights } = await import("./ai-signals-derive");
+        await deriveForcesFromInsights(data.project_id);
       }
     } catch (err) {
-      // Auto-extraction failing shouldn't fail the upload itself — the source is already
-      // "complete" and still available for the manual "Extract insights" button either way.
-      console.error("[sources] auto-extract failed", err);
+      // Auto-extraction/derivation failing shouldn't fail the upload itself — the source is
+      // already "complete" and still available for the manual "Extract insights" button either
+      // way, and KB-derive proposals (if any) will just be missing for this project for now.
+      console.error("[sources] auto-extract/derive failed", err);
     }
   }
 

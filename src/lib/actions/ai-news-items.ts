@@ -25,6 +25,7 @@ import { searchNewsItems } from "./ai-news-feed";
 import { extractInsightsForProject } from "./ai-insights";
 import { createSignal } from "./signals";
 import { scoreOneSignal } from "./ai-signals";
+import { draftForcePoles } from "./force-writing-rules";
 import { promoteEventToObserved } from "./events";
 import { getProjectAiSettingsMap } from "./project-ai-settings";
 import { getConnectedRssFeedUrl } from "./project-integrations";
@@ -473,15 +474,17 @@ export async function addNewsItemToSignals(projectId: string, newsItemId: string
     throw new Error(`No insight could be extracted from news item ${newsItemId} — insufficient evidence in its summary.`);
   }
 
+  // Reframe the news item as a forward, two-sided force rather than promoting its headline
+  // verbatim — see force-writing-rules.ts.
+  const framing = await draftForcePoles(projectId, { title: newsItem.title, body: newsItem.summary, category: newsItem.steep_category });
+
   const signal = await createSignal({
     projectId,
     category: newsItem.steep_category,
     source: newsItem.source,
-    title: newsItem.title,
-    // A promoted news item doesn't come with poles — same honest placeholder the 0038
-    // migration backfills for pre-rebuild signals; the user can rename them later.
-    poleA: "Doesn't happen",
-    poleB: newsItem.title,
+    title: framing.title,
+    poleA: framing.poleA,
+    poleB: framing.poleB,
     body: newsItem.summary,
     origin: "insight",
     groundedInsightIds: insights.map((i) => i.id),

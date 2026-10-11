@@ -267,6 +267,7 @@ function toEventItem(row: EventWithLinks, indicatorId: string | null): EventItem
     source: row.source,
     indicatorId,
     precursor: row.precursor,
+    insightId: row.insight_id,
     links: row.links,
   };
 }
@@ -384,6 +385,8 @@ export interface Store {
     likelihood?: "Low" | "Medium" | "High" | null;
     precursor?: string | null;
     source?: string | null;
+    createdVia?: "manual" | "news_match" | "ai" | "insight";
+    insightId?: string | null;
     links: EventLink[];
   }) => Promise<EventItem>;
   updateEvent: (input: {
@@ -975,6 +978,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       likelihood?: "Low" | "Medium" | "High" | null;
       precursor?: string | null;
       source?: string | null;
+      createdVia?: "manual" | "news_match" | "ai" | "insight";
+      insightId?: string | null;
       links: EventLink[];
     }) => {
       const row = await createEventAction(input);

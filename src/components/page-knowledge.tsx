@@ -25,6 +25,7 @@ import {
 import { listInsights, deleteInsight, type InsightRow } from "@/lib/actions/insights";
 import { listInterviews, inviteParticipant, type InterviewRow, type SteepTag } from "@/lib/actions/interviews";
 import { extractInsightsForProject } from "@/lib/actions/ai-insights";
+import { deriveForcesFromInsights } from "@/lib/actions/ai-signals-derive";
 import { listResearchSuggestions, confirmResearchSuggestion, dismissResearchSuggestion, type ResearchSuggestionRow } from "@/lib/actions/ai-research-suggestions";
 import { researchIndustry } from "@/lib/actions/ai-research-industry";
 
@@ -213,7 +214,17 @@ export function PageKnowledge() {
         setExtractResult("No new sources to extract from.");
       } else {
         const failureNote = result.failures.length ? ` (${result.failures.length} source(s) failed — try again later)` : "";
-        setExtractResult(`Extracted ${result.insightsCreated} insight(s) from ${result.sourcesProcessed} source(s)${failureNote}.`);
+        let message = `Extracted ${result.insightsCreated} insight(s) from ${result.sourcesProcessed} source(s)${failureNote}.`;
+        if (result.insightsCreated > 0) {
+          setExtractResult(`${message} Building your forces…`);
+          try {
+            const derived = await deriveForcesFromInsights(projectId);
+            message = derived.proposalCount > 0 ? `${message} ${derived.proposalCount} force(s) ready in Signals.` : message;
+          } catch (err) {
+            console.error("[knowledge] force derivation failed", err);
+          }
+        }
+        setExtractResult(message);
       }
       await refresh();
     } catch (err) {
@@ -326,6 +337,9 @@ export function PageKnowledge() {
   const latestInsight = insights[0];
 
   const filteredInsights = insights.filter((i) => tab === "All" || i.source_type === tab);
+  // Which insights have already become a real event (via the "+ Add to Signals" flow below,
+  // or a KB-derived observed event) — drives the "✓ In Signals" done-state.
+  const linkedInsightIds = React.useMemo(() => new Set(store.events.filter((e) => e.insightId).map((e) => e.insightId as string)), [store.events]);
 
   const stats = [
     { label: "Sources", value: sources.length },
@@ -635,12 +649,16 @@ export function PageKnowledge() {
                     </div>
                     {i.quote && <div className="mb-2 text-[12px] leading-[1.5] text-muted-foreground">{i.text}</div>}
                     <div className="flex items-center justify-end">
-                      <button
-                        className="border-0 bg-transparent text-xs font-medium text-brand-orange"
-                        onClick={() => navigate(`/signals?mergeInsight=${i.id}`)}
-                      >
-                        + Merge into Signal →
-                      </button>
+                      {linkedInsightIds.has(i.id) ? (
+                        <span className="text-xs font-medium text-[#059669]">✓ In Signals</span>
+                      ) : (
+                        <button
+                          className="border-0 bg-transparent text-xs font-medium text-brand-orange"
+                          onClick={() => navigate(`/signals?mergeInsight=${i.id}`)}
+                        >
+                          + Add to Signals →
+                        </button>
+                      )}
                     </div>
                   </div>
                 );

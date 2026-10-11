@@ -16,6 +16,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createSignal } from "./signals";
 import { scoreOneSignal } from "./ai-signals";
 import { createEvent, linkEvent } from "./events";
+import { deriveEventsForForce } from "./ai-signals-derive";
 import type { Database } from "@/lib/supabase/types";
 
 export type ForceProposalRow = Database["public"]["Tables"]["force_proposals"]["Row"];
@@ -260,18 +261,33 @@ export async function confirmForceProposal(projectId: string, id: string): Promi
   if (proposal.status === "confirmed") return { proposal, createdSignalId: proposal.created_signal_id };
 
   if (proposal.kind === "new_force") {
+    // grounded_insight_ids is only ever set by deriveForcesFromInsights (ai-signals-derive.ts)
+    // — a "Group into forces" proposal (ai-forces.ts) always has an empty array here.
+    const fromKnowledgeBase = proposal.grounded_insight_ids.length > 0;
     const signal = await createSignal({
       projectId,
       category: proposal.category ?? "Social",
-      source: "Grouped from inbox",
+      source: fromKnowledgeBase ? "Knowledge Base" : "Grouped from inbox",
       title: proposal.title,
       poleA: proposal.pole_a ?? "Doesn't happen",
       poleB: proposal.pole_b ?? proposal.title,
-      origin: "ai",
+      origin: fromKnowledgeBase ? "insight" : "ai",
+      groundedInsightIds: proposal.grounded_insight_ids,
     });
     await scoreOneSignal(projectId, signal.id);
     for (const link of proposal.member_links) {
       await linkEvent({ projectId, eventId: link.event_id, signalId: signal.id, side: link.side });
+    }
+    if (fromKnowledgeBase) {
+      // Draft events for this force now that it has a real signal_id to attach them to —
+      // event_proposals.signal_id is a required FK, so this couldn't happen any earlier
+      // (deriveForcesFromInsights only ever staged the force itself). Best-effort: a draft
+      // failure here shouldn't block confirming the force.
+      try {
+        await deriveEventsForForce(projectId, signal.id, proposal.grounded_insight_ids);
+      } catch (err) {
+        console.error("[forces] failed to derive events for confirmed KB force", signal.id, err);
+      }
     }
     const { data: updated, error } = await supabase
       .from("force_proposals")
@@ -470,20 +486,37 @@ export async function confirmEventProposal(projectId: string, id: string): Promi
   const { data: signal, error: signalError } = await supabase.from("signals").select("category").eq("id", proposal.signal_id).single();
   if (signalError) throw signalError;
 
-  const event = await createEvent({
-    projectId,
-    title: proposal.title,
-    description: proposal.body ?? undefined,
-    category: signal.category,
-    status: "possible",
-    windowLabel: proposal.window_label,
-    likelihood: proposal.likelihood,
-    impact: proposal.impact,
-    precursor: proposal.precursor,
-    source: proposal.citation_url ? `${proposal.citation_title} — ${proposal.citation_url}` : proposal.citation_title,
-    createdVia: "ai",
-    links: [{ signalId: proposal.signal_id, side: proposal.side }],
-  });
+  const event =
+    proposal.event_status === "observed"
+      ? await createEvent({
+          projectId,
+          title: proposal.title,
+          description: proposal.body ?? undefined,
+          category: signal.category,
+          status: "observed",
+          occurredOn: proposal.occurred_on,
+          precursor: proposal.precursor,
+          source: proposal.citation_title,
+          createdVia: "insight",
+          insightId: proposal.insight_id,
+          links: [{ signalId: proposal.signal_id, side: proposal.side }],
+        })
+      : await createEvent({
+          projectId,
+          title: proposal.title,
+          description: proposal.body ?? undefined,
+          category: signal.category,
+          status: "possible",
+          isWildcard: proposal.wildcard,
+          windowLabel: proposal.window_label,
+          likelihood: proposal.likelihood,
+          impact: proposal.impact,
+          precursor: proposal.precursor,
+          source: proposal.citation_url ? `${proposal.citation_title} — ${proposal.citation_url}` : proposal.citation_title,
+          createdVia: proposal.insight_id ? "insight" : "ai",
+          insightId: proposal.insight_id,
+          links: [{ signalId: proposal.signal_id, side: proposal.side }],
+        });
 
   const { data: updated, error } = await supabase
     .from("event_proposals")

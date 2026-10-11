@@ -51,7 +51,11 @@ export async function createEvent(input: {
   likelihood?: "Low" | "Medium" | "High" | null;
   precursor?: string | null;
   source?: string | null;
-  createdVia?: "manual" | "news_match" | "ai";
+  createdVia?: "manual" | "news_match" | "ai" | "insight";
+  // The insight this event was grounded in/derived from — set on the manual Knowledge Base
+  // "+ Add to Signals" flow and on KB-derived "observed" events, read back by the Knowledge
+  // Base page to show "✓ In Signals" instead of the add button.
+  insightId?: string | null;
   links: EventLink[];
 }): Promise<EventWithLinks> {
   const supabase = createClient();
@@ -71,6 +75,7 @@ export async function createEvent(input: {
       precursor: input.precursor ?? null,
       source: input.source ?? null,
       created_via: input.createdVia ?? "manual",
+      insight_id: input.insightId ?? null,
     })
     .select()
     .single();
