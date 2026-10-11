@@ -111,6 +111,11 @@ const MX_CSS = `
 .mx-seg button{flex:1;border:none;cursor:pointer;padding:7px 10px;border-radius:7px;font-family:inherit;font-size:12px;font-weight:500;background:transparent;color:#6B7280;white-space:nowrap}
 .mx-seg button[aria-pressed="true"]{background:#fff;color:#1E1B2E;box-shadow:0 1px 2px rgba(0,0,0,.08)}
 .mx-card{background:#fff;border:1px solid #E5E7EB;border-radius:12px;padding:14px}
+.mx-q-row{display:grid;grid-template-columns:8px minmax(0,1fr) auto;gap:10px;align-items:center;width:100%;text-align:left;background:#fff;border:none;border-top:1px solid #F3F4F6;padding:9px 10px;font-family:inherit;cursor:pointer;color:#1E1B2E}
+.mx-q-row:first-child{border-top:none}.mx-q-row:hover{background:#FAFAF9}.mx-q-row[aria-current="true"]{background:#FFF7ED}
+.mx-q-title{font-size:12.5px;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mx-tabs{display:flex;gap:4px;flex-wrap:wrap}.mx-tabs button{border:1px solid transparent;background:none;border-radius:999px;padding:4px 10px;font-family:inherit;font-size:12px;font-weight:500;color:#6B7280;cursor:pointer}
+.mx-tabs button[aria-pressed="true"]{background:#1E1B2E;color:#fff}.mx-tabs button:hover:not([aria-pressed="true"]){background:#F3F4F6}
 .mx-dot{transition:left .45s cubic-bezier(.2,.7,.2,1),top .45s cubic-bezier(.2,.7,.2,1)}
 @media (prefers-reduced-motion: reduce){.mx-dot{transition:none}}
 `;
@@ -384,6 +389,10 @@ function MXAssess({
   onReaxis,
   onNavigate,
   signals,
+  pos,
+  total,
+  onPrev,
+  onNext,
 }: {
   sig: MxForce;
   events: MxEvent[];
@@ -395,6 +404,10 @@ function MXAssess({
   onReaxis?: () => void;
   onNavigate?: (path: string) => void;
   signals: MxForce[];
+  pos: number;
+  total: number;
+  onPrev: () => void;
+  onNext: () => void;
 }) {
   const all = mxEvents(sig, events);
   const A = mxEvents(sig, events, "a"),
@@ -402,14 +415,23 @@ function MXAssess({
   const [i0, setI0] = React.useState(0),
     [ia, setIa] = React.useState(0),
     [ib, setIb] = React.useState(0);
+  // If only one pole has an observed (already-happened) event, that side is as settled as the
+  // record shows — default Step 2 to it rather than making the user re-derive what already
+  // happened. Still a plain default: the force can reverse before the horizon, so it stays
+  // editable, and if both poles have observed events there's nothing to suggest.
+  const suggestPlausible = (): "a" | "b" | null => {
+    const aObs = A.some((e) => e.status === "observed");
+    const bObs = B.some((e) => e.status === "observed");
+    return aObs && !bObs ? "a" : bObs && !aObs ? "b" : null;
+  };
   const [impactAns, setImpactAns] = React.useState<"no" | "somewhat" | "completely" | null>(placement && placement.confirmed ? placement.impactAns ?? null : null);
-  const [plausible, setPlausible] = React.useState<"both" | "a" | "b" | null>(placement && placement.confirmed ? placement.plausible ?? null : null);
+  const [plausible, setPlausible] = React.useState<"both" | "a" | "b" | null>(placement && placement.confirmed ? placement.plausible ?? null : suggestPlausible());
   React.useEffect(() => {
     setI0(0);
     setIa(0);
     setIb(0);
     setImpactAns(placement && placement.confirmed ? placement.impactAns ?? null : null);
-    setPlausible(placement && placement.confirmed ? placement.plausible ?? null : null);
+    setPlausible(placement && placement.confirmed ? placement.plausible ?? null : suggestPlausible());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sig.id]);
   const lead = all[i0 % Math.max(1, all.length)];
@@ -418,12 +440,14 @@ function MXAssess({
   const ready = !!impactAns && !!plausible;
   const q = ready ? mxQuad(mxPlace(impactAns!, plausible!)) : mxQuad(placement ?? null);
   const saved = !!placement && placement.confirmed && placement.impactAns === impactAns && placement.plausible === plausible;
-  const place = () =>
+  const place = (advance?: boolean) => {
     api.setPlacement(
       sig.id,
       { ...(placement || {}), sigId: sig.id, impactAns, plausible, confirmed: true, ...mxPlace(impactAns!, plausible!) },
       [lead?.id, evA?.id, evB?.id].filter((id): id is string => !!id)
     );
+    if (advance) setTimeout(onNext, 350);
+  };
   const isAxis = axes.includes(sig.id);
   const settled = plausible && plausible !== "both" ? mxPole(sig, plausible) : null;
   const verdict = q
@@ -458,6 +482,21 @@ function MXAssess({
   );
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {pos > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between", borderBottom: "1px solid #F3F4F6", paddingBottom: 10 }}>
+          <span className="mx-mono" style={{ fontSize: 10, color: "#6B7280" }}>
+            TO REVIEW · {pos} OF {total}
+          </span>
+          <span style={{ display: "flex", gap: 6 }}>
+            <button className="mx-btn mx-btn-ghost mx-btn-sm" onClick={onPrev} disabled={pos <= 1} aria-label="Previous force">
+              ←
+            </button>
+            <button className="mx-btn mx-btn-ghost mx-btn-sm" onClick={onNext} disabled={pos >= total}>
+              Skip →
+            </button>
+          </span>
+        </div>
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         <span style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <MXChip cat={sig.category}></MXChip>
@@ -480,7 +519,7 @@ function MXAssess({
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {stepLab("1", lead ? "If this happened tomorrow, would your decision change?" : `If this moved sharply toward "${mxPole(sig, "b")}", would your decision change?`)}
+        {stepLab("1", lead ? (lead.status === "observed" ? "Now that this happened, did it change your decision?" : "If this happened tomorrow, would your decision change?") : `If this moved sharply toward "${mxPole(sig, "b")}", would your decision change?`)}
         {lead ? (
           <MXHeadline ev={lead} pole={mxPole(sig, mxSide(sig, lead.links.find((l) => l.sigId === sig.id)!))} dir={mxSide(sig, lead.links.find((l) => l.sigId === sig.id)!)} count={all.length} onCycle={() => setI0((i) => i + 1)}></MXHeadline>
         ) : (
@@ -521,8 +560,8 @@ function MXAssess({
             <b>{MX_Q[q].label}.</b> {verdict}
           </span>
           <span style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button className="mx-btn mx-btn-primary mx-btn-sm" disabled={saved} onClick={place}>
-              {saved ? "✓ Placed" : placement ? "Move on matrix" : "Place on matrix"}
+            <button className="mx-btn mx-btn-primary mx-btn-sm" disabled={saved} onClick={() => place(pos > 0 && pos < total)}>
+              {saved ? "✓ Placed" : pos > 0 && pos < total ? (placement ? "Move & next →" : "Place & next →") : placement ? "Move on matrix" : "Place on matrix"}
             </button>
           </span>
         </div>
@@ -660,6 +699,91 @@ function MXWorlds({ x, y, events, headlines, onBuildScenarios, buildLabel }: { x
   );
 }
 
+type MxQueueTab = "review" | "placed" | "all";
+
+// Review queue: replaces the chip clouds. One row per force, filterable, collapsed past 8.
+function MXQueue({
+  signals,
+  pBy,
+  selected,
+  onSelect,
+  tab,
+  setTab,
+}: {
+  signals: MxForce[];
+  pBy: Record<string, MxPlacement>;
+  selected?: string;
+  onSelect: (id: string) => void;
+  tab: MxQueueTab;
+  setTab: (t: MxQueueTab) => void;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const toReview = signals.filter((s) => !pBy[s.id] || !pBy[s.id].confirmed);
+  const placed = signals.filter((s) => pBy[s.id] && pBy[s.id].confirmed);
+  const list = tab === "review" ? toReview : tab === "placed" ? placed : signals;
+  const LIMIT = 8,
+    shown = open ? list : list.slice(0, LIMIT);
+  const status = (s: MxForce) => {
+    const p = pBy[s.id];
+    if (!p) return <span style={{ fontSize: 11, color: "#9CA3AF" }}>Not placed</span>;
+    if (!p.confirmed) return <span style={{ fontSize: 11, color: "#B45309" }}>Star rating</span>;
+    return <MXQBadge q={mxQuad(p)}></MXQBadge>;
+  };
+  const pct = signals.length ? Math.round((placed.length / signals.length) * 100) : 0;
+  return (
+    <div className="mx-card" style={{ padding: 0, overflow: "hidden" }}>
+      <div style={{ padding: "12px 12px 10px", display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>Forces</span>
+          <span style={{ fontSize: 11.5, color: "#6B7280" }}>
+            {placed.length} of {signals.length} placed by events
+          </span>
+        </div>
+        <div style={{ height: 4, background: "#F3F4F6", borderRadius: 999 }}>
+          <div style={{ width: pct + "%", height: "100%", background: "#F97316", borderRadius: 999, transition: "width .3s" }}></div>
+        </div>
+        <div className="mx-tabs">
+          {(
+            [
+              ["review", "To review", toReview.length],
+              ["placed", "Placed", placed.length],
+              ["all", "All", signals.length],
+            ] as [MxQueueTab, string, number][]
+          ).map(([k, l, n]) => (
+            <button
+              key={k}
+              aria-pressed={tab === k}
+              onClick={() => {
+                setTab(k);
+                setOpen(false);
+              }}
+            >
+              {l} · {n}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div style={{ borderTop: "1px solid #E5E7EB" }}>
+        {shown.length === 0 && <div style={{ padding: "14px 12px", fontSize: 12.5, color: "#6B7280" }}>{tab === "review" ? "All forces are placed by events." : "Nothing here yet."}</div>}
+        {shown.map((s) => (
+          <button key={s.id} className="mx-q-row" aria-current={selected === s.id} onClick={() => onSelect(s.id)} title={s.title}>
+            <span style={{ width: 8, height: 8, borderRadius: 999, background: (MX_CAT[s.category] || ["", "#9CA3AF"])[1] }}></span>
+            <span className="mx-q-title">{s.title}</span>
+            {status(s)}
+          </button>
+        ))}
+      </div>
+      {list.length > LIMIT && (
+        <div style={{ borderTop: "1px solid #F3F4F6", padding: "8px 12px" }}>
+          <button className="mx-link" onClick={() => setOpen((o) => !o)}>
+            {open ? "Show fewer" : `Show all ${list.length}`}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function MatrixV2({ signals, events, placements, axes, headlines, focal, horizon, api, lockAxes, onBuildScenarios, buildLabel, onReaxis, onNavigate, initialSelected }: MatrixV2Props) {
   mxUseCss();
   const pBy = Object.fromEntries(placements.map((p) => [p.sigId, p]));
@@ -667,21 +791,22 @@ export function MatrixV2({ signals, events, placements, axes, headlines, focal, 
   const validInitial = initialSelected && signals.some((s) => s.id === initialSelected) ? initialSelected : undefined;
   const [selected, setSelected] = React.useState<string | undefined>(validInitial || firstOpen || axes[0] || (signals[0] && signals[0].id));
   const sig = signals.find((s) => s.id === selected);
-  const unconfirmed = signals.filter((s) => pBy[s.id] && !pBy[s.id].confirmed);
-  const unplaced = signals.filter((s) => !pBy[s.id]);
+  const [qTab, setQTab] = React.useState<MxQueueTab>("review");
+  const queue = [...signals.filter((s) => pBy[s.id] && !pBy[s.id].confirmed), ...signals.filter((s) => !pBy[s.id])];
+  const [qOrder, setQOrder] = React.useState<string[]>(() => queue.map((s) => s.id));
+  React.useEffect(() => {
+    setQOrder((o) => [...o.filter((id) => signals.some((s) => s.id === id)), ...queue.map((s) => s.id).filter((id) => !o.includes(id))]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signals.length]);
+  const qi = qOrder.indexOf(selected ?? "");
+  const goQ = (d: number) => {
+    const n = qOrder[qi + d];
+    if (n) setSelected(n);
+  };
   const predet = signals.filter((s) => mxQuad(pBy[s.id] ?? null) === "predetermined");
   const wild = events.filter((e) => e.wildcard);
   const ax = axes.map((id) => signals.find((s) => s.id === id)).filter((s): s is MxForce => !!s);
   const shared = ax.length === 2 ? events.filter((e) => !e.wildcard && ax.every((s) => (e.links || []).some((l) => l.sigId === s.id))) : [];
-  const chipList = (list: MxForce[], tone: "dashed" | "solid") => (
-    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-      {list.map((s) => (
-        <button key={s.id} onClick={() => setSelected(s.id)} style={{ border: `1px ${tone === "dashed" ? "dashed" : "solid"} ${selected === s.id ? "#F97316" : "#E5E7EB"}`, background: "#fff", borderRadius: 999, padding: "5px 10px", fontFamily: "inherit", fontSize: 12, cursor: "pointer", color: "#1E1B2E" }}>
-          {s.title}
-        </button>
-      ))}
-    </div>
-  );
   return (
     <div className="mx-root" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
@@ -718,25 +843,32 @@ export function MatrixV2({ signals, events, placements, axes, headlines, focal, 
               <span style={{ width: 12, height: 12, borderRadius: 999, background: "#6B7280", boxShadow: "0 0 0 2px #fff, 0 0 0 3.5px #6B7280" }}></span>Scenario axis
             </span>
           </div>
-          {unconfirmed.length > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600 }}>To confirm · {unconfirmed.length}</span>
-              {chipList(unconfirmed, "dashed")}
-            </div>
-          )}
-          {unplaced.length > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600 }}>Not on the matrix yet · {unplaced.length}</span>
-              {chipList(unplaced, "dashed")}
-            </div>
-          )}
         </div>
-        <div className="mx-card" style={{ flex: "1 1 330px", minWidth: 0, padding: 16 }}>
-          {sig ? (
-            <MXAssess key={sig.id} sig={sig} events={events} placement={pBy[sig.id]} axes={axes} horizon={horizon} lockAxes={lockAxes} api={api} onReaxis={onReaxis} onNavigate={onNavigate} signals={signals}></MXAssess>
-          ) : (
-            <span style={{ fontSize: 13, color: "#6B7280" }}>Select a force on the matrix.</span>
-          )}
+        <div style={{ flex: "1 1 340px", minWidth: 0, display: "flex", flexDirection: "column", gap: 12 }}>
+          <div className="mx-card" style={{ padding: 16 }}>
+            {sig ? (
+              <MXAssess
+                key={sig.id}
+                sig={sig}
+                events={events}
+                placement={pBy[sig.id]}
+                axes={axes}
+                horizon={horizon}
+                lockAxes={lockAxes}
+                api={api}
+                onReaxis={onReaxis}
+                onNavigate={onNavigate}
+                signals={signals}
+                pos={qi + 1}
+                total={qOrder.length}
+                onPrev={() => goQ(-1)}
+                onNext={() => goQ(1)}
+              ></MXAssess>
+            ) : (
+              <span style={{ fontSize: 13, color: "#6B7280" }}>Select a force on the matrix.</span>
+            )}
+          </div>
+          <MXQueue signals={signals} pBy={pBy} selected={selected} onSelect={setSelected} tab={qTab} setTab={setQTab}></MXQueue>
         </div>
       </div>
 
