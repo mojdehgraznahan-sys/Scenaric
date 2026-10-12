@@ -3,28 +3,13 @@
 // replaced by the real AI-backed checkAxisIndependence (src/lib/actions/ai-matrix.ts).
 import type { Signal } from "@/lib/types";
 
-// Per-signal axis metadata: short axis name + the two poles.
-export const SIGNAL_AXIS: Record<string, { axis: string; pos: string; neg: string }> = {
-  sg1: { axis: "Carbon Policy", pos: "Strict", neg: "Lax" },
-  sg2: { axis: "AI Adoption", pos: "Fast", neg: "Slow" },
-  sg3: { axis: "Talent Values", pos: "Purpose", neg: "Pay" },
-  sg4: { axis: "Geopolitical Alignment", pos: "Aligned", neg: "Decoupled" },
-  sg5: { axis: "Consumer Growth", pos: "High", neg: "Low" },
-  sg6: { axis: "Climate Risk", pos: "Severe", neg: "Mild" },
-  sg7: { axis: "Channel Shift", pos: "Mobile", neg: "Web" },
-  sg8: { axis: "Market Openness", pos: "Open", neg: "Closed" },
-  sg9: { axis: "FX Stability", pos: "Stable", neg: "Volatile" },
-};
-
+// Every real signal already carries its own two-sided framing (poleA/poleB, e.g. "Tariffs
+// soften"/"Tariffs bite harder") — the axis's pos/neg are just that, never a generic "High"/
+// "Low" stand-in. (Used to fall back to a hardcoded demo table keyed to old seed signal ids,
+// which meant every real project's axis silently got fake pole labels.)
 export function axisMeta(sig?: Signal): { axis: string; pos: string; neg: string } {
   if (!sig) return { axis: "—", pos: "High", neg: "Low" };
-  return (
-    SIGNAL_AXIS[sig.id] || {
-      axis: (sig.title || "").split(" ").slice(0, 2).join(" "),
-      pos: "High",
-      neg: "Low",
-    }
-  );
+  return { axis: sig.title, pos: sig.poleB, neg: sig.poleA };
 }
 
 export const SCENARIO_NAME_POOL = [

@@ -230,7 +230,10 @@ is ONE occurrence: who did what, where, and when. Someone reading the news must 
 
 Input: { focal_question, force: { title, pole_a, pole_b, body },
          insights: [{ id, text, source_name }] /* only insights this force is grounded in */,
-         existing_event_titles: string[] }
+         existing_event_titles: string[],
+         sibling_forces: [{title, pole_a, pole_b, category}] /* the rest of this project's force
+         landscape — context only, so you don't draft an event that actually belongs to a
+         different force's territory; every event you name must still pull on THIS force alone */ }
 
 Two kinds — weight toward (2): this tool is for mapping the future, not logging the past.
 
@@ -314,6 +317,17 @@ export async function deriveEventsForForce(projectId: string, signalId: string, 
     existingEventTitles = linkedEvents.map((e) => e.title);
   }
 
+  // Context only — the rest of this project's force landscape, so drafts aren't written in
+  // total isolation from sibling forces (unlike deriveForcesFromInsights one level up, which is
+  // already project-wide). No quadrant join here — this runs right after a KB force is
+  // confirmed, typically before any matrix placement exists yet.
+  const { data: siblingSignals, error: siblingSignalsError } = await supabase
+    .from("signals")
+    .select("title, pole_a, pole_b, category")
+    .eq("project_id", projectId)
+    .neq("id", signalId);
+  if (siblingSignalsError) throw siblingSignalsError;
+
   const runOnce = () =>
     runStructured({
       step: "signals.derive.events",
@@ -324,6 +338,7 @@ export async function deriveEventsForForce(projectId: string, signalId: string, 
         force: { title: signal.title, pole_a: signal.pole_a, pole_b: signal.pole_b, body: signal.body },
         insights: insights.map((i) => ({ id: i.id, text: i.text, source_name: i.source_id ? sourceNameById.get(i.source_id) ?? null : null })),
         existing_event_titles: existingEventTitles,
+        sibling_forces: siblingSignals,
       },
       schema: DeriveEventsSchema,
       effort: "medium",

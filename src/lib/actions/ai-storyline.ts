@@ -18,6 +18,7 @@ import { runStructured } from "@/lib/ai/client";
 import { StorylineScenarioNotFoundError, ValidationError } from "@/lib/ai/errors";
 import { getProjectAiSettings } from "./project-ai-settings";
 import { listEventsWithLinks } from "./events";
+import { syncEventScenarioLink } from "./storyline";
 import { z } from "zod";
 import type { Database } from "@/lib/supabase/types";
 import { PHASES, isPhaseOrderValid, type Phase } from "../storyline-mapping";
@@ -60,9 +61,10 @@ const StorylineNodeSchema = z.object({
   body: z.string(),
   year: z.number().int().nullable(),
   strength: z.enum(["Strong", "Moderate", "Weak"]),
-  // Required for every node except the single "realized"-phase capstone node — validated
-  // server-side below, not just requested by the prompt.
+  // Exactly one of signal_id/event_id set for every node except the single "realized"-phase
+  // capstone node (both null) — validated server-side below, not just requested by the prompt.
   signal_id: z.string().nullable(),
+  event_id: z.string().nullable(),
 });
 
 const StorylineChainSchema = z.object({
@@ -82,43 +84,57 @@ const StorylineChainSchema = z.object({
 const STORYLINE_TASK_PROMPT = `Task: Build the causal chain for ONE scenario across Schwartz's 5 phases:
 Precursors (conditions already true today) → Catalysts (near-term
 triggering events) → First-order effects → Second-order effects →
-Scenario realized (the end state at the horizon).
+Scenario realized (the end state at the horizon) — in service of the
+project's focal_question below. The chain should read as building
+toward that decision, not just toward the scenario's own end state in
+a vacuum.
 
-You are SELECTING from the project's real signals below — never invent a
-signal, fact, or entity that isn't already present in library_signals or
-predetermined_signals. Your job is to (1) choose which of these signals
-plausibly belong in THIS scenario's specific causal path — not every
-signal in the library needs to appear, only the ones that build this
-scenario's argument, and a scenario sharing axes with 3 siblings should
-select a DIFFERENT subset/framing than they would, even from the same
-pool — (2) assign each selected signal to the correct phase, and (3)
-connect them with directional edges showing how earlier signals causally
-lead to later ones and ultimately to the scenario being realized.
+You are SELECTING from the project's real signals and tracked events
+below — never invent a signal, event, fact, or entity that isn't
+already present in library_signals or library_events. Your job is to
+(1) choose which of these plausibly belong in THIS scenario's specific
+causal path — not everything in the library needs to appear, only what
+builds this scenario's argument, and a scenario sharing axes with 3
+siblings should select a DIFFERENT subset/framing than they would, even
+from the same pool — (2) assign each selected item to the correct
+phase, and (3) connect them with directional edges showing how earlier
+items causally lead to later ones and ultimately to the scenario being
+realized.
 
-Input: { scenario: {name, logic, tagline, summary, quadrant},
-         axis_a: {signal_id, label}, axis_b: {signal_id, label} /* context only —
-         these 2 signals already define the quadrant itself and are NOT present in
-         library_signals/predetermined_signals below; your job is explaining how
-         you plausibly get there using the rest of the library, not re-narrating
-         the axes */,
-         library_signals: [{id, title, body, category}],
-         predetermined_signals: [{id, title, body, category}],
+Input: { focal_question: string,
+         scenario: {name, logic, tagline, summary, quadrant},
+         axis_a: {signal_id, label, pole_a, pole_b, headline_a, headline_b},
+         axis_b: {signal_id, label, pole_a, pole_b, headline_a, headline_b}
+         /* context only — these 2 signals already define the quadrant itself
+         and are NOT present in library_signals/library_events below; your job
+         is explaining how you plausibly get there using the rest of the
+         library, not re-narrating the axes. headline_a/headline_b (each
+         {title, status, date} or null) is the concrete event the user already
+         picked on the Matrix to anchor that pole — when present, treat it as
+         this world's chosen front-page anchor rather than writing around it */,
+         library_signals: [{id, title, body, category, quadrant}]
+         /* quadrant is "predetermined"|"critical"|"monitor"|"background"|null —
+         a "predetermined" signal holds true in EVERY scenario; weave it in as
+         settled background, never as a variable this scenario's argument
+         turns on */,
+         library_events: [{id, title, body, category, status, likelihood}],
          horizon: string }
 
 Rules:
 - Every node in phases precursors/catalysts/first_order/second_order MUST
-  set signal_id to one of the ids given in library_signals or
-  predetermined_signals, copied VERBATIM — never a fabricated id, never
-  null. That node's title/body must be a faithful restatement of that
-  signal's own title/body — you may add causal framing language
+  set EXACTLY ONE of signal_id/event_id to an id copied VERBATIM from
+  library_signals or library_events — never both, never a fabricated id.
+  That node's title/body must be a faithful restatement of that signal's
+  or event's own title/body — you may add causal framing language
   connecting it to neighboring nodes in the chain, but must not add
-  facts, statistics, or claims the signal itself doesn't already state.
-- Exactly one node in the "realized" phase may have signal_id: null —
-  this is the scenario's own realized end-state, and its title/body must
-  be a faithful restatement of the scenario's own name/logic/summary
-  (given in the input), not new invented content. Any other node in the
-  "realized" phase must still set a real signal_id, same as every other
-  phase, if a signal genuinely represents part of the realized state.
+  facts, statistics, or claims it doesn't already state.
+- Exactly one node in the "realized" phase may have BOTH signal_id and
+  event_id null — this is the scenario's own realized end-state, and its
+  title/body must be a faithful restatement of the scenario's own
+  name/logic/summary (given in the input), not new invented content. Any
+  other node in the "realized" phase must still set a real signal_id or
+  event_id, same as every other phase, if a signal/event genuinely
+  represents part of the realized state.
 - No forward-skipping shortcuts that assert the end state as a
   precursor — respect causal ordering; a node in phase N can only
   causally justify nodes in phase N or later (never earlier — that is
@@ -128,15 +144,16 @@ Rules:
 - strength (per node) in {"Strong","Moderate","Weak"} — how central and
   well-evidenced this node is to the chain, not a vibe.
 - 7-10 nodes total, at least 1 per phase.
-- If fewer than 2 real candidate signals are available, or the available
-  signals genuinely don't support a coherent, differentiated chain for
-  THIS scenario, return sufficient_evidence:false and a one-sentence gap
-  instead of forcing a thin or generic chain.
+- If fewer than 2 real candidate signals/events are available, or the
+  available ones genuinely don't support a coherent, differentiated
+  chain for THIS scenario, return sufficient_evidence:false and a
+  one-sentence gap instead of forcing a thin or generic chain.
 
 Output schema:
 { sufficient_evidence: boolean, gap?: string,
   nodes: [{ id, phase, title, body, year: number|null,
-            strength: "Strong"|"Moderate"|"Weak", signal_id: string|null }],
+            strength: "Strong"|"Moderate"|"Weak",
+            signal_id: string|null, event_id: string|null }],
   edges: [{ from, to, relationship, confidence }] }`;
 
 export interface AutoSuggestStorylineResult {
@@ -160,7 +177,7 @@ export async function autoSuggestStoryline(scenarioId: string): Promise<AutoSugg
 
   const { data: project, error: projectError } = await supabase
     .from("projects")
-    .select("horizon")
+    .select("horizon, focal_question, refined_focal_question")
     .eq("id", scenario.project_id)
     .single();
   if (projectError) throw new StorylineScenarioNotFoundError(scenarioId, projectError);
@@ -205,14 +222,13 @@ async function runAutoSuggestStoryline(
     summary: string | null;
     quadrant: string;
   },
-  project: { horizon: string }
+  project: { horizon: string; focal_question: string; refined_focal_question: string | null }
 ): Promise<AutoSuggestStorylineResult> {
-  // Poles (pole_pos/pole_neg) are only ever computed client-side (axis-data.ts's axisMeta())
-  // and never persisted server-side — passing only {signal_id, label} here is honest about
-  // what's actually real project data, rather than fabricating poles the model would then
-  // treat as fact.
-  let axisA: { signal_id: string | null; label: string | null } = { signal_id: null, label: null };
-  let axisB: { signal_id: string | null; label: string | null } = { signal_id: null, label: null };
+  const focalQuestion = project.refined_focal_question ?? project.focal_question;
+  let axisSignalIdA: string | null = null;
+  let axisSignalIdB: string | null = null;
+  let axisLabelA: string | null = null;
+  let axisLabelB: string | null = null;
   if (scenario.axes_id) {
     const { data: axes, error: axesError } = await supabase
       .from("axes")
@@ -222,13 +238,15 @@ async function runAutoSuggestStoryline(
     if (axesError) throw axesError;
     // Matches buildScenarios' own convention (ai-scenarios.ts): axis A is the y (top/bottom)
     // axis, axis B is the x (left/right) axis.
-    axisA = { signal_id: axes.y_signal_id, label: axes.y_label };
-    axisB = { signal_id: axes.x_signal_id, label: axes.x_label };
+    axisSignalIdA = axes.y_signal_id;
+    axisLabelA = axes.y_label;
+    axisSignalIdB = axes.x_signal_id;
+    axisLabelB = axes.x_label;
   }
 
   const { data: signals, error: signalsError } = await supabase
     .from("signals")
-    .select("id, title, body, category")
+    .select("id, title, body, category, pole_a, pole_b")
     .eq("project_id", scenario.project_id);
   if (signalsError) throw signalsError;
 
@@ -240,24 +258,76 @@ async function runAutoSuggestStoryline(
   const quadrantBySignalId = new Map(placements.map((p) => [p.signal_id, p.quadrant]));
   const signalById = new Map(signals.map((s) => [s.id, s]));
 
+  // The axis signals' own real poles ARE persisted (signals.pole_a/pole_b) — unlike the
+  // now-removed client-side axisMeta() demo fallback (axis-data.ts), these are honest project
+  // data, not fabricated. The "front page" headline event the user picked on the Matrix for
+  // each pole (axis_headlines) is real project data too, but was never surfaced to any prompt
+  // before — fetch both so the chain can anchor on the same concrete headline the Matrix shows.
+  const axisHeadlineBySignalId = new Map<string, Map<"a" | "b", { title: string; status: string; date: string | null }>>();
+  const axisSignalIds = [axisSignalIdA, axisSignalIdB].filter((id): id is string => id != null);
+  if (axisSignalIds.length > 0) {
+    const { data: headlineRows, error: headlinesError } = await supabase
+      .from("axis_headlines")
+      .select("signal_id, side, event_id")
+      .eq("project_id", scenario.project_id)
+      .in("signal_id", axisSignalIds);
+    if (headlinesError) throw headlinesError;
+    const headlineEventIds = headlineRows.map((h) => h.event_id);
+    if (headlineEventIds.length > 0) {
+      const { data: headlineEvents, error: headlineEventsError } = await supabase
+        .from("events")
+        .select("id, title, status, occurred_on, window_label")
+        .in("id", headlineEventIds);
+      if (headlineEventsError) throw headlineEventsError;
+      const headlineEventById = new Map(headlineEvents.map((e) => [e.id, e]));
+      for (const row of headlineRows) {
+        const ev = headlineEventById.get(row.event_id);
+        if (!ev) continue;
+        const bySide = axisHeadlineBySignalId.get(row.signal_id) ?? new Map();
+        bySide.set(row.side, { title: ev.title, status: ev.status, date: ev.occurred_on ?? ev.window_label });
+        axisHeadlineBySignalId.set(row.signal_id, bySide);
+      }
+    }
+  }
+  const axisInput = (signalId: string | null, label: string | null) => {
+    const sig = signalId ? signalById.get(signalId) : undefined;
+    const headlines = signalId ? axisHeadlineBySignalId.get(signalId) : undefined;
+    return {
+      signal_id: signalId,
+      label,
+      pole_a: sig?.pole_a ?? null,
+      pole_b: sig?.pole_b ?? null,
+      headline_a: headlines?.get("a") ?? null,
+      headline_b: headlines?.get("b") ?? null,
+    };
+  };
+  const axisA = axisInput(axisSignalIdA, axisLabelA);
+  const axisB = axisInput(axisSignalIdB, axisLabelB);
+
   // The axis signals are excluded here (SCHWARTZ_METHODOLOGY_SKILL.md's Storyline section):
   // the axes define the quadrant itself — Storyline's job is explaining how you plausibly get
   // there using the *rest* of the library, not re-narrating the axes. Under Matrix v2 there is
   // no longer a wildcard SIGNAL bucket to also exclude — wildcards are events now
   // (events.is_wildcard), never a force's own classification — so every non-axis signal is a
   // legitimate library candidate.
-  const axisSignalIds = new Set([axisA.signal_id, axisB.signal_id].filter((id): id is string => id != null));
-  const nonAxisSignals = signals.filter((s) => !axisSignalIds.has(s.id));
-  const librarySignals = nonAxisSignals.map((s) => ({ id: s.id, title: s.title, body: s.body, category: s.category }));
-  const predeterminedSignals = nonAxisSignals
-    .filter((s) => quadrantBySignalId.get(s.id) === "predetermined")
-    .map((s) => ({ id: s.id, title: s.title, body: s.body, category: s.category }));
+  const axisSignalIdSet = new Set(axisSignalIds);
+  const nonAxisSignals = signals.filter((s) => !axisSignalIdSet.has(s.id));
+  // quadrant folded in directly (rather than a separate predetermined_signals list, which was
+  // always a strict subset of this one with no distinct instruction attached) — "predetermined"
+  // is explained in the prompt as holding true in every scenario regardless of which subset is
+  // selected.
+  const librarySignals = nonAxisSignals.map((s) => ({ id: s.id, title: s.title, body: s.body, category: s.category, quadrant: quadrantBySignalId.get(s.id) ?? null }));
   const candidateIds = new Set(librarySignals.map((s) => s.id));
+
+  const events = await listEventsWithLinks(scenario.project_id);
+  const libraryEvents = events.map((e) => ({ id: e.id, title: e.title, body: e.description, category: e.category, status: e.status, likelihood: e.likelihood }));
+  const candidateEventIds = new Set(libraryEvents.map((e) => e.id));
+  const eventById = new Map(events.map((e) => [e.id, e]));
 
   // Reject before spending a model call on an already-invalid request — same pattern as
   // assertAxisCandidates in matrix.ts.
-  if (candidateIds.size < 2) {
-    const gap = "Fewer than 2 signals are available in this project to build a causal chain.";
+  if (candidateIds.size + candidateEventIds.size < 2) {
+    const gap = "Fewer than 2 signals/events are available in this project to build a causal chain.";
     await markStorylineStatus(supabase, projectId, scenarioId, { status: "failed", error_message: gap });
     return EMPTY_FAILURE(gap);
   }
@@ -267,11 +337,12 @@ async function runAutoSuggestStoryline(
     projectId: scenario.project_id,
     taskPrompt: STORYLINE_TASK_PROMPT,
     input: {
+      focal_question: focalQuestion,
       scenario: { name: scenario.name, logic: scenario.logic, tagline: scenario.tagline, summary: scenario.summary, quadrant: scenario.quadrant },
       axis_a: axisA,
       axis_b: axisB,
       library_signals: librarySignals,
-      predetermined_signals: predeterminedSignals,
+      library_events: libraryEvents,
       horizon: project.horizon,
     },
     schema: StorylineChainSchema,
@@ -286,19 +357,23 @@ async function runAutoSuggestStoryline(
   }
 
   // Validate before persisting — defense in depth beyond the prompt's own instructions.
-  // A non-null signal_id must be one of the real ids we actually offered (never a
-  // hallucinated id / free-text stand-in); dedupe local ids defensively in case the model
-  // reuses one.
+  // Exactly one of signal_id/event_id (or both null, for the realized capstone) must be one of
+  // the real ids we actually offered (never a hallucinated id / free-text stand-in, never both
+  // set at once); dedupe local ids defensively in case the model reuses one.
   const seenLocalIds = new Set<string>();
   const validNodes = output.nodes.filter((n) => {
     if (seenLocalIds.has(n.id)) return false;
-    if (n.signal_id != null && !candidateIds.has(n.signal_id)) return false;
+    const hasSignal = n.signal_id != null;
+    const hasEvent = n.event_id != null;
+    if (hasSignal && hasEvent) return false;
+    if (hasSignal && !candidateIds.has(n.signal_id!)) return false;
+    if (hasEvent && !candidateEventIds.has(n.event_id!)) return false;
     seenLocalIds.add(n.id);
     return true;
   });
 
   if (validNodes.length === 0) {
-    const gap = "The model's output didn't reference any real project signals.";
+    const gap = "The model's output didn't reference any real project signals or events.";
     await markStorylineStatus(supabase, projectId, scenarioId, { status: "failed", error_message: gap });
     return EMPTY_FAILURE(gap);
   }
@@ -315,15 +390,16 @@ async function runAutoSuggestStoryline(
         project_id: scenario.project_id,
         scenario_id: scenarioId,
         phase: n.phase,
-        // Server-derived from the real signal row, never trusted from model output — one
-        // less thing the model could mis-transcribe. Null only for the signal-less
+        // Server-derived from the real signal/event row, never trusted from model output — one
+        // less thing the model could mis-transcribe. Null only for the grounding-less
         // "realized" capstone node.
-        category: n.signal_id ? (signalById.get(n.signal_id)?.category ?? null) : null,
+        category: n.signal_id ? (signalById.get(n.signal_id)?.category ?? null) : n.event_id ? (eventById.get(n.event_id)?.category ?? null) : null,
         title: n.title,
         body: n.body,
         year: n.year,
         strength: n.strength,
         signal_id: n.signal_id,
+        event_id: n.event_id,
       }))
     )
     .select();
@@ -335,6 +411,13 @@ async function runAutoSuggestStoryline(
     idMap.set(n.id, insertedNodes[i].id);
     phaseByLocalId.set(n.id, n.phase);
   });
+
+  // Keep event_scenario_links in sync for every event-grounded node, same as the manual
+  // "+ Add event to chain" flow (storyline.ts's createStorylineNode) — otherwise an
+  // auto-suggested chain's event-grounded nodes would silently not show up in Monitoring.
+  for (const node of insertedNodes) {
+    if (node.event_id) await syncEventScenarioLink(supabase, scenario.project_id, scenarioId, node.event_id, node.phase as Phase);
+  }
 
   // One-directional causality: an edge may only point from a node's phase to the same or a
   // later phase — drop (never insert) anything backward, or referencing a node that didn't

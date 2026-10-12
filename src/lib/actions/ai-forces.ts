@@ -344,7 +344,12 @@ named force toward ONE of its two poles — grounded in real current news, geopo
 supply-chain, technology, or discovery trends, never fabricated wholesale.
 
 Input: { focal_question: string, signal: { title, body, category, pole_a, pole_b },
-         target_pole: string, existing_event_titles: string[] }
+         target_pole: string, existing_event_titles: string[],
+         sibling_forces: [{title, pole_a, pole_b, category, quadrant}] /* the rest of this
+         project's force landscape — context only, so you don't draft an event that actually
+         belongs to a different force's territory. A "predetermined"/"critical" quadrant hints
+         at which forces matter most to the decision, but never invent an event for a sibling
+         force — every draft must still pull on signal/target_pole alone */ }
 
 Rules:
 - Every draft must be reasoned from a REAL, current, cited trend found via web_search — the
@@ -402,6 +407,20 @@ export async function generateForPole(projectId: string, signalId: string, side:
 
   const targetPole = side === "a" ? signal.pole_a ?? "Doesn't happen" : signal.pole_b ?? signal.title;
 
+  // Context only — the rest of this project's force landscape, so drafts aren't written in
+  // total isolation from forces the model would otherwise never see (unlike KB-driven signal
+  // generation one level up, which is already project-wide).
+  const { data: siblingSignals, error: siblingSignalsError } = await supabase
+    .from("signals")
+    .select("id, title, pole_a, pole_b, category")
+    .eq("project_id", projectId)
+    .neq("id", signalId);
+  if (siblingSignalsError) throw siblingSignalsError;
+  const { data: siblingPlacements, error: siblingPlacementsError } = await supabase.from("matrix_placements_v").select("signal_id, quadrant").eq("project_id", projectId);
+  if (siblingPlacementsError) throw siblingPlacementsError;
+  const quadrantBySignalId = new Map(siblingPlacements.map((p) => [p.signal_id, p.quadrant]));
+  const siblingForces = siblingSignals.map((s) => ({ title: s.title, pole_a: s.pole_a, pole_b: s.pole_b, category: s.category, quadrant: quadrantBySignalId.get(s.id) ?? null }));
+
   let output: z.infer<typeof GenerateForPoleSchema>;
   try {
     output = await runStructured({
@@ -413,6 +432,7 @@ export async function generateForPole(projectId: string, signalId: string, side:
         signal: { title: signal.title, body: signal.body, category: signal.category, pole_a: signal.pole_a, pole_b: signal.pole_b },
         target_pole: targetPole,
         existing_event_titles: existingEventTitles,
+        sibling_forces: siblingForces,
       },
       schema: GenerateForPoleSchema,
       effort: "medium",

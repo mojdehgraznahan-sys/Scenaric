@@ -87,7 +87,7 @@ async function loadEventForNode(supabase: SupabaseClient, projectId: string, eve
 // fetchTrackedEvents (decision-tracking.ts) reads to decide an event is "tracked". Called with
 // the node's final/post-write event_id + phase, so creating or dragging an event-grounded node
 // to a new column always has it show up in Monitoring after the next scan.
-async function syncEventScenarioLink(supabase: SupabaseClient, projectId: string, scenarioId: string, eventId: string, phase: Phase) {
+export async function syncEventScenarioLink(supabase: SupabaseClient, projectId: string, scenarioId: string, eventId: string, phase: Phase) {
   const { error } = await supabase
     .from("event_scenario_links")
     .upsert({ project_id: projectId, event_id: eventId, scenario_id: scenarioId, phase }, { onConflict: "event_id,scenario_id" });

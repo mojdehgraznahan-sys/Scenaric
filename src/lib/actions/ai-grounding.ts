@@ -201,7 +201,7 @@ export async function generateScenarioGrounding(scenarioId: string): Promise<Sce
   // valid, honestly-reportable input, not an error (see the prompt's own instruction for it).
   const { data: storylineNodes, error: nodesError } = await supabase
     .from("storyline_nodes")
-    .select("id, phase, title, signal_id")
+    .select("id, phase, title, signal_id, event_id")
     .eq("scenario_id", scenarioId)
     .order("created_at", { ascending: true });
   if (nodesError) throw nodesError;
@@ -212,7 +212,7 @@ export async function generateScenarioGrounding(scenarioId: string): Promise<Sce
     .eq("scenario_id", scenarioId);
   if (edgesError) throw edgesError;
 
-  const chainNodes = storylineNodes.map((n) => ({ phase: n.phase, title: n.title, signal_id: n.signal_id }));
+  const chainNodes = storylineNodes.map((n) => ({ phase: n.phase, title: n.title, signal_id: n.signal_id, event_id: n.event_id }));
   const chainEdges = storylineEdges.map((e) => ({
     from: e.from_node_id,
     to: e.to_node_id,

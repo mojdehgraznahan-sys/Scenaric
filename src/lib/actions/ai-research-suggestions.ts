@@ -96,7 +96,11 @@ genuine two-sided uncertainty over the horizon, not a one-directional news trend
 
 Input: { focal_question: string, industry: string, horizon: string,
          existing_signals: [{ title: string, category: string }]
-         /* avoid resurfacing one of these — check semantic overlap, not just exact title match */ }
+         /* avoid resurfacing one of these — check semantic overlap, not just exact title match */,
+         knowledge_base_insights: [{ text: string, category: string }]
+         /* the project's own extracted insights, most recent first — skip anything these
+         already evidence, even if it hasn't been turned into a signal yet; this call is for
+         surfacing genuinely new forces the KB hasn't already flagged */ }
 
 ${FORCE_FRAMING_RULES}
 
@@ -108,7 +112,8 @@ Further rules:
   Political.
 - citation_title/citation_url must be the real title/URL you found this evidence reported in —
   never invented.
-- Skip anything semantically the same as an existing_signals entry.
+- Skip anything semantically the same as an existing_signals entry, or already evidenced in
+  knowledge_base_insights.
 - If web_search turns up nothing genuinely new and relevant, return sufficient_evidence:false
   and a gap explaining why — do not pad with tangential results to look complete.
 - Cap at 8 items per call.
@@ -213,6 +218,14 @@ export async function runMacroTrendSweep(projectId: string, options: RunScanOpti
   const { data: existingSignals, error: signalsError } = await supabase.from("signals").select("title, category").eq("project_id", projectId);
   if (signalsError) throw signalsError;
 
+  const { data: knowledgeBaseInsights, error: insightsError } = await supabase
+    .from("insights")
+    .select("text, category")
+    .eq("project_id", projectId)
+    .order("created_at", { ascending: false })
+    .limit(30);
+  if (insightsError) throw insightsError;
+
   let output: z.infer<typeof MacroTrendSweepSchema>;
   try {
     output = await runStructured({
@@ -224,6 +237,7 @@ export async function runMacroTrendSweep(projectId: string, options: RunScanOpti
         industry: project.industry,
         horizon: project.horizon,
         existing_signals: existingSignals.map((s) => ({ title: s.title, category: s.category })),
+        knowledge_base_insights: knowledgeBaseInsights.map((i) => ({ text: i.text, category: i.category })),
       },
       schema: MacroTrendSweepSchema,
       effort: "medium",
