@@ -30,19 +30,19 @@ export async function POST(request: Request, { params }: { params: { id: string 
         if (!body.optionId) {
           return NextResponse.json({ error: "optionId is required for stress_test_option." }, { status: 400 });
         }
-        return NextResponse.json(await stressTestOption(body.optionId));
+        return NextResponse.json(await stressTestOption(projectId, body.optionId));
 
       case "apply_stress_test_findings":
         if (!body.optionId || !body.findings) {
           return NextResponse.json({ error: "optionId and findings are required for apply_stress_test_findings." }, { status: 400 });
         }
-        return NextResponse.json(await applyStressTestFindings(body.optionId, body.findings));
+        return NextResponse.json(await applyStressTestFindings(projectId, body.optionId, body.findings));
 
       case "explain_non_robust":
         if (!body.optionId || !body.scenarioId) {
           return NextResponse.json({ error: "optionId and scenarioId are required for explain_non_robust." }, { status: 400 });
         }
-        return NextResponse.json(await explainNonRobustCell(body.optionId, body.scenarioId));
+        return NextResponse.json(await explainNonRobustCell(projectId, body.optionId, body.scenarioId));
 
       case "suggest_hedge":
         return NextResponse.json(await suggestHedge(projectId));

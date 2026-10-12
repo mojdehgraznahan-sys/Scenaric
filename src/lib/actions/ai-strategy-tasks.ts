@@ -90,13 +90,19 @@ export interface StressTestOptionResult {
 // follow-up). Applying a revision now requires the separate, explicit applyStressTestFindings
 // call below, fired only from a "Apply changes" button after the user has seen the findings —
 // same confirm-before-write contract as every other proposal in this app.
-export async function stressTestOption(optionId: string): Promise<StressTestOptionResult> {
+// projectId here (and on applyStressTestFindings/explainNonRobustCell below) is a
+// verification argument, not a filter chosen for convenience — the route handler
+// (strategy/ask-ai/route.ts) gets it from the URL's own :id, and RLS (0003_rls.sql) only
+// scopes to the caller's org, not this specific project, so without .eq("project_id", ...) an
+// optionId from a sibling project in the same org would be accepted as if it belonged here.
+export async function stressTestOption(projectId: string, optionId: string): Promise<StressTestOptionResult> {
   const supabase = createClient();
 
   const { data: option, error: optionError } = await supabase
     .from("strategic_options")
     .select("id, project_id, name, risk, cost")
     .eq("id", optionId)
+    .eq("project_id", projectId)
     .single();
   if (optionError) throw new NotFoundError(`Strategic option ${optionId} could not be loaded.`);
 
@@ -184,13 +190,19 @@ export async function stressTestOption(optionId: string): Promise<StressTestOpti
 // scores' robust flag, recomputes the option's risk, and invalidates the project's cached
 // recommendation.
 export async function applyStressTestFindings(
+  projectId: string,
   optionId: string,
   findings: { scenarioId: string; rationale: string; groundedIn: string[] }[]
 ): Promise<{ applied: number }> {
   const supabase = createClient();
   if (findings.length === 0) return { applied: 0 };
 
-  const { data: option, error: optionError } = await supabase.from("strategic_options").select("id, project_id").eq("id", optionId).single();
+  const { data: option, error: optionError } = await supabase
+    .from("strategic_options")
+    .select("id, project_id")
+    .eq("id", optionId)
+    .eq("project_id", projectId)
+    .single();
   if (optionError) throw new NotFoundError(`Strategic option ${optionId} could not be loaded.`);
 
   const { data: scores, error: scoresError } = await supabase
@@ -257,10 +269,15 @@ Rules:
 Output schema: { explanation: string }`;
 
 // POST .../projects/:id/strategy/ask-ai { task: "explain_non_robust", optionId, scenarioId }
-export async function explainNonRobustCell(optionId: string, scenarioId: string): Promise<{ explanation: string }> {
+export async function explainNonRobustCell(projectId: string, optionId: string, scenarioId: string): Promise<{ explanation: string }> {
   const supabase = createClient();
 
-  const { data: option, error: optionError } = await supabase.from("strategic_options").select("id, project_id, name").eq("id", optionId).single();
+  const { data: option, error: optionError } = await supabase
+    .from("strategic_options")
+    .select("id, project_id, name")
+    .eq("id", optionId)
+    .eq("project_id", projectId)
+    .single();
   if (optionError) throw new NotFoundError(`Strategic option ${optionId} could not be loaded.`);
 
   const { data: score, error: scoreError } = await supabase
@@ -277,7 +294,7 @@ export async function explainNonRobustCell(optionId: string, scenarioId: string)
     return { explanation: 'This option is marked robust in that scenario — there is no "not robust" rationale to expand. Try "Stress-test this option" instead.' };
   }
 
-  const { data: scenario, error: scenarioError } = await supabase.from("scenarios").select("id, name, logic").eq("id", scenarioId).single();
+  const { data: scenario, error: scenarioError } = await supabase.from("scenarios").select("id, name, logic").eq("id", scenarioId).eq("project_id", projectId).single();
   if (scenarioError) throw scenarioError;
 
   const citedMaterial: { id: string; kind: "implication" | "predetermined_element"; text: string }[] = [];

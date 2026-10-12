@@ -615,6 +615,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [projects, setProjectsState] = useState<ProjectSummary[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  // Always holds the latest activeProjectId, readable from inside an in-flight async refresh
+  // (refreshSignals/refreshEvents/refreshMatrixData/refreshScenarios below) to detect a project
+  // switch that happened while that fetch was in flight — without this, a slow fetch for the
+  // project the user just switched AWAY from can resolve after the new project's own fetch and
+  // silently overwrite its state with the stale project's data.
+  const activeProjectIdRef = React.useRef<string | null>(null);
+  useEffect(() => {
+    activeProjectIdRef.current = activeProjectId;
+  }, [activeProjectId]);
 
   const refreshProjects = useCallback(async () => {
     const rows = await listProjects();
@@ -732,6 +741,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     await getMatrixData(projectId);
     await classifyMatrixBuckets(projectId).catch((err) => console.error("[store] bucket classification failed", err));
     const result = await getMatrixData(projectId);
+    if (activeProjectIdRef.current !== projectId) return; // project switched while this was in flight — don't clobber the new one's state
     setMatrixDots(result.dots.map(toMatrixDot));
     setPendingScoringCount(result.pendingScoringCount);
     setPendingScoringIds(result.pendingScoringIds);
@@ -806,6 +816,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const refreshSignals = useCallback(async (projectId: string) => {
     const rows = await listSignals(projectId);
+    if (activeProjectIdRef.current !== projectId) return; // see activeProjectIdRef's comment above
     setSignalsState(rows.map(toSignal));
   }, []);
 
@@ -861,8 +872,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       impact?: number | null;
       uncertainty?: "Low" | "Medium" | "High" | null;
     }) => {
-      const row = await updateSignalAction(input);
-      if (activeProjectId) await refreshSignals(activeProjectId);
+      if (!activeProjectId) throw new Error("No active project.");
+      const row = await updateSignalAction({ ...input, projectId: activeProjectId });
+      await refreshSignals(activeProjectId);
       // Self-heals a signal left unscored (e.g. a swallowed AIGenerationFailedError at
       // creation time) — mirrors createSignal's fire-and-forget scoring above, including the
       // matrix-data refresh so the dot gets classified as soon as scoring lands.
@@ -878,8 +890,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const deleteSignal = useCallback(
     async (id: string) => {
-      await deleteSignalAction(id);
-      if (activeProjectId) await refreshSignals(activeProjectId);
+      if (!activeProjectId) return;
+      await deleteSignalAction(activeProjectId, id);
+      await refreshSignals(activeProjectId);
     },
     [activeProjectId, refreshSignals]
   );
@@ -894,6 +907,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     for (const indicator of indicators) {
       if (indicator.event_id) indicatorIdByEvent.set(indicator.event_id, indicator.id);
     }
+    if (activeProjectIdRef.current !== projectId) return; // see activeProjectIdRef's comment above
     setEventsState(rows.map((row) => toEventItem(row, indicatorIdByEvent.get(row.id) ?? null)));
   }, []);
 
@@ -1004,8 +1018,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       precursor?: string | null;
       source?: string | null;
     }) => {
-      const row = await updateEventAction(input);
-      if (activeProjectId) await refreshEvents(activeProjectId);
+      if (!activeProjectId) throw new Error("No active project.");
+      const row = await updateEventAction({ ...input, projectId: activeProjectId });
+      await refreshEvents(activeProjectId);
       return row;
     },
     [activeProjectId, refreshEvents]
@@ -1027,7 +1042,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const unlinkEvent = useCallback(
     async (eventId: string, signalId: string) => {
       if (!activeProjectId) return;
-      await unlinkEventAction(eventId, signalId);
+      await unlinkEventAction(activeProjectId, eventId, signalId);
       await refreshEvents(activeProjectId);
     },
     [activeProjectId, refreshEvents]
@@ -1035,8 +1050,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const deleteEvent = useCallback(
     async (id: string) => {
-      await deleteEventAction(id);
-      if (activeProjectId) await refreshEvents(activeProjectId);
+      if (!activeProjectId) return;
+      await deleteEventAction(activeProjectId, id);
+      await refreshEvents(activeProjectId);
     },
     [activeProjectId, refreshEvents]
   );
@@ -1077,6 +1093,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const refreshScenarios = useCallback(async (projectId: string) => {
     const rows = await getScenarios(projectId);
+    if (activeProjectIdRef.current !== projectId) return; // see activeProjectIdRef's comment above
     setScenarios(rows.map(toScenario));
   }, []);
 
@@ -1096,8 +1113,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   // restore action. No AI call, just a persisted field flip + refetch.
   const archiveScenario = useCallback(
     async (scenarioId: string, archived: boolean) => {
-      await setScenarioArchived(scenarioId, archived);
-      if (activeProjectId) await refreshScenarios(activeProjectId);
+      if (!activeProjectId) return;
+      await setScenarioArchived(activeProjectId, scenarioId, archived);
+      await refreshScenarios(activeProjectId);
     },
     [activeProjectId, refreshScenarios]
   );

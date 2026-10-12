@@ -77,11 +77,14 @@ export async function getScenarios(projectId: string): Promise<ScenarioWithAxes[
   });
 }
 
-// PATCH .../scenarios/:id — archive/restore toggle only, no AI. Trusts RLS for project
-// scoping (supabase/migrations/0003_rls.sql), same convention as signals.ts's updateSignal.
-export async function setScenarioArchived(scenarioId: string, archived: boolean): Promise<void> {
+// PATCH .../scenarios/:id — archive/restore toggle only, no AI. RLS (0003_rls.sql) only scopes
+// to the caller's org, not this specific project, so a stale scenarioId from a sibling project
+// in the same org would otherwise silently archive/restore the wrong project's scenario — the
+// explicit .eq("project_id", ...) plus .select().single() (which throws when 0 rows match) is
+// what actually enforces "this id belongs to this project."
+export async function setScenarioArchived(projectId: string, scenarioId: string, archived: boolean): Promise<void> {
   const supabase = createClient();
-  const { error } = await supabase.from("scenarios").update({ is_archived: archived }).eq("id", scenarioId);
+  const { error } = await supabase.from("scenarios").update({ is_archived: archived }).eq("id", scenarioId).eq("project_id", projectId).select("id").single();
   if (error) throw error;
   revalidatePath("/canvas");
 }
@@ -91,12 +94,15 @@ export async function setScenarioArchived(scenarioId: string, archived: boolean)
 // into the textarea, the exact case that flag exists to record — so a later "Expand with AI"
 // run on this scenario knows to confirm before overwriting (expandNarrativeWithAI, in
 // ai-narrative.ts, clears the flag again once the user has accepted an AI regeneration).
-export async function updateScenarioNarrative(scenarioId: string, fields: { narrative?: string; summary?: string }): Promise<void> {
+export async function updateScenarioNarrative(projectId: string, scenarioId: string, fields: { narrative?: string; summary?: string }): Promise<void> {
   const supabase = createClient();
   const { error } = await supabase
     .from("scenarios")
     .update({ ...fields, narrative_edited_by_user: true })
-    .eq("id", scenarioId);
+    .eq("id", scenarioId)
+    .eq("project_id", projectId)
+    .select("id")
+    .single();
   if (error) throw error;
   revalidatePath("/narrative");
 }

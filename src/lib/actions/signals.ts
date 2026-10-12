@@ -1,7 +1,8 @@
 "use server";
 
 // Signals CRUD — backend build order §14 item 4c Phase 1. RLS (supabase/migrations/0003_rls.sql)
-// scopes every query to the caller's org via project_id; no manual org/user filtering needed here.
+// only scopes to the caller's org, not to one specific project within it — every query here
+// still needs its own explicit project_id filter (see updateSignal/deleteSignal below).
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { Database } from "@/lib/supabase/types";
@@ -86,7 +87,12 @@ export async function createSignal(input: {
   return data;
 }
 
+// RLS (0003_rls.sql) only scopes to the caller's org, not this specific project — a stale
+// signal id from a sibling project in the same org would otherwise silently update/delete the
+// wrong project's force. The explicit .eq("project_id", ...) plus .select().single() (which
+// throws when 0 rows match) is what actually enforces "this id belongs to this project."
 export async function updateSignal(input: {
+  projectId: string;
   id: string;
   title?: string;
   body?: string;
@@ -98,11 +104,12 @@ export async function updateSignal(input: {
   uncertainty?: "Low" | "Medium" | "High" | null;
 }): Promise<SignalRow> {
   const supabase = createClient();
-  const { id, poleA, poleB, ...fields } = input;
+  const { id, projectId, poleA, poleB, ...fields } = input;
   const { data, error } = await supabase
     .from("signals")
     .update({ ...fields, ...(poleA !== undefined ? { pole_a: poleA } : {}), ...(poleB !== undefined ? { pole_b: poleB } : {}) })
     .eq("id", id)
+    .eq("project_id", projectId)
     .select()
     .single();
   if (error) throw error;
@@ -110,9 +117,9 @@ export async function updateSignal(input: {
   return data;
 }
 
-export async function deleteSignal(id: string): Promise<void> {
+export async function deleteSignal(projectId: string, id: string): Promise<void> {
   const supabase = createClient();
-  const { error } = await supabase.from("signals").delete().eq("id", id);
+  const { error } = await supabase.from("signals").delete().eq("id", id).eq("project_id", projectId).select("id").single();
   if (error) throw error;
   revalidatePath("/signals");
 }

@@ -146,7 +146,13 @@ export async function setStrategyTarget(projectId: string, scenarioId: string, c
 // see set_primary_strategic_option for the one case here that does). Setting a card back to
 // 'pending' (Undo) restores the move's effect.previous_status, captured when the card was
 // created — see decision-scan.ts's raiseActionCards.
+// projectId here (and on the other actions below) is a verification argument, not a filter
+// the caller chose for convenience: RLS (0003_rls.sql) only scopes to the caller's org, not
+// this specific project, so without .eq("project_id", ...) a stale cardId from a sibling
+// project in the same org would otherwise silently accept/defer/dismiss/undo that other
+// project's action card.
 export async function actOnActionCard(
+  projectId: string,
   cardId: string,
   status: "accepted" | "deferred" | "dismissed" | "pending",
   decidedBy: string | null,
@@ -157,7 +163,7 @@ export async function actOnActionCard(
 ): Promise<void> {
   const supabase = createClient();
 
-  const { data: card, error: cardError } = await supabase.from("action_cards").select("effect").eq("id", cardId).single();
+  const { data: card, error: cardError } = await supabase.from("action_cards").select("effect").eq("id", cardId).eq("project_id", projectId).single();
   if (cardError) throw cardError;
 
   const { error: updateError } = await supabase
@@ -168,7 +174,8 @@ export async function actOnActionCard(
       decided_at: status === "pending" ? null : new Date().toISOString(),
       ...(status === "accepted" ? { owner_id: options?.ownerId ?? null, due_on: options?.dueOn ?? null } : {}),
     })
-    .eq("id", cardId);
+    .eq("id", cardId)
+    .eq("project_id", projectId);
   if (updateError) throw updateError;
 
   type RouteMoveStatus = Database["public"]["Tables"]["route_moves"]["Row"]["status"];
@@ -176,7 +183,11 @@ export async function actOnActionCard(
   if (effect?.move_id) {
     const nextStatus = status === "accepted" ? effect.status : status === "pending" ? effect.previous_status : undefined;
     if (nextStatus) {
-      const { error: moveError } = await supabase.from("route_moves").update({ status: nextStatus, updated_at: new Date().toISOString() }).eq("id", effect.move_id);
+      const { error: moveError } = await supabase
+        .from("route_moves")
+        .update({ status: nextStatus, updated_at: new Date().toISOString() })
+        .eq("id", effect.move_id)
+        .eq("project_id", projectId);
       if (moveError) throw moveError;
     }
   }
@@ -185,13 +196,41 @@ export async function actOnActionCard(
 // `confirmed` inserts the event, its force link, and its scenario links (one per
 // proposed_scenarios entry, phase defaulted to 'precursors' — the earliest phase, since a
 // freshly discovered event has no storyline placement yet; a human can move it once Storyline
-// picks it up). `rejected`/`sent_to_signals` are a plain status update, no new rows.
-export async function reviewDiscoveredEvent(discoveryId: string, status: "confirmed" | "sent_to_signals" | "rejected", reviewedBy: string | null): Promise<void> {
+// picks it up), and remembers the new event's id on the discovery row (created_event_id,
+// 0048_monitoring_undo_and_attribution.sql) so Undo can find it again. `rejected`/
+// `sent_to_signals` are a plain status update, no new rows.
+//
+// `pending` is Undo (PROMPTS.md Prompt 1: "Every decision has an Undo"). Reversing
+// 'confirmed' deletes the event created_event_id points at — event_signal_links/
+// event_scenario_links/event_likelihood_history all cascade-delete with it, and
+// storyline_nodes.event_id is on delete set null, so nothing is left dangling. Reversing
+// 'rejected'/'sent_to_signals' just clears the review fields; there was no row to undo.
+export async function reviewDiscoveredEvent(
+  projectId: string,
+  discoveryId: string,
+  status: "confirmed" | "sent_to_signals" | "rejected" | "pending",
+  reviewedBy: string | null
+): Promise<void> {
   const supabase = createClient();
 
-  const { data: discovery, error: discoveryError } = await supabase.from("discovered_events").select("*").eq("id", discoveryId).single();
+  const { data: discovery, error: discoveryError } = await supabase.from("discovered_events").select("*").eq("id", discoveryId).eq("project_id", projectId).single();
   if (discoveryError) throw discoveryError;
 
+  if (status === "pending") {
+    if (discovery.created_event_id) {
+      const { error: deleteError } = await supabase.from("events").delete().eq("id", discovery.created_event_id).eq("project_id", projectId);
+      if (deleteError) throw deleteError;
+    }
+    const { error: undoError } = await supabase
+      .from("discovered_events")
+      .update({ dc_status: "pending", reviewed_by: null, reviewed_at: null, created_event_id: null })
+      .eq("id", discoveryId)
+      .eq("project_id", projectId);
+    if (undoError) throw undoError;
+    return;
+  }
+
+  let createdEventId: string | null = null;
   if (status === "confirmed") {
     const { data: event, error: eventError } = await supabase
       .from("events")
@@ -207,6 +246,7 @@ export async function reviewDiscoveredEvent(discoveryId: string, status: "confir
       .select("id")
       .single();
     if (eventError) throw eventError;
+    createdEventId = event.id;
 
     if (discovery.fits && discovery.proposed_force_id) {
       const { error: linkError } = await supabase.from("event_signal_links").insert({
@@ -233,14 +273,15 @@ export async function reviewDiscoveredEvent(discoveryId: string, status: "confir
 
   const { error: updateError } = await supabase
     .from("discovered_events")
-    .update({ dc_status: status, reviewed_by: reviewedBy, reviewed_at: new Date().toISOString() })
-    .eq("id", discoveryId);
+    .update({ dc_status: status, reviewed_by: reviewedBy, reviewed_at: new Date().toISOString(), created_event_id: createdEventId })
+    .eq("id", discoveryId)
+    .eq("project_id", projectId);
   if (updateError) throw updateError;
 }
 
-export async function setStrategyRevisionStatus(revisionId: string, status: "applied" | "dismissed"): Promise<void> {
+export async function setStrategyRevisionStatus(projectId: string, revisionId: string, status: "applied" | "dismissed"): Promise<void> {
   const supabase = createClient();
-  const { error } = await supabase.from("strategy_revisions").update({ status }).eq("id", revisionId);
+  const { error } = await supabase.from("strategy_revisions").update({ status }).eq("id", revisionId).eq("project_id", projectId);
   if (error) throw error;
 }
 

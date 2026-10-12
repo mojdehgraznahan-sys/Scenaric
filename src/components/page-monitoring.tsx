@@ -308,7 +308,7 @@ export function PageMonitoring() {
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className="text-[13.5px] font-medium text-brand-dark">{row.title}</span>
-                        {d !== 0 && last < 4 && good !== null && (
+                        {d !== 0 && good !== null && (
                           <span className="text-[11px] font-semibold" style={{ color: good ? "#047857" : "#B91C1C" }}>
                             {good ? "good for target" : "bad for target"}
                           </span>
@@ -322,7 +322,9 @@ export function PageMonitoring() {
                           “{latestScanChange.cite}” <span className="text-text-3">{latestScanChange.sourceTitle}, {new Date(latestScanChange.observedAt).toLocaleDateString()}</span>
                         </div>
                       ) : latestUserChange ? (
-                        <div className="mt-1.5 text-[12px] leading-[1.45] text-[#4B5563]">Updated manually.</div>
+                        <div className="mt-1.5 text-[12px] leading-[1.45] text-[#4B5563]">
+                          {latestUserChange.changedByName ? `Updated by ${latestUserChange.changedByName}.` : "Updated manually."}
+                        </div>
                       ) : null}
                       <div className="mt-1.5">
                         <DcScenarioDots scenarioIds={row.supports} targetId={target?.id ?? null} scenarios={scenariosLite} />
@@ -430,6 +432,9 @@ export function PageMonitoring() {
                       ) : (
                         <div className="flex items-center justify-between text-[12px] text-muted-foreground">
                           <span>{n.dc_status === "confirmed" ? "Added to project and tracked" : n.dc_status === "sent_to_signals" ? "Sent to Signals" : "Rejected"}</span>
+                          <Button variant="ghost" size="sm" onClick={() => reviewDiscovery(n.id, "pending", store.user.id || null)}>
+                            Undo
+                          </Button>
                         </div>
                       )}
                     </div>

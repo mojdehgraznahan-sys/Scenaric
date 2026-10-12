@@ -89,6 +89,15 @@ export function PageSettings() {
   const projectId = store.activeProjectId;
   const [team, setTeam] = React.useState<TeamMember[]>([]);
 
+  // Guards loadProjectSettings/loadIntegrations below against a project switch mid-fetch —
+  // without checking this right before committing state, a slow fetch for the project just
+  // switched AWAY from can resolve after the new project's own fetch and silently overwrite its
+  // settings/integrations with the stale project's data.
+  const projectIdRef = React.useRef(projectId);
+  React.useEffect(() => {
+    projectIdRef.current = projectId;
+  }, [projectId]);
+
   const toast = React.useCallback((message: string) => {
     const w = window as FmWindow;
     if (w.FM_toast) w.FM_toast({ message });
@@ -104,6 +113,7 @@ export function PageSettings() {
       const res = await fetch(`/api/projects/${id}/settings`);
       if (!res.ok) throw new Error(`Request failed (${res.status}).`);
       const data: ProjectSettings = await res.json();
+      if (projectIdRef.current !== id) return;
       setProjectSettings(data);
       // The effective question — same refined-overrides-raw fallback every AI prompt in the app
       // already uses (see project-settings.ts) — not the raw column alone, or an accepted
@@ -365,7 +375,9 @@ export function PageSettings() {
     try {
       const res = await fetch(`/api/projects/${id}/integrations`);
       if (!res.ok) throw new Error(`Request failed (${res.status}).`);
-      setIntegrations(await res.json());
+      const data = await res.json();
+      if (projectIdRef.current !== id) return;
+      setIntegrations(data);
     } catch (err) {
       console.error("[settings] failed to load integrations", err);
     }

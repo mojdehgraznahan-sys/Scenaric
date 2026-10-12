@@ -186,7 +186,7 @@ export function EventPickerModal({ open, onClose, scenarioId, nodes, phases, col
       const movedIds = new Set<string>();
       for (const e of toMove) {
         const nodeId = alreadyInChain.get(e.id)!;
-        await updateStorylineNode({ id: nodeId, phase: toBackendPhase(placement) });
+        await updateStorylineNode({ scenarioId, id: nodeId, phase: toBackendPhase(placement) });
         movedIds.add(nodeId);
       }
 

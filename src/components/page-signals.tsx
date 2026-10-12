@@ -71,6 +71,15 @@ export function PageSignals() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  // Guards every refreshX below against a project switch mid-fetch — without checking this
+  // right before committing state, a slow fetch for the project just switched AWAY from can
+  // resolve after the new project's own fetch and silently overwrite its state with the stale
+  // project's suggestions/proposals/insight count.
+  const activeProjectIdRef = React.useRef(store.activeProjectId);
+  React.useEffect(() => {
+    activeProjectIdRef.current = store.activeProjectId;
+  }, [store.activeProjectId]);
+
   const [filter, setFilter] = React.useState<"All" | SteepCategory>("All");
   const [openEventId, setOpenEventId] = React.useState<string | null>(null);
   const [addingEvent, setAddingEvent] = React.useState<AddEventModalPreset | null>(null);
@@ -99,13 +108,14 @@ export function PageSignals() {
   // match on immediately instead of waiting for the user to type one.
   React.useEffect(() => {
     const insightId = searchParams.get("mergeInsight");
-    if (!insightId) return;
+    const projectIdForMerge = store.activeProjectId;
+    if (!insightId || !projectIdForMerge) return;
     router.replace("/signals");
     (async () => {
       try {
-        const insight = await getInsight(insightId);
+        const insight = await getInsight(projectIdForMerge, insightId);
         if (!insight) return;
-        const source = insight.source_id ? await getSource(insight.source_id) : null;
+        const source = insight.source_id ? await getSource(projectIdForMerge, insight.source_id) : null;
         setAddingEvent({
           title: insight.text,
           body: insight.quote || insight.text,
@@ -139,8 +149,11 @@ export function PageSignals() {
   const [workingSuggestionId, setWorkingSuggestionId] = React.useState<string | null>(null);
 
   const refreshResearchSuggestions = React.useCallback(async () => {
-    if (!store.activeProjectId) return;
-    setResearchSuggestions(await listResearchSuggestions(store.activeProjectId, ["driving_forces", "find"]));
+    const projectId = store.activeProjectId;
+    if (!projectId) return;
+    const rows = await listResearchSuggestions(projectId, ["driving_forces", "find"]);
+    if (activeProjectIdRef.current !== projectId) return;
+    setResearchSuggestions(rows);
   }, [store.activeProjectId]);
 
   React.useEffect(() => {
@@ -189,8 +202,11 @@ export function PageSignals() {
   const [workingBatchId, setWorkingBatchId] = React.useState<string | null>(null);
 
   const refreshScoreProposals = React.useCallback(async () => {
-    if (!store.activeProjectId) return;
-    setScoreProposals(await listSignalScoreProposals(store.activeProjectId));
+    const projectId = store.activeProjectId;
+    if (!projectId) return;
+    const rows = await listSignalScoreProposals(projectId);
+    if (activeProjectIdRef.current !== projectId) return;
+    setScoreProposals(rows);
   }, [store.activeProjectId]);
 
   React.useEffect(() => {
@@ -266,8 +282,11 @@ export function PageSignals() {
   const [lastLeftoverIds, setLastLeftoverIds] = React.useState<string[]>([]);
 
   const refreshForceProposals = React.useCallback(async () => {
-    if (!store.activeProjectId) return;
-    setForceProposals(await listForceProposals(store.activeProjectId));
+    const projectId = store.activeProjectId;
+    if (!projectId) return;
+    const rows = await listForceProposals(projectId);
+    if (activeProjectIdRef.current !== projectId) return;
+    setForceProposals(rows);
   }, [store.activeProjectId]);
 
   /* ─────────────────────────── Knowledge Base provenance banner ─────────────────────────── */
@@ -275,9 +294,13 @@ export function PageSignals() {
   // the pending-batch insight count itself comes straight from kbForceProposals below.
   const [totalInsightCount, setTotalInsightCount] = React.useState(0);
   React.useEffect(() => {
-    if (!store.activeProjectId) return;
-    listInsights(store.activeProjectId)
-      .then((rows) => setTotalInsightCount(rows.length))
+    const projectId = store.activeProjectId;
+    if (!projectId) return;
+    listInsights(projectId)
+      .then((rows) => {
+        if (activeProjectIdRef.current !== projectId) return;
+        setTotalInsightCount(rows.length);
+      })
       .catch((err) => console.error("[signals] failed to load insight count", err));
   }, [store.activeProjectId]);
 
@@ -344,8 +367,11 @@ export function PageSignals() {
   const [busyPole, setBusyPole] = React.useState<Record<string, "a" | "b" | null>>({});
 
   const refreshEventProposals = React.useCallback(async () => {
-    if (!store.activeProjectId) return;
-    setEventProposals(await listEventProposals(store.activeProjectId));
+    const projectId = store.activeProjectId;
+    if (!projectId) return;
+    const rows = await listEventProposals(projectId);
+    if (activeProjectIdRef.current !== projectId) return;
+    setEventProposals(rows);
   }, [store.activeProjectId]);
 
   React.useEffect(() => {

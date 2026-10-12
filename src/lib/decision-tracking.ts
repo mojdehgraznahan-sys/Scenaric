@@ -42,6 +42,10 @@ export interface HistoryEntry {
   sourceTitle: string | null;
   sourceUrl: string | null;
   changedBy: "scan" | "user";
+  // Resolved display name of the person who made a 'user' change, never the raw user id —
+  // null for 'scan' rows and for pre-attribution rows (changed_by_user_id predates
+  // 0048_monitoring_undo_and_attribution.sql).
+  changedByName: string | null;
 }
 
 // Every event with at least one event_scenario_links row is "tracked". Pulls the supporting
@@ -72,12 +76,24 @@ export async function fetchTrackedEvents(supabase: SupabaseClient<Database>, pro
     supabase.from("events").select("id, title, impact, status, likelihood").in("id", eventIds),
     supabase.from("event_levers").select("event_id, lever").in("event_id", eventIds),
     supabase.from("event_signal_links").select("event_id, signal_id, side, created_at").in("event_id", eventIds).order("created_at", { ascending: true }),
-    supabase.from("event_likelihood_history").select("event_id, level, observed_at, cite, source_title, source_url, changed_by").in("event_id", eventIds),
+    supabase
+      .from("event_likelihood_history")
+      .select("event_id, level, observed_at, cite, source_title, source_url, changed_by, changed_by_user_id")
+      .in("event_id", eventIds),
   ]);
   if (eventsResult.error) throw eventsResult.error;
   if (leversResult.error) throw leversResult.error;
   if (signalLinksResult.error) throw signalLinksResult.error;
   if (historyResult.error) throw historyResult.error;
+
+  // Resolve each 'user' row's editor to a display name up front — Monitoring must never show
+  // a raw changed_by_user_id, and this is the one place the whole history list goes through.
+  const editorIds = Array.from(new Set(historyResult.data.map((r) => r.changed_by_user_id).filter((id): id is string => !!id)));
+  const { data: editorProfiles, error: editorsError } = editorIds.length
+    ? await supabase.from("profiles").select("id, name, email").in("id", editorIds)
+    : { data: [] as { id: string; name: string | null; email: string }[], error: null };
+  if (editorsError) throw editorsError;
+  const editorNameById = new Map(editorProfiles.map((p) => [p.id, p.name ?? p.email]));
 
   const leverByEvent = new Map(leversResult.data.map((l) => [l.event_id, l.lever as "influence" | "watch"]));
   const signalLinkByEvent = new Map<string, { signalId: string; side: "a" | "b" | null }>();
@@ -100,6 +116,7 @@ export async function fetchTrackedEvents(supabase: SupabaseClient<Database>, pro
       sourceTitle: row.source_title,
       sourceUrl: row.source_url,
       changedBy: row.changed_by as "scan" | "user",
+      changedByName: row.changed_by_user_id ? editorNameById.get(row.changed_by_user_id) ?? null : null,
     });
     historyByEvent.set(row.event_id, rows);
   }

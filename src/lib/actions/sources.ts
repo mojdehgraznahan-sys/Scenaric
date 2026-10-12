@@ -1,8 +1,9 @@
 "use server";
 
 // Sources CRUD — backend build order §14 item 4b Phase 1 (docs), extended for
-// audio/survey/web ingestion. RLS (supabase/migrations/0003_rls.sql) scopes every query
-// to the caller's org via project_id; no manual org/user filtering needed here.
+// audio/survey/web ingestion. RLS (supabase/migrations/0003_rls.sql) only scopes to the
+// caller's org, not to one specific project within it — every query here still needs its own
+// explicit project_id filter (see getSource/deleteSource below).
 // Storage bytes are uploaded directly from the browser (src/components/page-knowledge.tsx) against
 // the "sources" bucket (supabase/migrations/0007_sources_storage.sql) — this file only ever touches
 // the sources table row + deleting the resulting Storage object.
@@ -43,9 +44,12 @@ export async function listSources(projectId: string): Promise<SourceRow[]> {
   return data;
 }
 
-export async function getSource(id: string): Promise<SourceRow | null> {
+// RLS (0003_rls.sql) only scopes to the caller's org, not this specific project — without the
+// explicit .eq("project_id", ...) a stale source id from a sibling project in the same org
+// would otherwise return/delete the wrong project's source.
+export async function getSource(projectId: string, id: string): Promise<SourceRow | null> {
   const supabase = createClient();
-  const { data, error } = await supabase.from("sources").select("*").eq("id", id).maybeSingle();
+  const { data, error } = await supabase.from("sources").select("*").eq("id", id).eq("project_id", projectId).maybeSingle();
   if (error) throw error;
   return data;
 }
@@ -296,12 +300,12 @@ async function updateSourceStatus(id: string, status: SourceRow["status"], extra
   return data;
 }
 
-export async function deleteSource(id: string): Promise<void> {
+export async function deleteSource(projectId: string, id: string): Promise<void> {
   const supabase = createClient();
-  const { data: source, error: readError } = await supabase.from("sources").select("type, storage_url").eq("id", id).single();
+  const { data: source, error: readError } = await supabase.from("sources").select("type, storage_url").eq("id", id).eq("project_id", projectId).single();
   if (readError) throw readError;
 
-  const { error } = await supabase.from("sources").delete().eq("id", id);
+  const { error } = await supabase.from("sources").delete().eq("id", id).eq("project_id", projectId);
   if (error) throw error;
 
   if (source?.storage_url && source.type !== "web") {

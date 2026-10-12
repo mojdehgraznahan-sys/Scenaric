@@ -154,9 +154,12 @@ export async function inviteParticipant(input: {
   }
 }
 
-export async function deleteInterview(id: string): Promise<void> {
+// RLS (0003_rls.sql) only scopes to the caller's org, not this specific project — without the
+// explicit .eq("project_id", ...) a stale interview id from a sibling project in the same org
+// would otherwise silently delete the wrong project's interview.
+export async function deleteInterview(projectId: string, id: string): Promise<void> {
   const supabase = createClient();
-  const { error } = await supabase.from("interviews").delete().eq("id", id);
+  const { error } = await supabase.from("interviews").delete().eq("id", id).eq("project_id", projectId);
   if (error) throw error;
   revalidatePath("/knowledge");
 }

@@ -369,7 +369,7 @@ export function StorylineCanvas({
               return [...without.slice(0, insertAt), { ...moving, phase: prev.overPhase! }, ...without.slice(insertAt)];
             });
             showToast("Saved");
-            updateStorylineNode({ id: prev.id, phase: toBackendPhase(prev.overPhase!) }).catch((err) => {
+            updateStorylineNode({ scenarioId, id: prev.id, phase: toBackendPhase(prev.overPhase!) }).catch((err) => {
               console.error("[storyline] failed to persist phase move", err);
               showToast("Couldn't save that move", "error");
             });
@@ -408,7 +408,7 @@ export function StorylineCanvas({
               setEdges((es) => es.map((ed) => (edgeKey(ed) === prev.dragEdgeKey ? { ...ed, from: newFrom, to: newTo } : ed)));
               showToast("Connection updated");
               if (existingId) {
-                updateStorylineEdge({ id: existingId, fromNodeId: newFrom, toNodeId: newTo }).catch((err) => {
+                updateStorylineEdge({ scenarioId, id: existingId, fromNodeId: newFrom, toNodeId: newTo }).catch((err) => {
                   console.error("[storyline] failed to persist rewired connection", err);
                   showToast("Couldn't save that connection", "error");
                 });
@@ -468,7 +468,7 @@ export function StorylineCanvas({
         category: fromNode.cat,
       });
       const [, newFromEdge, newToEdge] = await Promise.all([
-        deleteStorylineEdge(oldEdgeId),
+        deleteStorylineEdge(scenarioId, oldEdgeId),
         createStorylineEdge({
           scenarioId,
           fromNodeId: edge.from,
@@ -507,6 +507,7 @@ export function StorylineCanvas({
     showToast("Saved");
     if (id) {
       updateStorylineEdge({
+        scenarioId,
         id,
         relationship: patch.relationship ? asRelationship(patch.relationship) : undefined,
         confidence: patch.confidence ? asConfidence(patch.confidence) : undefined,
@@ -522,7 +523,7 @@ export function StorylineCanvas({
     setPopover(null);
     showToast("Connection removed");
     if (id) {
-      deleteStorylineEdge(id).catch((err) => {
+      deleteStorylineEdge(scenarioId, id).catch((err) => {
         console.error("[storyline] failed to persist connection removal", err);
         showToast("Couldn't remove that connection", "error");
       });

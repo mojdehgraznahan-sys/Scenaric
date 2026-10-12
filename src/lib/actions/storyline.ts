@@ -169,6 +169,11 @@ export async function createStorylineNode(input: CreateStorylineNodeInput): Prom
 }
 
 export interface UpdateStorylineNodeInput {
+  // Verification argument, not a filter chosen for convenience: RLS (0003_rls.sql) only scopes
+  // to the caller's org, not this specific scenario/project — without checking the node's own
+  // scenario_id against this, a stale node id from a sibling scenario (in this project or
+  // another one in the same org) would otherwise silently apply the edit to the wrong node.
+  scenarioId: string;
   id: string;
   phase?: Phase;
   // Present (even as null) means "change the grounding": a real id re-derives title/body/
@@ -193,7 +198,7 @@ export async function updateStorylineNode(input: UpdateStorylineNodeInput): Prom
 
   if (input.eventId !== undefined) {
     if (input.eventId) {
-      const { data: node, error: nodeError } = await supabase.from("storyline_nodes").select("project_id").eq("id", input.id).single();
+      const { data: node, error: nodeError } = await supabase.from("storyline_nodes").select("project_id").eq("id", input.id).eq("scenario_id", input.scenarioId).single();
       if (nodeError) throw nodeError;
       const event = await loadEventForNode(supabase, node.project_id, input.eventId);
       fields.event_id = event.id;
@@ -209,7 +214,7 @@ export async function updateStorylineNode(input: UpdateStorylineNodeInput): Prom
     }
   } else if (input.signalId !== undefined) {
     if (input.signalId) {
-      const { data: node, error: nodeError } = await supabase.from("storyline_nodes").select("project_id").eq("id", input.id).single();
+      const { data: node, error: nodeError } = await supabase.from("storyline_nodes").select("project_id").eq("id", input.id).eq("scenario_id", input.scenarioId).single();
       if (nodeError) throw nodeError;
       const signal = await loadSignalForNode(supabase, node.project_id, input.signalId);
       fields.signal_id = signal.id;
@@ -229,7 +234,7 @@ export async function updateStorylineNode(input: UpdateStorylineNodeInput): Prom
     if (input.category !== undefined) fields.category = input.category;
   }
 
-  const { data, error } = await supabase.from("storyline_nodes").update(fields).eq("id", input.id).select().single();
+  const { data, error } = await supabase.from("storyline_nodes").update(fields).eq("id", input.id).eq("scenario_id", input.scenarioId).select().single();
   if (error) throw error;
   // Covers both "just got grounded in an event" and "an already event-grounded node moved to
   // a new column" (phase change) — either way the link's phase must match the node's.
@@ -241,10 +246,11 @@ export async function updateStorylineNode(input: UpdateStorylineNodeInput): Prom
 }
 
 // DELETE .../storyline/nodes/:id — storyline_edges.from_node_id/to_node_id are `on delete
-// cascade`, so dependent edges clean up automatically.
-export async function deleteStorylineNode(id: string): Promise<void> {
+// cascade`, so dependent edges clean up automatically. scenarioId is a verification argument
+// (see UpdateStorylineNodeInput's comment above) — RLS alone doesn't scope to one scenario.
+export async function deleteStorylineNode(scenarioId: string, id: string): Promise<void> {
   const supabase = createClient();
-  const { error } = await supabase.from("storyline_nodes").delete().eq("id", id);
+  const { error } = await supabase.from("storyline_nodes").delete().eq("id", id).eq("scenario_id", scenarioId);
   if (error) throw error;
   revalidatePath("/storyline");
 }
@@ -302,6 +308,8 @@ export async function createStorylineEdge(input: CreateStorylineEdgeInput): Prom
 }
 
 export interface UpdateStorylineEdgeInput {
+  // Verification argument — see UpdateStorylineNodeInput's comment above; same reasoning.
+  scenarioId: string;
   id: string;
   fromNodeId?: string;
   toNodeId?: string;
@@ -321,6 +329,7 @@ export async function updateStorylineEdge(input: UpdateStorylineEdgeInput): Prom
       .from("storyline_edges")
       .select("from_node_id, to_node_id, scenario_id")
       .eq("id", input.id)
+      .eq("scenario_id", input.scenarioId)
       .single();
     if (edgeError) throw edgeError;
     const fromId = input.fromNodeId ?? edge.from_node_id;
@@ -330,16 +339,17 @@ export async function updateStorylineEdge(input: UpdateStorylineEdgeInput): Prom
     fields.to_node_id = toId;
   }
 
-  const { data, error } = await supabase.from("storyline_edges").update(fields).eq("id", input.id).select().single();
+  const { data, error } = await supabase.from("storyline_edges").update(fields).eq("id", input.id).eq("scenario_id", input.scenarioId).select().single();
   if (error) throw error;
   revalidatePath("/storyline");
   return data;
 }
 
-// DELETE .../storyline/edges/:id
-export async function deleteStorylineEdge(id: string): Promise<void> {
+// DELETE .../storyline/edges/:id — scenarioId is a verification argument (see
+// UpdateStorylineNodeInput's comment above).
+export async function deleteStorylineEdge(scenarioId: string, id: string): Promise<void> {
   const supabase = createClient();
-  const { error } = await supabase.from("storyline_edges").delete().eq("id", id);
+  const { error } = await supabase.from("storyline_edges").delete().eq("id", id).eq("scenario_id", scenarioId);
   if (error) throw error;
   revalidatePath("/storyline");
 }

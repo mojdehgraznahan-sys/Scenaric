@@ -234,10 +234,14 @@ export async function updateMatrixDotPosition(projectId: string, signalId: strin
   );
   if (dotError) throw dotError;
 
+  // .eq("project_id", ...) here too — RLS (0003_rls.sql) only scopes to the caller's org, not
+  // this specific project, so without it a stale signalId from a sibling project in the same
+  // org would silently rewrite that other project's signal's impact/uncertainty.
   const { error: signalError } = await supabase
     .from("signals")
     .update({ user_impact: impact, user_uncertainty: uncertainty, impact, uncertainty })
-    .eq("id", signalId);
+    .eq("id", signalId)
+    .eq("project_id", projectId);
   if (signalError) throw signalError;
 
   revalidatePath("/matrix");

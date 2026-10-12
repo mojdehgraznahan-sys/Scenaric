@@ -118,14 +118,26 @@ export function PageKnowledge() {
   const [inviteSubmitting, setInviteSubmitting] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
+  // Guards against a project switch that happens while this fetch is in flight: without
+  // checking projectIdRef right before committing state, a slow fetch for the project the user
+  // just switched AWAY from can resolve after the new project's own fetch and silently
+  // overwrite its state with the stale project's sources/insights/interviews/suggestions —
+  // the exact "Knowledge Base shows the other project's data" symptom.
+  const projectIdRef = React.useRef(projectId);
+  React.useEffect(() => {
+    projectIdRef.current = projectId;
+  }, [projectId]);
+
   const refresh = React.useCallback(async () => {
     if (!projectId) return;
+    const requestedFor = projectId;
     const [nextSources, nextInsights, nextInterviews, nextSuggestions] = await Promise.all([
-      listSources(projectId),
-      listInsights(projectId),
-      listInterviews(projectId),
-      listResearchSuggestions(projectId, "key_forces"),
+      listSources(requestedFor),
+      listInsights(requestedFor),
+      listInterviews(requestedFor),
+      listResearchSuggestions(requestedFor, "key_forces"),
     ]);
+    if (projectIdRef.current !== requestedFor) return;
     setSources(nextSources);
     setInsights(nextInsights);
     setInterviews(nextInterviews);
@@ -193,12 +205,14 @@ export function PageKnowledge() {
   };
 
   const onDeleteSource = async (id: string) => {
-    await deleteSource(id);
+    if (!projectId) return;
+    await deleteSource(projectId, id);
     await refresh();
   };
 
   const onDeleteInsight = async (id: string) => {
-    await deleteInsight(id);
+    if (!projectId) return;
+    await deleteInsight(projectId, id);
     await refresh();
   };
 

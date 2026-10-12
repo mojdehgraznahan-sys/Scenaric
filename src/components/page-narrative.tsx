@@ -99,10 +99,10 @@ export function PageNarrative() {
   };
 
   const saveEdit = async () => {
-    if (!current) return;
+    if (!current || !store.activeProjectId) return;
     setSaving(true);
     try {
-      await updateScenarioNarrative(current.id, { narrative: draftNarrative, summary: draftSummary });
+      await updateScenarioNarrative(store.activeProjectId, current.id, { narrative: draftNarrative, summary: draftSummary });
       if (store.activeProjectId) await store.refreshScenarios(store.activeProjectId);
       setEditing(false);
       toast("Narrative saved");

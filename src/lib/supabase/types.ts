@@ -1441,6 +1441,7 @@ export interface Database {
           source_url: string | null;
           cite: string | null;
           changed_by: "scan" | "user";
+          changed_by_user_id: string | null;
           created_at: string;
         };
         Insert: {
@@ -1454,6 +1455,7 @@ export interface Database {
           source_url?: string | null;
           cite?: string | null;
           changed_by: "scan" | "user";
+          changed_by_user_id?: string | null;
           created_at?: string;
         };
         Update: {
@@ -1467,6 +1469,7 @@ export interface Database {
           source_url?: string | null;
           cite?: string | null;
           changed_by?: "scan" | "user";
+          changed_by_user_id?: string | null;
           created_at?: string;
         };
         Relationships: [];
@@ -1541,6 +1544,7 @@ export interface Database {
           dc_status: "pending" | "confirmed" | "sent_to_signals" | "rejected";
           reviewed_by: string | null;
           reviewed_at: string | null;
+          created_event_id: string | null;
           created_at: string;
         };
         Insert: {
@@ -1561,6 +1565,7 @@ export interface Database {
           dc_status?: "pending" | "confirmed" | "sent_to_signals" | "rejected";
           reviewed_by?: string | null;
           reviewed_at?: string | null;
+          created_event_id?: string | null;
           created_at?: string;
         };
         Update: {
@@ -1581,6 +1586,7 @@ export interface Database {
           dc_status?: "pending" | "confirmed" | "sent_to_signals" | "rejected";
           reviewed_by?: string | null;
           reviewed_at?: string | null;
+          created_event_id?: string | null;
           created_at?: string;
         };
         Relationships: [];

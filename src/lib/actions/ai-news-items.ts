@@ -431,7 +431,7 @@ export async function addNewsItemToSignals(projectId: string, newsItemId: string
 
   const match = await findMatchingPossibleEvent(projectId, { title: newsItem.title, summary: newsItem.summary });
   if (match.matched && match.eventId) {
-    const promoted = await promoteEventToObserved(match.eventId, {
+    const promoted = await promoteEventToObserved(projectId, match.eventId, {
       occurredOn: newsItem.published_at ? newsItem.published_at.slice(0, 10) : new Date().toISOString().slice(0, 10),
       source: newsItem.source,
     });

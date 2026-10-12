@@ -52,6 +52,15 @@ export function PageStrategy() {
   const [briefingOpen, setBriefingOpen] = React.useState(false);
   const [showDone, setShowDone] = React.useState(false);
 
+  // Guards refreshOptions and the recommendation fetch below against a project switch mid-fetch
+  // — without checking this right before committing state, a slow fetch for the project just
+  // switched AWAY from can resolve after the new project's own fetch and silently overwrite its
+  // Wind tunnel options/AI recommendation with the stale project's data.
+  const projectIdRef = React.useRef(projectId);
+  React.useEffect(() => {
+    projectIdRef.current = projectId;
+  }, [projectId]);
+
   // Kept as a no-op read (arrives as /strategy?scenarioId={id} from Narrative) — same
   // convention as the page this replaces; pre-filtering the wind tunnel by it is out of scope.
   const searchParams = useSearchParams();
@@ -66,11 +75,13 @@ export function PageStrategy() {
   const refreshOptions = React.useCallback(async (id: string) => {
     setOptionsLoading(true);
     try {
-      setOptions(await listStrategicOptions(id));
+      const rows = await listStrategicOptions(id);
+      if (projectIdRef.current !== id) return;
+      setOptions(rows);
     } catch (err) {
       console.error("[strategy] failed to load strategic options", err);
     } finally {
-      setOptionsLoading(false);
+      if (projectIdRef.current === id) setOptionsLoading(false);
     }
   }, []);
   React.useEffect(() => {
@@ -155,11 +166,16 @@ export function PageStrategy() {
     setRecommendationLoading(true);
     fetch(`/api/projects/${projectId}/strategy/recommendation`)
       .then((res) => res.json())
-      .then((d: { sufficientEvidence: boolean; rationale: string | null; primaryOptionId: string | null; pairingOptionId: string | null }) =>
-        setRecommendation(d.sufficientEvidence && d.rationale ? { rationale: d.rationale, primaryOptionId: d.primaryOptionId, pairingOptionId: d.pairingOptionId } : null)
-      )
-      .catch(() => setRecommendation(null))
-      .finally(() => setRecommendationLoading(false));
+      .then((d: { sufficientEvidence: boolean; rationale: string | null; primaryOptionId: string | null; pairingOptionId: string | null }) => {
+        if (projectIdRef.current !== projectId) return;
+        setRecommendation(d.sufficientEvidence && d.rationale ? { rationale: d.rationale, primaryOptionId: d.primaryOptionId, pairingOptionId: d.pairingOptionId } : null);
+      })
+      .catch(() => {
+        if (projectIdRef.current === projectId) setRecommendation(null);
+      })
+      .finally(() => {
+        if (projectIdRef.current === projectId) setRecommendationLoading(false);
+      });
   }, [projectId]);
 
   // Draft route modal state — the draft itself lives only here until confirmed (see

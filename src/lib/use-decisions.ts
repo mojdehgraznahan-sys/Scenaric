@@ -47,7 +47,7 @@ export interface UseDecisionsResult {
     userId: string | null,
     options?: { ownerId?: string | null; dueOn?: string | null }
   ) => Promise<void>;
-  reviewDiscovery: (discoveryId: string, status: "confirmed" | "sent_to_signals" | "rejected", userId: string | null) => Promise<void>;
+  reviewDiscovery: (discoveryId: string, status: "confirmed" | "sent_to_signals" | "rejected" | "pending", userId: string | null) => Promise<void>;
   setRevision: (revisionId: string, status: "applied" | "dismissed") => Promise<void>;
   createRoute: (scenarioId: string, moves: RouteMoveDraft[]) => Promise<void>;
 }
@@ -55,15 +55,24 @@ export interface UseDecisionsResult {
 export function useDecisions(projectId: string | null): UseDecisionsResult {
   const [data, setData] = React.useState<DecisionsData | null>(null);
   const [loading, setLoading] = React.useState(false);
+  // Guards against a project switch while a fetch is in flight — without checking this right
+  // before committing state, a slow fetch for the project just switched AWAY from can resolve
+  // after the new project's own fetch and silently overwrite its Monitoring/Strategy/Home data.
+  const projectIdRef = React.useRef(projectId);
+  React.useEffect(() => {
+    projectIdRef.current = projectId;
+  }, [projectId]);
 
   const refreshFor = React.useCallback(async (id: string) => {
     setLoading(true);
     try {
-      setData(await getDecisionsData(id));
+      const result = await getDecisionsData(id);
+      if (projectIdRef.current !== id) return;
+      setData(result);
     } catch (err) {
       console.error("[use-decisions] failed to load decisions data", err);
     } finally {
-      setLoading(false);
+      if (projectIdRef.current === id) setLoading(false);
     }
   }, []);
 
@@ -106,7 +115,7 @@ export function useDecisions(projectId: string | null): UseDecisionsResult {
       options?: { ownerId?: string | null; dueOn?: string | null }
     ) => {
       if (!projectId) return;
-      await actOnActionCard(cardId, status, userId, options);
+      await actOnActionCard(projectId, cardId, status, userId, options);
       dispatchUpdated(projectId);
     },
     [projectId]
@@ -122,22 +131,26 @@ export function useDecisions(projectId: string | null): UseDecisionsResult {
   );
 
   const reviewDiscovery = React.useCallback(
-    async (discoveryId: string, status: "confirmed" | "sent_to_signals" | "rejected", userId: string | null) => {
+    async (discoveryId: string, status: "confirmed" | "sent_to_signals" | "rejected" | "pending", userId: string | null) => {
       if (!projectId) return;
-      await reviewDiscoveredEvent(discoveryId, status, userId);
+      // Confirming inserts a real event; undoing a confirmed discovery deletes it again
+      // (reviewDiscoveredEvent). Either way the Signals page's own store needs to hear about
+      // it via the same fm:events-updated convention (src/lib/store.tsx) to refresh without a
+      // reload — checked against the pre-call status since "pending" alone doesn't say which.
+      const wasConfirmed = data?.inbox.find((d) => d.id === discoveryId)?.dc_status === "confirmed";
+      await reviewDiscoveredEvent(projectId, discoveryId, status, userId);
       dispatchUpdated(projectId);
-      // A confirmed discovery inserts a real event — the Signals page's own store listens for
-      // this same event convention (src/lib/store.tsx's fm:events-updated handler) to pick it
-      // up without a reload.
-      if (status === "confirmed") window.dispatchEvent(new CustomEvent("fm:events-updated", { detail: { projectId } }));
+      if (status === "confirmed" || (status === "pending" && wasConfirmed)) {
+        window.dispatchEvent(new CustomEvent("fm:events-updated", { detail: { projectId } }));
+      }
     },
-    [projectId]
+    [projectId, data]
   );
 
   const setRevision = React.useCallback(
     async (revisionId: string, status: "applied" | "dismissed") => {
       if (!projectId) return;
-      await setStrategyRevisionStatus(revisionId, status);
+      await setStrategyRevisionStatus(projectId, revisionId, status);
       dispatchUpdated(projectId);
     },
     [projectId]

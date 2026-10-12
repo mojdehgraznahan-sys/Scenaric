@@ -6,12 +6,43 @@
 // signal_insight_links join).
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/types";
 import type { SteepCategory } from "./signals";
+import { likelihoodTextToLevel } from "@/lib/decision-tracking";
 
 export type EventRow = Database["public"]["Tables"]["events"]["Row"];
 export type EventLink = { signalId: string; side: "a" | "b" };
 export type EventWithLinks = EventRow & { links: EventLink[] };
+
+// Monitoring/Strategy (decision-tracking.ts's fetchTrackedEvents) read an event's current
+// likelihood from event_likelihood_history, not events.status/likelihood directly, once any
+// history row exists (almost immediately — see seedMissingHistory). Without this, a Signals
+// edit to a tracked event's likelihood/status would change the event row but never reach the
+// decision layer. Called after every write that can change the resolved level; a no-op when
+// the level didn't actually move.
+async function recordLikelihoodChangeIfAny(
+  supabase: SupabaseClient<Database>,
+  before: { status: "observed" | "possible"; likelihood: "Low" | "Medium" | "High" | null },
+  after: { project_id: string; id: string; status: "observed" | "possible"; likelihood: "Low" | "Medium" | "High" | null }
+): Promise<void> {
+  const beforeLevel = likelihoodTextToLevel(before.status, before.likelihood);
+  const afterLevel = likelihoodTextToLevel(after.status, after.likelihood);
+  if (beforeLevel === afterLevel) return;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { error } = await supabase.from("event_likelihood_history").insert({
+    project_id: after.project_id,
+    event_id: after.id,
+    level: afterLevel,
+    changed_by: "user",
+    changed_by_user_id: user?.id ?? null,
+    cite: "Updated manually in Signals.",
+  });
+  if (error) throw error;
+}
 
 export async function listEventsWithLinks(projectId: string): Promise<EventWithLinks[]> {
   const supabase = createClient();
@@ -92,7 +123,13 @@ export async function createEvent(input: {
   return { ...data, links: input.links };
 }
 
+// RLS (0003_rls.sql) only scopes to the caller's org, not this specific project — a stale
+// event id from a sibling project in the same org would otherwise silently update/delete the
+// wrong project's event. The explicit .eq("project_id", ...) on both the pre-fetch and the
+// update (plus .select().single(), which throws when 0 rows match) is what actually enforces
+// "this id belongs to this project."
 export async function updateEvent(input: {
+  projectId: string;
   id: string;
   title?: string;
   description?: string;
@@ -107,7 +144,11 @@ export async function updateEvent(input: {
   source?: string | null;
 }): Promise<EventRow> {
   const supabase = createClient();
-  const { id, isWildcard, occurredOn, windowLabel, ...rest } = input;
+  const { id, projectId, isWildcard, occurredOn, windowLabel, ...rest } = input;
+
+  const { data: before, error: beforeError } = await supabase.from("events").select("status, likelihood").eq("id", id).eq("project_id", projectId).single();
+  if (beforeError) throw beforeError;
+
   const { data, error } = await supabase
     .from("events")
     .update({
@@ -117,16 +158,20 @@ export async function updateEvent(input: {
       ...(windowLabel !== undefined ? { window_label: windowLabel } : {}),
     })
     .eq("id", id)
+    .eq("project_id", projectId)
     .select()
     .single();
   if (error) throw error;
+
+  await recordLikelihoodChangeIfAny(supabase, before, data);
+
   revalidatePath("/signals");
   return data;
 }
 
-export async function deleteEvent(id: string): Promise<void> {
+export async function deleteEvent(projectId: string, id: string): Promise<void> {
   const supabase = createClient();
-  const { error } = await supabase.from("events").delete().eq("id", id);
+  const { error } = await supabase.from("events").delete().eq("id", id).eq("project_id", projectId).select("id").single();
   if (error) throw error;
   revalidatePath("/signals");
 }
@@ -146,16 +191,25 @@ export async function linkEvent(input: { projectId: string; eventId: string; sig
   revalidatePath("/signals");
 }
 
-export async function unlinkEvent(eventId: string, signalId: string): Promise<void> {
+export async function unlinkEvent(projectId: string, eventId: string, signalId: string): Promise<void> {
   const supabase = createClient();
-  const { error } = await supabase.from("event_signal_links").delete().eq("event_id", eventId).eq("signal_id", signalId);
+  const { error } = await supabase
+    .from("event_signal_links")
+    .delete()
+    .eq("event_id", eventId)
+    .eq("signal_id", signalId)
+    .eq("project_id", projectId);
   if (error) throw error;
   revalidatePath("/signals");
 }
 
 // Used by both manual editing and the news-match promotion flow (ai-news-items.ts).
-export async function promoteEventToObserved(eventId: string, input: { occurredOn: string | null; source?: string | null }): Promise<EventRow> {
+export async function promoteEventToObserved(projectId: string, eventId: string, input: { occurredOn: string | null; source?: string | null }): Promise<EventRow> {
   const supabase = createClient();
+
+  const { data: before, error: beforeError } = await supabase.from("events").select("status, likelihood").eq("id", eventId).eq("project_id", projectId).single();
+  if (beforeError) throw beforeError;
+
   const { data, error } = await supabase
     .from("events")
     .update({
@@ -164,9 +218,13 @@ export async function promoteEventToObserved(eventId: string, input: { occurredO
       ...(input.source ? { source: input.source } : {}),
     })
     .eq("id", eventId)
+    .eq("project_id", projectId)
     .select()
     .single();
   if (error) throw error;
+
+  await recordLikelihoodChangeIfAny(supabase, before, data);
+
   revalidatePath("/signals");
   return data;
 }

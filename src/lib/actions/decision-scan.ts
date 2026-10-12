@@ -95,6 +95,7 @@ export async function runDecisionScanForProject(projectId: string, batchId: stri
         sourceTitle: source?.title ?? null,
         sourceUrl: source?.url ?? null,
         changedBy: "scan",
+        changedByName: null,
       });
       changes += 1;
     }

@@ -19,16 +19,21 @@ export async function listInsights(projectId: string): Promise<InsightRow[]> {
   return data;
 }
 
-export async function getInsight(id: string): Promise<InsightRow | null> {
+// RLS (0003_rls.sql) only scopes to the caller's org, not this specific project — without the
+// explicit .eq("project_id", ...) a stale insight id from a sibling project in the same org
+// would otherwise return/delete the wrong project's insight (getInsight feeds page-signals.tsx's
+// mergeInsight deep link, so this doubles as the fix for that leaking another project's text
+// into the current one's Add Event modal).
+export async function getInsight(projectId: string, id: string): Promise<InsightRow | null> {
   const supabase = createClient();
-  const { data, error } = await supabase.from("insights").select("*").eq("id", id).maybeSingle();
+  const { data, error } = await supabase.from("insights").select("*").eq("id", id).eq("project_id", projectId).maybeSingle();
   if (error) throw error;
   return data;
 }
 
-export async function deleteInsight(id: string): Promise<void> {
+export async function deleteInsight(projectId: string, id: string): Promise<void> {
   const supabase = createClient();
-  const { error } = await supabase.from("insights").delete().eq("id", id);
+  const { error } = await supabase.from("insights").delete().eq("id", id).eq("project_id", projectId).select("id").single();
   if (error) throw error;
   revalidatePath("/knowledge");
 }
