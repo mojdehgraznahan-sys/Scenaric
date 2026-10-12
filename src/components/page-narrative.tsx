@@ -13,6 +13,8 @@ import { useNavigate } from "@/lib/use-navigate";
 import { ScenarioContextHeader } from "@/components/storyline/scenario-context-header";
 import { updateScenarioNarrative } from "@/lib/actions/scenarios";
 import { listImplications, type ImplicationRow } from "@/lib/actions/implications";
+import { listScenarioMonitoredEvents, type MonitoredEventRow } from "@/lib/actions/event-monitoring";
+import { MonitorEventsModal } from "@/components/narrative/monitor-events-modal";
 
 const CATEGORY_LABEL: Record<string, string> = {
   capital: "Capital allocation",
@@ -62,7 +64,8 @@ export function PageNarrative() {
   const [generatingImplications, setGeneratingImplications] = React.useState(false);
   const [implicationsGap, setImplicationsGap] = React.useState<string | null>(null);
 
-  const [generatingIndicators, setGeneratingIndicators] = React.useState(false);
+  const [monitoredEvents, setMonitoredEvents] = React.useState<MonitoredEventRow[]>([]);
+  const [monitorModalOpen, setMonitorModalOpen] = React.useState(false);
 
   // Switching scenarios mid-edit would otherwise save a draft under the wrong scenario, or
   // leave a stale "insufficient evidence" banner showing for a scenario that's not thin —
@@ -212,32 +215,31 @@ export function PageNarrative() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id, current?.narrative]);
 
-  // "Track indicators" — Step 8 (Build Plan §11), generates + persists real indicators for
-  // this scenario, then hands off to Monitoring pre-filtered to them. Not the same feature
-  // as Signpost (ai-grounding.ts) — see SCHWARTZ_METHODOLOGY_SKILL.md's "Signpost" section.
-  const onTrackIndicators = async () => {
-    if (!current || !store.activeProjectId) return;
-    setGeneratingIndicators(true);
-    try {
-      const res = await fetch(`/api/projects/${store.activeProjectId}/indicators/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scenarioId: current.id }),
-      });
-      if (!res.ok) throw new Error(`Generate failed (${res.status}).`);
-      const result: { sufficientEvidence: boolean; gap?: string | null; count: number } = await res.json();
-      if (!result.sufficientEvidence) {
-        toast(result.gap || "Couldn't generate indicators for this scenario.");
-        return;
-      }
-      toast(`Generated ${result.count} indicator(s)`);
-      navigate(`/monitoring?scenarioId=${current.id}`);
-    } catch (err) {
-      console.error("[narrative] indicators generate failed", err);
-      toast("Couldn't generate indicators right now — try again.");
-    } finally {
-      setGeneratingIndicators(false);
-    }
+  // "Monitor events" — Step 8 (Build Plan §11), replacing the old indicator-generation flow:
+  // the user picks which of the project's existing events are worth tracking for this scenario
+  // (event_scenario_links), then hands off to Monitoring. Not the same feature as Signpost
+  // (ai-grounding.ts) — see SCHWARTZ_METHODOLOGY_SKILL.md's "Signpost" section.
+  React.useEffect(() => {
+    if (!current) return;
+    let cancelled = false;
+    listScenarioMonitoredEvents(current.id)
+      .then((rows) => {
+        if (!cancelled) setMonitoredEvents(rows);
+      })
+      .catch((err) => console.error("[narrative] failed to load monitored events", err));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current?.id]);
+
+  const onMonitorEventsSaved = (addedEventIds: string[]) => {
+    if (!current) return;
+    listScenarioMonitoredEvents(current.id)
+      .then(setMonitoredEvents)
+      .catch((err) => console.error("[narrative] failed to refresh monitored events", err));
+    toast(addedEventIds.length === 1 ? "1 event added to monitoring" : addedEventIds.length > 1 ? `${addedEventIds.length} events added to monitoring` : "Monitoring updated");
+    navigate(addedEventIds.length === 1 ? `/monitoring?event=${addedEventIds[0]}` : "/monitoring");
   };
 
   // Empty state — no scenarios built yet.
@@ -415,8 +417,8 @@ export function PageNarrative() {
             <Button variant="primary" onClick={() => navigate(`/strategy?scenarioId=${current.id}`)}>
               See strategic options <Icons.ArrowRight size={14} />
             </Button>
-            <Button variant="ghost" onClick={onTrackIndicators} disabled={generatingIndicators}>
-              {generatingIndicators && <Icons.Refresh size={12} className="animate-spin" />} Track indicators
+            <Button variant="ghost" onClick={() => setMonitorModalOpen(true)}>
+              <Icons.Eye size={12} /> Monitor events{monitoredEvents.length > 0 ? ` (${monitoredEvents.length})` : ""}
             </Button>
           </div>
         </div>
@@ -446,6 +448,17 @@ export function PageNarrative() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {current && store.activeProjectId && (
+        <MonitorEventsModal
+          open={monitorModalOpen}
+          onClose={() => setMonitorModalOpen(false)}
+          projectId={store.activeProjectId}
+          scenarioId={current.id}
+          initiallyMonitored={monitoredEvents}
+          onSaved={onMonitorEventsSaved}
+        />
+      )}
     </div>
   );
 }

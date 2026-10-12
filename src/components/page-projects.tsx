@@ -20,7 +20,7 @@ import { useStore } from "@/lib/store";
 import { useNavigate } from "@/lib/use-navigate";
 import type { ProjectSummary } from "@/lib/types";
 
-const STEP_LABELS = ["Focal question", "Driving forces", "Rank forces", "Scenarios", "Narrative", "Implications", "Indicators", "Strategy"];
+const STEP_LABELS = ["Focal question", "Driving forces", "Rank forces", "Scenarios", "Narrative", "Implications", "Monitoring", "Strategy"];
 const TOTAL_STEPS = STEP_LABELS.length;
 
 function fmtRelative(iso: string) {

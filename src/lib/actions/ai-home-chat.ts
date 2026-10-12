@@ -4,9 +4,11 @@
 // context="home" branch, ScenarioChatPanel), never the canned-reply demo. Same
 // read-then-JSON-input pattern as askSignalsChat (ai-signals.ts) / askMonitoringChat
 // (ai-monitoring-chat.ts), just grounded across all four project entities at once
-// (signals/scenarios/indicators/news) rather than one page's own single entity type.
+// (signals/scenarios/tracked events/news) rather than one page's own single entity type.
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
+import { fetchTrackedEvents } from "@/lib/decision-tracking";
+import { LIKELIHOOD_LEVELS } from "@/lib/decision-model";
 import { z } from "zod";
 
 const HomeChatSchema = z.object({
@@ -19,20 +21,20 @@ const HomeChatSchema = z.object({
 });
 
 const HOME_CHAT_TASK_PROMPT = `Task: Answer the user's question about their scenario-planning
-project as a whole — grounded strictly in the signals, scenarios, indicators, and news items
-already in this project. This is a project-wide variant of the other pages' own scoped chats
-(Signals/Monitoring/Strategy); answer broadly across all four entity types as relevant to the
-question.
+project as a whole — grounded strictly in the signals, scenarios, tracked events, and news
+items already in this project. This is a project-wide variant of the other pages' own scoped
+chats (Signals/Monitoring/Strategy); answer broadly across all four entity types as relevant to
+the question.
 
 Input: { question: string, focal_question: string,
          signals: [{id, title, category, impact, uncertainty}],
          scenarios: [{id, name, tagline}],
-         indicators: [{id, name, status}],
+         tracked_events: [{id, title, current_level}],
          news_items: [{id, title, summary, impact}] }
 
 Rules:
-- Answer ONLY using the supplied data. Never invent a signal, scenario, indicator, news item,
-  statistic, or fact not traceable to one of them.
+- Answer ONLY using the supplied data. Never invent a signal, scenario, tracked event, news
+  item, statistic, or fact not traceable to one of them.
 - If you reason beyond the supplied data (general knowledge, extrapolation, an inference not
   directly stated in any item), put that reasoning in \`inference\` — never inline it in
   \`answer\` as if it were sourced from the project's own data. Leave inference null when the
@@ -40,7 +42,7 @@ Rules:
 - If the question has no supporting evidence in the given data, say so plainly rather than
   fabricating an answer.
 - Keep \`answer\` under ~120 words unless the user explicitly asks for more depth.
-- \`cites\` lists the real ids (from signals/scenarios/indicators/news_items) the answer
+- \`cites\` lists the real ids (from signals/scenarios/tracked_events/news_items) the answer
   actually relied on.
 
 Output schema: { answer: string, cites: string[], inference: string | null }`;
@@ -63,16 +65,14 @@ export async function askHomeChat(input: { projectId: string; question: string }
   if (projectError) throw projectError;
   const focalQuestion = project.refined_focal_question ?? project.focal_question;
 
-  const [{ data: signals, error: signalsError }, { data: scenarios, error: scenariosError }, { data: indicators, error: indicatorsError }, { data: newsItems, error: newsError }] =
-    await Promise.all([
-      supabase.from("signals").select("id, title, category, impact, uncertainty").eq("project_id", input.projectId),
-      supabase.from("scenarios").select("id, name, tagline").eq("project_id", input.projectId).eq("is_archived", false),
-      supabase.from("indicators").select("id, name, status").eq("project_id", input.projectId),
-      supabase.from("news_items").select("id, title, summary, impact").eq("project_id", input.projectId).order("published_at", { ascending: false }).limit(20),
-    ]);
+  const [{ data: signals, error: signalsError }, { data: scenarios, error: scenariosError }, trackedEvents, { data: newsItems, error: newsError }] = await Promise.all([
+    supabase.from("signals").select("id, title, category, impact, uncertainty").eq("project_id", input.projectId),
+    supabase.from("scenarios").select("id, name, tagline").eq("project_id", input.projectId).eq("is_archived", false),
+    fetchTrackedEvents(supabase, input.projectId),
+    supabase.from("news_items").select("id, title, summary, impact").eq("project_id", input.projectId).order("published_at", { ascending: false }).limit(20),
+  ]);
   if (signalsError) throw signalsError;
   if (scenariosError) throw scenariosError;
-  if (indicatorsError) throw indicatorsError;
   if (newsError) throw newsError;
 
   const output = await runStructured({
@@ -84,7 +84,7 @@ export async function askHomeChat(input: { projectId: string; question: string }
       focal_question: focalQuestion,
       signals,
       scenarios,
-      indicators,
+      tracked_events: trackedEvents.map((e) => ({ id: e.eventId, title: e.title, current_level: LIKELIHOOD_LEVELS[e.currentLevel] })),
       news_items: newsItems,
     },
     schema: HomeChatSchema,

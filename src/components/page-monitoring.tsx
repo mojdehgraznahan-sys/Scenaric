@@ -49,6 +49,14 @@ export function PageMonitoring() {
   const [filter, setFilter] = React.useState<Filter>("All");
   const [briefingOpen, setBriefingOpen] = React.useState(false);
 
+  // Ask AI's "Explain this event's likelihood" scoping — click a tracked-event row to select
+  // it (toggle: clicking the same row again deselects), same contract store.tsx's
+  // monitoringAskAiContext comment already describes but was never actually wired up here.
+  const selectEventForAskAi = (eventId: string, title: string) => {
+    const current = store.monitoringAskAiContext?.selectedEvent;
+    store.setMonitoringAskAiContext(current?.id === eventId ? { selectedEvent: null } : { selectedEvent: { id: eventId, title } });
+  };
+
   // Deep link from Home's charts (design/2026-10-05/04-home-ceo-view/PROMPTS.md Prompt 2:
   // "Each chart element links to its source event in Monitoring,
   // /app/monitoring?event={id}") — scrolls to and briefly highlights that event's row once
@@ -280,14 +288,21 @@ export function PageMonitoring() {
                 const good = target ? (helps(row.eventId) ? d > 0 : d < 0) : null;
                 const latestScanChange = [...row.history].filter((h) => h.changedBy === "scan").sort((a, b) => b.observedAt.localeCompare(a.observedAt))[0];
                 const latestUserChange = !latestScanChange ? [...row.history].sort((a, b) => b.observedAt.localeCompare(a.observedAt))[0] : null;
+                const selectedForAskAi = store.monitoringAskAiContext?.selectedEvent?.id === row.eventId;
                 return (
                   <div
                     key={row.eventId}
                     id={`dc-event-${row.eventId}`}
-                    className={cn("grid gap-x-3.5 gap-y-1.5 rounded-md py-3 transition-colors", i > 0 && "border-t border-[#F3F4F6]")}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => selectEventForAskAi(row.eventId, row.title)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") selectEventForAskAi(row.eventId, row.title);
+                    }}
+                    className={cn("grid cursor-pointer gap-x-3.5 gap-y-1.5 rounded-md py-3 transition-colors", i > 0 && "border-t border-[#F3F4F6]")}
                     style={{
                       gridTemplateColumns: "minmax(0,1fr) auto",
-                      ...(row.eventId === highlightEventId ? { background: "#FFF7ED", boxShadow: "0 0 0 1px #FED7AA" } : {}),
+                      ...(row.eventId === highlightEventId || selectedForAskAi ? { background: "#FFF7ED", boxShadow: "0 0 0 1px #FED7AA" } : {}),
                     }}
                   >
                     <div className="min-w-0">

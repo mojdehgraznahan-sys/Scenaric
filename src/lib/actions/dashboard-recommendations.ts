@@ -84,9 +84,12 @@ export async function getNextGate(projectId: string, stepsComplete: number): Pro
       return { term, label: STEP_LABELS[6], route: STEP_ROUTES[6], current: count ?? 0, required: 12 };
     }
     case 8: {
-      const { count, error } = await supabase.from("indicators").select("id", { count: "exact", head: true }).eq("project_id", projectId);
+      // Same condition compute_steps_complete() itself uses (0047_step8_gate_tracked_events.sql),
+      // verbatim: distinct events with at least one event_scenario_links row for the project.
+      const { data, error } = await supabase.from("event_scenario_links").select("event_id").eq("project_id", projectId);
       if (error) throw error;
-      return { term, label: STEP_LABELS[7], route: STEP_ROUTES[7], current: count ?? 0, required: 12 };
+      const current = new Set(data.map((l) => l.event_id)).size;
+      return { term, label: STEP_LABELS[7], route: STEP_ROUTES[7], current, required: 12 };
     }
     case 9: {
       const { count, error } = await supabase.from("strategic_options").select("id", { count: "exact", head: true }).eq("project_id", projectId);
@@ -99,28 +102,30 @@ export async function getNextGate(projectId: string, stepsComplete: number): Pro
 }
 
 export interface MonitorCandidate {
-  kind: "alerts" | "no_indicators_yet" | "all_on_track";
-  indicatorsTotal: number;
-  indicatorsInAlert: number;
+  kind: "alerts" | "no_events_yet" | "all_quiet";
+  eventsTotal: number;
+  pendingAlerts: number;
 }
 
-// Takes indicatorsTotal from getProjectDashboard's already-fetched KPI (kpis.indicators.value)
+// Takes eventsTotal from getProjectDashboard's already-fetched KPI (kpis.trackedEvents.value)
 // rather than re-querying it, but runs its own small count query for the alert-specific number
-// — cheaper and more robust than re-deriving it by parsing kpis.indicators.sub's display string.
-export async function getMonitorCandidate(projectId: string, indicatorsTotal: number): Promise<MonitorCandidate> {
-  if (indicatorsTotal === 0) return { kind: "no_indicators_yet", indicatorsTotal, indicatorsInAlert: 0 };
+// — cheaper and more robust than re-deriving it by parsing kpis.trackedEvents.sub's display
+// string. "Alert" analog is a pending action_card (raised when a tracked event's likelihood
+// crosses a threshold), not a per-event status the way indicators.status used to be.
+export async function getMonitorCandidate(projectId: string, eventsTotal: number): Promise<MonitorCandidate> {
+  if (eventsTotal === 0) return { kind: "no_events_yet", eventsTotal, pendingAlerts: 0 };
 
   const supabase = createClient();
   const { count, error } = await supabase
-    .from("indicators")
+    .from("action_cards")
     .select("id", { count: "exact", head: true })
     .eq("project_id", projectId)
-    .eq("status", "Alert");
+    .eq("status", "pending");
   if (error) throw error;
-  const indicatorsInAlert = count ?? 0;
+  const pendingAlerts = count ?? 0;
 
-  if (indicatorsInAlert > 0) return { kind: "alerts", indicatorsTotal, indicatorsInAlert };
-  return { kind: "all_on_track", indicatorsTotal, indicatorsInAlert };
+  if (pendingAlerts > 0) return { kind: "alerts", eventsTotal, pendingAlerts };
+  return { kind: "all_quiet", eventsTotal, pendingAlerts };
 }
 
 const RecommendationsSchema = z.object({
@@ -143,8 +148,8 @@ choosing what the actions ARE, only whether each is worth surfacing right now an
 Input: { focal_question: string,
          next_step: { label: string, current: number | null, required: number | null } | null
            /* null means the whole methodology is already complete */,
-         monitor: { kind: "alerts"|"no_indicators_yet"|"all_on_track",
-           indicators_total: number, indicators_in_alert: number } }
+         monitor: { kind: "alerts"|"no_events_yet"|"all_quiet",
+           events_total: number, pending_alerts: number } }
 
 Rules:
 - For each candidate given (next_step if non-null, monitor always), output exactly one action
@@ -152,8 +157,8 @@ Rules:
 - rationale MUST cite the real number(s) given (e.g. "2 of the 4 signals needed") — never
   filler text like "this is important" with no number attached, when a number was given.
 - worth_surfacing: true unless the candidate is genuinely redundant or empty of content right
-  now (e.g. "all_on_track" with 0 total indicators isn't really "on track" — set false and skip
-  it rather than writing a hollow reassurance).
+  now (e.g. "all_quiet" with 0 total events isn't really "quiet" — set false and skip it rather
+  than writing a hollow reassurance).
 - Keep each rationale to one sentence.
 
 Output schema:
@@ -173,9 +178,9 @@ function nextStepCandidateCopy(gate: NextGate | null): { title: string; ctaLabel
 }
 
 function monitorCandidateCopy(candidate: MonitorCandidate): { title: string; ctaLabel: string; route: string } {
-  if (candidate.kind === "alerts") return { title: `Review ${candidate.indicatorsInAlert} indicator(s) in alert`, ctaLabel: "Open monitoring", route: "/monitoring" };
-  if (candidate.kind === "all_on_track") return { title: `All ${candidate.indicatorsTotal} indicators on track`, ctaLabel: "Open monitoring", route: "/monitoring" };
-  return { title: "Set up leading indicators", ctaLabel: "Open monitoring", route: "/monitoring" };
+  if (candidate.kind === "alerts") return { title: `Review ${candidate.pendingAlerts} pending alert(s)`, ctaLabel: "Open monitoring", route: "/monitoring" };
+  if (candidate.kind === "all_quiet") return { title: `All ${candidate.eventsTotal} tracked events quiet`, ctaLabel: "Open monitoring", route: "/monitoring" };
+  return { title: "Start monitoring events", ctaLabel: "Open monitoring", route: "/monitoring" };
 }
 
 export async function getDashboardRecommendations(projectId: string): Promise<{ actions: RecommendationAction[] }> {
@@ -190,7 +195,7 @@ export async function getDashboardRecommendations(projectId: string): Promise<{ 
 
   const [nextGate, monitor] = await Promise.all([
     getNextGate(projectId, dashboard.stepsComplete),
-    getMonitorCandidate(projectId, dashboard.kpis.indicators.value),
+    getMonitorCandidate(projectId, dashboard.kpis.trackedEvents.value),
   ]);
 
   const output = await runStructured({
@@ -200,7 +205,7 @@ export async function getDashboardRecommendations(projectId: string): Promise<{ 
     input: {
       focal_question: focalQuestion,
       next_step: nextGate ? { label: nextGate.label, current: nextGate.current, required: nextGate.required } : null,
-      monitor: { kind: monitor.kind, indicators_total: monitor.indicatorsTotal, indicators_in_alert: monitor.indicatorsInAlert },
+      monitor: { kind: monitor.kind, events_total: monitor.eventsTotal, pending_alerts: monitor.pendingAlerts },
     },
     schema: RecommendationsSchema,
     effort: "low",

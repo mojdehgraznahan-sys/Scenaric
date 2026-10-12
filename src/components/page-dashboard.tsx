@@ -113,8 +113,8 @@ export function PageDashboard() {
       route: "/canvas",
     },
     {
-      label: "Indicators live",
-      ...(dashboard?.kpis.indicators ?? EMPTY_KPI),
+      label: "Events monitored",
+      ...(dashboard?.kpis.trackedEvents ?? EMPTY_KPI),
       tone: "text-[#EF4444]",
       route: "/monitoring",
     },
@@ -234,14 +234,14 @@ export function PageDashboard() {
               <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[#065F46]">Monitor</span>
             </div>
             <div className="mb-1 text-[15px] font-semibold">
-              {monitorAction ? monitorAction.title : kpis[2].value > 0 ? `Track ${kpis[2].value} leading indicators` : "Set up leading indicators"}
+              {monitorAction ? monitorAction.title : kpis[2].value > 0 ? `Watching ${kpis[2].value} events` : "Start monitoring events"}
             </div>
             <div className="mb-3.5 text-[13px] leading-[1.55] text-muted-foreground">
               {monitorAction
                 ? monitorAction.rationale
                 : kpis[2].value > 0
                   ? "Regulatory rulings and AI capex thresholds will tell you which scenario is unfolding."
-                  : "Once your scenarios are built, define the signposts that tell you which future is unfolding."}
+                  : "Once your scenarios are built, pick the events from Narrative that tell you which future is unfolding."}
             </div>
             <Button variant="ghost" size="sm" onClick={() => navigate(monitorAction?.route ?? "/monitoring")}>
               {monitorAction ? monitorAction.ctaLabel : "Open monitoring"} <Icons.ArrowRight size={12} />

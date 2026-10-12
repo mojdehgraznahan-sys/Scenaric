@@ -13,6 +13,8 @@ import { z } from "zod";
 import { getProjectDashboard } from "./dashboard";
 import { getNextGate, getMonitorCandidate } from "./dashboard-recommendations";
 import { STEP_LABELS, STEP_GATE } from "@/lib/step-tracker";
+import { fetchTrackedEvents } from "@/lib/decision-tracking";
+import { LIKELIHOOD_LEVELS } from "@/lib/decision-model";
 import type { Database } from "@/lib/supabase/types";
 
 // ─────────────────────── Task 1: What should I do next? ───────────────────────
@@ -26,17 +28,17 @@ given — deterministic narration of an already-decided next step, not creative 
 Input: { focal_question: string,
          next_step: { label: string, current: number | null, required: number | null } | null
            /* null means the whole 9-step methodology is already complete */,
-         monitor: { kind: "alerts"|"no_indicators_yet"|"all_on_track",
-           indicators_total: number, indicators_in_alert: number } }
+         monitor: { kind: "alerts"|"no_events_yet"|"all_quiet",
+           events_total: number, pending_alerts: number } }
 
 Rules:
 - If next_step is non-null, name it by its real label and cite current/required when both are
   numbers (e.g. "you have 2 of the 4 signals needed").
 - If next_step is null, say the methodology itself is complete and point toward reviewing
   strategy instead.
-- Briefly mention the monitor status too (e.g. indicators in alert) only if it's genuinely
-  relevant right now — don't pad the answer with it otherwise.
-- Never invent a step name, count, or indicator not present in the input.
+- Briefly mention the monitor status too (e.g. pending alerts) only if it's genuinely relevant
+  right now — don't pad the answer with it otherwise.
+- Never invent a step name, count, or event not present in the input.
 
 Output schema: { answer: string }`;
 
@@ -61,7 +63,7 @@ export async function whatShouldIDoNext(projectId: string): Promise<NextStepsRes
   const dashboard = await getProjectDashboard(projectId);
   const [nextGate, monitor] = await Promise.all([
     getNextGate(projectId, dashboard.stepsComplete),
-    getMonitorCandidate(projectId, dashboard.kpis.indicators.value),
+    getMonitorCandidate(projectId, dashboard.kpis.trackedEvents.value),
   ]);
 
   const output = await runStructured({
@@ -71,7 +73,7 @@ export async function whatShouldIDoNext(projectId: string): Promise<NextStepsRes
     input: {
       focal_question: focalQuestion,
       next_step: nextGate ? { label: nextGate.label, current: nextGate.current, required: nextGate.required } : null,
-      monitor: { kind: monitor.kind, indicators_total: monitor.indicatorsTotal, indicators_in_alert: monitor.indicatorsInAlert },
+      monitor: { kind: monitor.kind, events_total: monitor.eventsTotal, pending_alerts: monitor.pendingAlerts },
     },
     schema: NextStepsSchema,
     effort: "low",
@@ -179,11 +181,12 @@ represented in the input; if a category has zero, say so plainly rather than omi
 awkwardly.
 
 Input: { new_signals: number, new_news_items: number,
-         indicator_changes: [{ name: string, from_status: string, to_status: string }] }
+         event_changes: [{ title: string, from_level: string, to_level: string }] }
 
 Rules:
 - Cite the real numbers given for new_signals and new_news_items.
-- Name each indicator_changes entry by its real name and from→to transition — never invent one.
+- Name each event_changes entry by its real title and from→to likelihood transition — never
+  invent one.
 - If everything is 0/empty, say plainly that nothing changed since their last visit.
 
 Output schema: { answer: string }`;
@@ -207,7 +210,6 @@ export async function whatsChangedSinceLastVisit(projectId: string): Promise<Wha
     return { firstVisit: true, answer: null };
   }
   const lastViewed = project.dashboard_last_viewed_at;
-  const lastViewedDate = lastViewed.slice(0, 10);
 
   const [{ count: newSignals, error: signalsError }, { count: newNewsItems, error: newsError }] = await Promise.all([
     supabase.from("signals").select("id", { count: "exact", head: true }).eq("project_id", projectId).gt("created_at", lastViewed),
@@ -216,29 +218,23 @@ export async function whatsChangedSinceLastVisit(projectId: string): Promise<Wha
   if (signalsError) throw signalsError;
   if (newsError) throw newsError;
 
-  const { data: indicators, error: indicatorsError } = await supabase.from("indicators").select("id, name, status").eq("project_id", projectId);
-  if (indicatorsError) throw indicatorsError;
-
-  // Status "as of" last visit vs. live status now — one cheap query per indicator, same
-  // per-indicator-reading-lookup shape ai-monitoring-tasks.ts's summarizeRecentChanges already
-  // uses, just against the visit boundary instead of a fixed 7-day window.
-  const indicatorChanges: { name: string; fromStatus: string; toStatus: string }[] = [];
-  for (const indicator of indicators) {
-    const { data: asOfReading, error: readingError } = await supabase
-      .from("indicator_readings")
-      .select("status_at_time")
-      .eq("indicator_id", indicator.id)
-      .lte("date", lastViewedDate)
-      .order("date", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (readingError) throw readingError;
-    if (asOfReading && asOfReading.status_at_time !== indicator.status) {
-      indicatorChanges.push({ name: indicator.name, fromStatus: asOfReading.status_at_time, toStatus: indicator.status });
+  // "as of" last visit vs. live level now — fetchTrackedEvents already resolves "live level now"
+  // correctly (latest history row, falling back to the event's own seed status/likelihood when
+  // unscanned), same loader every other tracked-event consumer uses; this just additionally
+  // looks for the history entry in effect at the visit boundary, same spirit as
+  // ai-monitoring-tasks.ts's summarizeRecentChanges but against the visit boundary instead of a
+  // fixed 7-day window.
+  const tracked = await fetchTrackedEvents(supabase, projectId);
+  const eventChanges: { title: string; fromLevel: string; toLevel: string }[] = [];
+  for (const event of tracked) {
+    const asOf = [...event.history].filter((h) => h.observedAt <= lastViewed).sort((a, b) => b.observedAt.localeCompare(a.observedAt))[0];
+    if (!asOf) continue;
+    if (asOf.level !== event.currentLevel) {
+      eventChanges.push({ title: event.title, fromLevel: LIKELIHOOD_LEVELS[asOf.level], toLevel: LIKELIHOOD_LEVELS[event.currentLevel] });
     }
   }
 
-  if ((newSignals ?? 0) === 0 && (newNewsItems ?? 0) === 0 && indicatorChanges.length === 0) {
+  if ((newSignals ?? 0) === 0 && (newNewsItems ?? 0) === 0 && eventChanges.length === 0) {
     return { firstVisit: false, answer: "Nothing has changed in this project since your last visit." };
   }
 
@@ -249,7 +245,7 @@ export async function whatsChangedSinceLastVisit(projectId: string): Promise<Wha
     input: {
       new_signals: newSignals ?? 0,
       new_news_items: newNewsItems ?? 0,
-      indicator_changes: indicatorChanges.map((c) => ({ name: c.name, from_status: c.fromStatus, to_status: c.toStatus })),
+      event_changes: eventChanges.map((c) => ({ title: c.title, from_level: c.fromLevel, to_level: c.toLevel })),
     },
     schema: WhatsChangedSchema,
     effort: "low",

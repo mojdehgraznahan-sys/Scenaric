@@ -461,12 +461,12 @@ export interface Store {
       selectedCell: { optionId: string; optionName: string; scenarioId: string; scenarioName: string } | null;
     } | null
   ) => void;
-  // Monitoring's own Ask AI scoping — "Explain this indicator's status" needs
-  // selectedIndicator, set by clicking one indicator row on the Monitoring page (toggle:
-  // clicking the same row again deselects). The other three tasks need nothing but
-  // store.activeProjectId, same convention as Strategy's "Suggest a hedge".
-  monitoringAskAiContext: { selectedIndicator: { id: string; name: string } | null } | null;
-  setMonitoringAskAiContext: (v: { selectedIndicator: { id: string; name: string } | null } | null) => void;
+  // Monitoring's own Ask AI scoping — "Explain this event's likelihood" needs selectedEvent,
+  // set by clicking one tracked-event row on the Monitoring page (toggle: clicking the same
+  // row again deselects). The other three tasks need nothing but store.activeProjectId, same
+  // convention as Strategy's "Suggest a hedge".
+  monitoringAskAiContext: { selectedEvent: { id: string; title: string } | null } | null;
+  setMonitoringAskAiContext: (v: { selectedEvent: { id: string; title: string } | null } | null) => void;
   // Matrix's own Ask AI scoping — "Why is this signal a critical uncertainty?" needs
   // selectedDot (the currently-selected dot's signal id/title/bucket); "Are my two selected
   // axes truly independent?" needs topAxisPair to have exactly 2 entries. The other four tasks
@@ -1114,7 +1114,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     selectedOption: { id: string; name: string } | null;
     selectedCell: { optionId: string; optionName: string; scenarioId: string; scenarioName: string } | null;
   } | null>(null);
-  const [monitoringAskAiContext, setMonitoringAskAiContext] = useState<{ selectedIndicator: { id: string; name: string } | null } | null>(null);
+  const [monitoringAskAiContext, setMonitoringAskAiContext] = useState<{ selectedEvent: { id: string; title: string } | null } | null>(null);
   const [matrixAskAiContext, setMatrixAskAiContext] = useState<{
     selectedDot: { signalId: string; title: string; bucket: MatrixBucket | null } | null;
     topAxisPair: { signalId: string; title: string }[];

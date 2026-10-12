@@ -7,8 +7,8 @@
 //
 // Digest content reuses summarizeWeekSignals (ai-home-tasks.ts, already built for the Home
 // dashboard's Ask AI "Summarize this week's signals" task — same STEEP-grouped real signal
-// summary, already ai_runs-logged) rather than re-deriving it, plus real indicator-alert and
-// recent-news counts via the same simple queries dashboard.ts/news.ts already use.
+// summary, already ai_runs-logged) rather than re-deriving it, plus real pending-alert (action
+// cards) and recent-news counts via the same simple queries dashboard.ts/news.ts already use.
 import { Resend } from "resend";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { summarizeWeekSignals } from "./ai-home-tasks";
@@ -22,7 +22,7 @@ function getResendClient(): Resend {
   return new Resend(apiKey);
 }
 
-function renderDigestHtml(projectName: string, weekSignals: Awaited<ReturnType<typeof summarizeWeekSignals>>, indicatorsInAlert: number, newsThisWeek: number): string {
+function renderDigestHtml(projectName: string, weekSignals: Awaited<ReturnType<typeof summarizeWeekSignals>>, pendingAlerts: number, newsThisWeek: number): string {
   const categoriesHtml =
     weekSignals.totalSignals === 0
       ? "<p>No new signals this week.</p>"
@@ -31,7 +31,7 @@ function renderDigestHtml(projectName: string, weekSignals: Awaited<ReturnType<t
           .join("");
   return `
     <h2>Weekly digest — ${projectName}</h2>
-    <p>${weekSignals.totalSignals} new signal(s) this week, ${indicatorsInAlert} indicator(s) in alert, ${newsThisWeek} news item(s) pulled.</p>
+    <p>${weekSignals.totalSignals} new signal(s) this week, ${pendingAlerts} pending alert(s), ${newsThisWeek} news item(s) pulled.</p>
     ${categoriesHtml}
   `;
 }
@@ -48,9 +48,9 @@ async function computeAndSendDigestForProject(
   if (recipients.length === 0) return { recipients: 0 };
 
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  const [weekSignals, { count: indicatorsInAlert }, { count: newsThisWeek }] = await Promise.all([
+  const [weekSignals, { count: pendingAlerts }, { count: newsThisWeek }] = await Promise.all([
     summarizeWeekSignals(projectId, supabase),
-    supabase.from("indicators").select("id", { count: "exact", head: true }).eq("project_id", projectId).eq("status", "Alert"),
+    supabase.from("action_cards").select("id", { count: "exact", head: true }).eq("project_id", projectId).eq("status", "pending"),
     supabase.from("news_items").select("id", { count: "exact", head: true }).eq("project_id", projectId).gte("created_at", sevenDaysAgo),
   ]);
 
@@ -62,7 +62,7 @@ async function computeAndSendDigestForProject(
     from: fromAddress,
     to: recipients.map((r) => r.email),
     subject: `Scenaric weekly digest — ${project.name}`,
-    html: renderDigestHtml(project.name, weekSignals, indicatorsInAlert ?? 0, newsThisWeek ?? 0),
+    html: renderDigestHtml(project.name, weekSignals, pendingAlerts ?? 0, newsThisWeek ?? 0),
   });
   if (sendError) throw new Error(sendError.message);
 

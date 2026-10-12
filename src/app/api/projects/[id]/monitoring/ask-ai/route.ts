@@ -1,18 +1,18 @@
 import { NextResponse } from "next/server";
-import { rankScenariosByIndicatorSignal, explainIndicatorStatus, summarizeRecentChanges, suggestIndicatorForUnderMonitoredScenario } from "@/lib/actions/ai-monitoring-tasks";
+import { rankScenariosByEventSignal, explainEventLikelihood, summarizeRecentEventChanges, suggestEventMonitoringForUnderMonitoredScenario } from "@/lib/actions/ai-monitoring-tasks";
 import { errorResponse } from "@/lib/api/error-response";
 
 // Fixed task menu — never freeform (see ask-ai.tsx's context="monitoring" branch; freeform is
-// the separate /monitoring/chat route). Each task reasons only over this project's own
-// indicators/indicator_readings/sources, no general external knowledge.
+// the separate /monitoring/chat route). Each task reasons only over this project's own tracked
+// events (event_scenario_links/event_likelihood_history), no general external knowledge.
 export const maxDuration = 120;
 
-type Task = "most_likely_scenario" | "explain_indicator" | "recent_changes" | "suggest_indicator";
+type Task = "most_likely_scenario" | "explain_event" | "recent_changes" | "suggest_events";
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
   const projectId = params.id;
 
-  let body: { task?: Task; indicatorId?: string };
+  let body: { task?: Task; eventId?: string };
   try {
     body = await request.json();
   } catch {
@@ -22,19 +22,19 @@ export async function POST(request: Request, { params }: { params: { id: string 
   try {
     switch (body.task) {
       case "most_likely_scenario":
-        return NextResponse.json(await rankScenariosByIndicatorSignal(projectId));
+        return NextResponse.json(await rankScenariosByEventSignal(projectId));
 
-      case "explain_indicator":
-        if (!body.indicatorId) {
-          return NextResponse.json({ error: "indicatorId is required for explain_indicator." }, { status: 400 });
+      case "explain_event":
+        if (!body.eventId) {
+          return NextResponse.json({ error: "eventId is required for explain_event." }, { status: 400 });
         }
-        return NextResponse.json(await explainIndicatorStatus(body.indicatorId));
+        return NextResponse.json(await explainEventLikelihood(body.eventId));
 
       case "recent_changes":
-        return NextResponse.json(await summarizeRecentChanges(projectId));
+        return NextResponse.json(await summarizeRecentEventChanges(projectId));
 
-      case "suggest_indicator":
-        return NextResponse.json(await suggestIndicatorForUnderMonitoredScenario(projectId));
+      case "suggest_events":
+        return NextResponse.json(await suggestEventMonitoringForUnderMonitoredScenario(projectId));
 
       default:
         return NextResponse.json({ error: `Unknown task: ${body.task}` }, { status: 400 });

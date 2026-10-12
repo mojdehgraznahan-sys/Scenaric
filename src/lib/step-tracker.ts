@@ -10,7 +10,7 @@ export const STEP_LABELS = [
   "Scenario logics",
   "Narratives",
   "Implications",
-  "Indicators",
+  "Monitoring",
   "Strategy",
 ];
 export const STEP_ROUTES = ["/settings", "/knowledge", "/signals", "/matrix", "/canvas", "/narrative", "/narrative", "/monitoring", "/strategy"];
