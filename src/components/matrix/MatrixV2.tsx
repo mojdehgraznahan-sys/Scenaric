@@ -19,6 +19,7 @@
 // api (async): setPlacement(sigId, placement) · setAxes(ids) · setHeadline(sigId, side, eventId)
 import * as React from "react";
 import type { SteepCategory } from "@/lib/types";
+import { arePolesWeak, isPoleOk } from "@/lib/poles";
 
 export interface MxForce {
   id: string;
@@ -69,6 +70,11 @@ export interface MxApi {
   setPlacement: (sigId: string, p: Partial<MxPlacement> & { sigId: string }, assessedEventIds?: string[]) => void | Promise<void>;
   setAxes: (ids: string[]) => void | Promise<void>;
   setHeadline: (sigId: string, side: "a" | "b", eventId: string) => void | Promise<void>;
+  // Added post-port (CLAUDE_CODE_MATRIX_POLES_PROMPTS.md) — backs MXPoleEditor below, the "Name
+  // both ends of this force" fix-it box shown in place of the "Can go two ways" line whenever a
+  // force's poles are too generic/duplicate/title-equal to compare (lib/poles.ts's
+  // arePolesWeak).
+  setPoles: (sigId: string, poles: [string, string]) => void | Promise<void>;
 }
 
 export interface MatrixV2Props {
@@ -210,6 +216,49 @@ function MXSeg<V extends string>({ value, options, onChange }: { value: V | null
     </div>
   );
 }
+// Added post-port (CLAUDE_CODE_MATRIX_POLES_PROMPTS.md) — replaces the "Can go two ways: A or B"
+// line whenever arePolesWeak(sig.title, sig.poles) is true. Prefills only whichever existing
+// pole already passes isPoleOk; Save stays disabled until both ends are real and distinct.
+function MXPoleEditor({ sig, onSave }: { sig: MxForce; onSave: (poles: [string, string]) => void | Promise<void> }) {
+  const prefill = (i: 0 | 1) => (isPoleOk(sig.title, sig.poles[i]) ? sig.poles[i] : "");
+  const [a, setA] = React.useState(prefill(0));
+  const [b, setB] = React.useState(prefill(1));
+  const [saving, setSaving] = React.useState(false);
+  React.useEffect(() => {
+    setA(prefill(0));
+    setB(prefill(1));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sig.id]);
+  const ok = isPoleOk(sig.title, a) && isPoleOk(sig.title, b) && a.trim().toLowerCase() !== b.trim().toLowerCase();
+  const save = async () => {
+    setSaving(true);
+    try {
+      await onSave([a.trim(), b.trim()]);
+    } finally {
+      setSaving(false);
+    }
+  };
+  const inputStyle: React.CSSProperties = { flex: 1, minWidth: 140, border: "1px solid #FDE68A", borderRadius: 7, padding: "7px 9px", fontSize: 12.5, fontFamily: "inherit", background: "#fff", color: "#1E1B2E" };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 10, padding: "9px 10px" }}>
+      <span style={{ fontSize: 12, fontWeight: 600, color: "#92400E" }}>Name both ends of this force</span>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minWidth: 140 }}>
+          <span style={{ fontSize: 10.5, color: "#92400E" }}>← One end</span>
+          <input style={inputStyle} value={a} onChange={(e) => setA(e.target.value)} placeholder="e.g. Dependence falls fast" />
+        </label>
+        <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minWidth: 140 }}>
+          <span style={{ fontSize: 10.5, color: "#92400E" }}>Other end →</span>
+          <input style={inputStyle} value={b} onChange={(e) => setB(e.target.value)} placeholder="e.g. Dependence deepens" />
+        </label>
+      </div>
+      <button className="mx-btn mx-btn-primary mx-btn-sm" style={{ alignSelf: "flex-start" }} disabled={!ok || saving} onClick={save}>
+        {saving ? "Saving…" : "Save ends"}
+      </button>
+    </div>
+  );
+}
+
 function MXQBadge({ q }: { q: ReturnType<typeof mxQuad> }) {
   if (!q) return <span className="mx-badge" style={{ background: "#F3F4F6", color: "#6B7280" }}>Not placed</span>;
   return (
@@ -508,9 +557,13 @@ function MXAssess({
           )}
         </span>
         <span style={{ fontSize: 16, fontWeight: 600, lineHeight: 1.3, letterSpacing: "-0.01em" }}>{sig.title}</span>
-        <span style={{ fontSize: 12, color: "#6B7280" }}>
-          Can go two ways: <b style={{ color: "#1E1B2E", fontWeight: 600 }}>{mxPole(sig, "a")}</b> or <b style={{ color: "#1E1B2E", fontWeight: 600 }}>{mxPole(sig, "b")}</b>
-        </span>
+        {arePolesWeak(sig.title, sig.poles) ? (
+          <MXPoleEditor sig={sig} onSave={(poles) => api.setPoles(sig.id, poles)} />
+        ) : (
+          <span style={{ fontSize: 12, color: "#6B7280" }}>
+            Can go two ways: <b style={{ color: "#1E1B2E", fontWeight: 600 }}>{mxPole(sig, "a")}</b> or <b style={{ color: "#1E1B2E", fontWeight: 600 }}>{mxPole(sig, "b")}</b>
+          </span>
+        )}
         {placement && !placement.confirmed && (
           <span style={{ fontSize: 12, color: "#92400E", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 8, padding: "7px 9px", lineHeight: 1.45 }}>
             This was placed with a star rating. Answer the two questions below to place it by real events.
@@ -547,7 +600,7 @@ function MXAssess({
           value={plausible}
           onChange={setPlausible}
           options={[
-            ["both", "Yes, either"],
+            ["both", "Yes, both plausible"],
             ["a", "Only ← " + mxPole(sig, "a")],
             ["b", "Only " + mxPole(sig, "b") + " →"],
           ]}

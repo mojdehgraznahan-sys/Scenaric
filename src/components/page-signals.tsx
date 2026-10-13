@@ -615,6 +615,9 @@ export function PageSignals() {
               onAcceptProposal={onAcceptEventProposal}
               onDismissProposal={onDismissEventProposal}
               onMatrix={addingToMatrixId === s.id ? undefined : () => onPlaceOnMatrix(s)}
+              onSavePoles={async (poles) => {
+                await store.updateSignal({ id: s.id, poleA: poles[0], poleB: poles[1] });
+              }}
             />
           ))}
         </div>

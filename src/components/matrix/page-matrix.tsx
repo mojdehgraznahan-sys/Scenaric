@@ -90,9 +90,12 @@ export function PageMatrix({ navigate }: { navigate: Navigate }) {
         if (!store.activeProjectId) return;
         await store.setMatrixHeadline(store.activeProjectId, sigId, side, eventId);
       },
+      setPoles: async (sigId, [poleA, poleB]) => {
+        await store.updateSignal({ id: sigId, poleA, poleB });
+      },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `store` itself isn't reference-stable across renders; the specific fields used are already listed
-    [store.activeProjectId, store.setMatrixPlacement, store.setMatrixAxes, store.setMatrixHeadline]
+    [store.activeProjectId, store.setMatrixPlacement, store.setMatrixAxes, store.setMatrixHeadline, store.updateSignal]
   );
 
   // Keep the legacy field in sync so the existing Build/Re-axis modals (which read

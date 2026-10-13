@@ -13,6 +13,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { runStructured } from "@/lib/ai/client";
 import { AIWebSearchError, NotFoundError } from "@/lib/ai/errors";
 import { createClient } from "@/lib/supabase/server";
+import { arePolesWeak } from "@/lib/poles";
 import { createSignal } from "./signals";
 import { scoreOneSignal } from "./ai-signals";
 import { createEvent, linkEvent } from "./events";
@@ -135,7 +136,12 @@ Rules:
 - Only propose a new force when at least one inbox event doesn't fit any existing signal. A new
   force needs a title, STEEP category, and two named poles (pole_a/pole_b) that this event (and
   any others clustered with it) plausibly pulls between — name both poles even if every member
-  event currently pulls toward just one of them.
+  event currently pulls toward just one of them. A force is a variable; its two poles are
+  opposite END STATES of that variable, each a short (2-5 word) outcome a strategist could
+  picture by the horizon — never "Doesn't happen", "Happens", "Low"/"High", "Yes"/"No", the force
+  title itself, or a bare negation of the other pole.
+  Bad: ["Doesn't happen", "US dependent on Chinese power-electronics components"]
+  Good: ["US supply diversifies", "Dependence on China deepens"]
 - Cluster multiple inbox events into ONE new force only when they describe the same underlying
   uncertainty, not merely the same topic area — a new force with a single member event is fine
   and expected, don't force a merge to make clusters look bigger.
@@ -175,19 +181,29 @@ export async function groupInboxIntoForces(projectId: string, eventIds: string[]
     .eq("project_id", projectId);
   if (signalsError) throw signalsError;
 
-  const output = await runStructured({
-    step: "signals.group_inbox",
-    projectId,
-    taskPrompt: GROUP_INBOX_TASK_PROMPT,
-    input: {
-      focal_question: focalQuestion,
-      events: events.map((e) => ({ id: e.id, title: e.title, body: e.description ?? "", category: e.category })),
-      existing_signals: signals.map((s) => ({ id: s.id, title: s.title, body: s.body, category: s.category, pole_a: s.pole_a, pole_b: s.pole_b })),
-    },
-    schema: GroupInboxSchema,
-    effort: "medium",
-    maxTokens: 6000,
-  });
+  const runOnce = () =>
+    runStructured({
+      step: "signals.group_inbox",
+      projectId,
+      taskPrompt: GROUP_INBOX_TASK_PROMPT,
+      input: {
+        focal_question: focalQuestion,
+        events: events.map((e) => ({ id: e.id, title: e.title, body: e.description ?? "", category: e.category })),
+        existing_signals: signals.map((s) => ({ id: s.id, title: s.title, body: s.body, category: s.category, pole_a: s.pole_a, pole_b: s.pole_b })),
+      },
+      schema: GroupInboxSchema,
+      effort: "medium",
+      maxTokens: 6000,
+    });
+
+  let output = await runOnce();
+  // One retry on any weak new-force pole pair. Whatever's still weak after that is inserted
+  // anyway — confirmForceProposal's createSignal call (signals.ts) flags poles_need_review
+  // itself as a backstop, same as every other path into the signals table, so a stubborn weak
+  // pair never gets silently dropped (which would just orphan its member events instead).
+  if (output.new_forces.some((f) => arePolesWeak(f.title, [f.pole_a, f.pole_b]))) {
+    output = await runOnce();
+  }
 
   const batchId = crypto.randomUUID();
   const rows: Database["public"]["Tables"]["force_proposals"]["Insert"][] = [

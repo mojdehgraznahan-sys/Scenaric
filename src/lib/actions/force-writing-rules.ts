@@ -10,6 +10,7 @@
 import "server-only";
 import { runStructured } from "@/lib/ai/client";
 import { z } from "zod";
+import { arePolesWeak } from "@/lib/poles";
 import type { SteepCategory } from "./signals";
 
 // Interpolate this block into any task prompt that asks the model to name a driving force.
@@ -20,8 +21,13 @@ export const FORCE_FRAMING_RULES = `- \`title\`: a neutral noun phrase naming wh
   Never a direction verb (accelerates, deepens, surges, stalls, shifts, dominates, doubles) and
   never a year. Good: "Pace of enterprise AI adoption", "Volatility of regional currencies".
   Bad: "AI adoption accelerates" (picks a side), "2027 trade deal" (a date, not a variable).
-- \`pole_a\`/\`pole_b\`: two short (2-4 word), parallel phrases naming the two genuinely distinct
-  outcomes this force could resolve to. Each must read naturally as "{title}: {pole}".
+- \`pole_a\`/\`pole_b\`: a force is a variable; its two poles are opposite END STATES of that
+  variable. Each is a short (2-5 word) outcome a strategist could picture by the horizon — not a
+  verdict on whether the force happens at all. Never "Doesn't happen", "Happens", "Low"/"High",
+  "Yes"/"No", the force title itself, or a bare negation of the other pole.
+  Bad: ["Doesn't happen", "US dependent on Chinese power-electronics components"]
+  Good: ["US supply diversifies", "Dependence on China deepens"]
+  Good: ["Tariffs soften", "Tariffs bite harder"]
 - \`body\`: one sentence, starting "How…" or "Whether…", stating the forward uncertainty itself
   — not a recap of the evidence behind it.
 - Do NOT reuse the wording of any single insight, quote, or source you were given. If your
@@ -38,8 +44,7 @@ export function isValidForceTitle(title: string, poleA: string, poleB: string): 
   const lower = title.toLowerCase();
   if (DIRECTION_WORDS.some((w) => lower.includes(w))) return false;
   if (/\b(19|20)\d{2}\b/.test(title)) return false;
-  if (poleA.trim().toLowerCase() === poleB.trim().toLowerCase()) return false;
-  if (lower === poleA.trim().toLowerCase() || lower === poleB.trim().toLowerCase()) return false;
+  if (arePolesWeak(title, [poleA, poleB])) return false;
   return true;
 }
 
@@ -101,13 +106,22 @@ export interface DraftForcePolesResult {
 }
 
 export async function draftForcePoles(projectId: string, input: { title: string; body: string; category: SteepCategory }): Promise<DraftForcePolesResult> {
-  const output = await runStructured({
-    step: "signals.draft_force_poles",
-    projectId,
-    taskPrompt: DRAFT_FORCE_POLES_TASK_PROMPT,
-    input,
-    schema: DraftForcePolesSchema,
-    effort: "low",
-  });
+  const runOnce = () =>
+    runStructured({
+      step: "signals.draft_force_poles",
+      projectId,
+      taskPrompt: DRAFT_FORCE_POLES_TASK_PROMPT,
+      input,
+      schema: DraftForcePolesSchema,
+      effort: "low",
+    });
+
+  let output = await runOnce();
+  // One retry on a weak pole pair (same "Doesn't happen"/title pattern this whole fix targets) —
+  // if it's still weak after that, createSignal (signals.ts) flags poles_need_review itself from
+  // whatever comes back here, so this never blocks the signal from being created.
+  if (arePolesWeak(output.title, [output.pole_a, output.pole_b])) {
+    output = await runOnce();
+  }
   return { title: output.title, poleA: output.pole_a, poleB: output.pole_b };
 }

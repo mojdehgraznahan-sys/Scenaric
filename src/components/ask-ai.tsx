@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/chip";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
-import { askSignalsChat, suggestSignals, type SignalsChatResult } from "@/lib/actions/ai-signals";
+import { askSignalsChat, suggestSignals, draftPolesForSuggestedSignal, type SignalsChatResult } from "@/lib/actions/ai-signals";
 import {
   runMacroTrendSweep,
   researchSupplyChainGeopolitics,
@@ -1134,15 +1134,16 @@ export function AskAI({
     const projectId = store.activeProjectId;
     if (!suggestion || msg.added || msg.suggestedForProjectId !== projectId || !projectId) return;
     try {
+      // Ask AI's suggested_signal doesn't propose poles — draft a real two-sided framing before
+      // writing the signal rather than falling back to a generic "Doesn't happen"/title pair.
+      const { poleA, poleB } = await draftPolesForSuggestedSignal(projectId, { title: suggestion.title, body: suggestion.body, category: suggestion.category });
       await store.createSignal({
         projectId,
         category: suggestion.category,
         source: "Ask AI",
         title: suggestion.title,
-        // Ask AI's suggested_signal doesn't propose poles — same honest placeholder the
-        // 0038 migration backfills for pre-rebuild signals; the user can rename them later.
-        poleA: "Doesn't happen",
-        poleB: suggestion.title,
+        poleA,
+        poleB,
         body: suggestion.body,
         origin: suggestion.origin,
         groundedInsightIds: suggestion.groundedIn,

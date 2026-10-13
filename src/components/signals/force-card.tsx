@@ -6,12 +6,58 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Chip } from "@/components/chip";
 import { Stars } from "@/lib/icons";
 import type { EventItem, Signal } from "@/lib/types";
 import type { EventProposalRow } from "@/lib/actions/ai-forces";
+import { isPoleOk, arePolesWeak } from "@/lib/poles";
 import { slPole } from "./pole";
 import { Spectrum, EventRow } from "./spectrum";
+
+// CLAUDE_CODE_MATRIX_POLES_PROMPTS.md — shown in place of the Spectrum header whenever a
+// force's poles are too generic/duplicate/title-equal to compare (lib/poles.ts's
+// arePolesWeak), so a weak force can be fixed from the Signals Library too, not only the
+// Matrix (which has its own copy of this same editor, MXPoleEditor, for its unrelated "mx-*"
+// styling system).
+function WeakPoleEditor({ sig, onSave }: { sig: Signal; onSave: (poles: [string, string]) => Promise<void> }) {
+  const prefill = (pole: string) => (isPoleOk(sig.title, pole) ? pole : "");
+  const [a, setA] = React.useState(prefill(sig.poleA));
+  const [b, setB] = React.useState(prefill(sig.poleB));
+  const [saving, setSaving] = React.useState(false);
+  React.useEffect(() => {
+    setA(prefill(sig.poleA));
+    setB(prefill(sig.poleB));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sig.id]);
+  const ok = isPoleOk(sig.title, a) && isPoleOk(sig.title, b) && a.trim().toLowerCase() !== b.trim().toLowerCase();
+  const save = async () => {
+    setSaving(true);
+    try {
+      await onSave([a.trim(), b.trim()]);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="flex flex-col gap-2 rounded-[10px] border border-[#FDE68A] bg-[#FFFBEB] p-2.5">
+      <span className="text-[12px] font-semibold text-[#92400E]">Name both ends of this force</span>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="flex flex-col gap-1">
+          <span className="text-[10.5px] text-[#92400E]">← One end</span>
+          <Input value={a} onChange={(e) => setA(e.target.value)} placeholder="e.g. Dependence falls fast" className="h-8 text-[12.5px]" />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[10.5px] text-[#92400E]">Other end →</span>
+          <Input value={b} onChange={(e) => setB(e.target.value)} placeholder="e.g. Dependence deepens" className="h-8 text-[12.5px]" />
+        </label>
+      </div>
+      <Button variant="primary" size="sm" className="self-start px-2.5 py-1" disabled={!ok || saving} onClick={save}>
+        {saving ? "Saving…" : "Save ends"}
+      </Button>
+    </div>
+  );
+}
 
 const LIKELIHOOD_BADGE: Record<"Low" | "Medium" | "High", string> = {
   High: "bg-brand-orangeLight text-brand-orange700",
@@ -48,9 +94,10 @@ export interface ForceCardProps {
   onAcceptProposal: (p: EventProposalRow) => void;
   onDismissProposal: (p: EventProposalRow) => void;
   onMatrix?: () => void;
+  onSavePoles: (poles: [string, string]) => Promise<void>;
 }
 
-export function ForceCard({ sig, events, proposals, busySide, onOpen, onAdd, onGenerate, onAcceptProposal, onDismissProposal, onMatrix }: ForceCardProps) {
+export function ForceCard({ sig, events, proposals, busySide, onOpen, onAdd, onGenerate, onAcceptProposal, onDismissProposal, onMatrix, onSavePoles }: ForceCardProps) {
   const [more, setMore] = React.useState(false);
   const mine = events.filter((e) => e.links.some((l) => l.signalId === sig.id));
   const order = (list: EventItem[]) => [...list.filter((e) => e.status === "observed"), ...list.filter((e) => e.status !== "observed")];
@@ -77,7 +124,7 @@ export function ForceCard({ sig, events, proposals, busySide, onOpen, onAdd, onG
       <div className="text-[15px] font-semibold leading-[1.3] tracking-[-0.01em]" title={sig.body || ""}>
         {sig.title}
       </div>
-      <Spectrum sig={sig} a={sides.a} b={sides.b} onOpen={onOpen} />
+      {arePolesWeak(sig.title, [sig.poleA, sig.poleB]) ? <WeakPoleEditor sig={sig} onSave={onSavePoles} /> : <Spectrum sig={sig} a={sides.a} b={sides.b} onOpen={onOpen} />}
       <div className="grid grid-cols-2 gap-2.5">
         {(["a", "b"] as const).map((side) => {
           const list = sides[side];

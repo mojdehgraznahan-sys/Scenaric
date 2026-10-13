@@ -15,7 +15,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { runStructured } from "@/lib/ai/client";
 import { createClient } from "@/lib/supabase/server";
-import { FORCE_FRAMING_RULES, validateForceCandidate } from "./force-writing-rules";
+import { FORCE_FRAMING_RULES, validateForceCandidate, draftForcePoles } from "./force-writing-rules";
 import type { Database } from "@/lib/supabase/types";
 import type { SteepCategory } from "./signals";
 
@@ -348,6 +348,15 @@ export interface SignalsChatResult {
     origin: "insight" | "external_pattern";
   };
   cites: string[];
+}
+
+// Signals chat's suggested_signal (above) never proposes poles — only title/body/category — so
+// "+ Add to Signals" needs a real two-sided framing before it can call createSignal. Thin
+// wrapper around draftForcePoles (force-writing-rules.ts), the same "one-off case: creates a
+// signal directly, with no existing AI call to attach real poles to" this helper already exists
+// for (there, it's news-item promotion; here, it's Ask AI).
+export async function draftPolesForSuggestedSignal(projectId: string, input: { title: string; body: string; category: SteepCategory }) {
+  return draftForcePoles(projectId, input);
 }
 
 export async function askSignalsChat(input: { projectId: string; question: string }): Promise<SignalsChatResult> {
