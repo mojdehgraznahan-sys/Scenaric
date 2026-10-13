@@ -16,6 +16,43 @@ export type LikelihoodLevel = 0 | 1 | 2 | 3 | 4;
 export const STORYLINE_PHASES = ["precursors", "catalysts", "first_order", "second_order", "realized"] as const;
 export type StorylinePhase = (typeof STORYLINE_PHASES)[number];
 
+export type RouteHorizon = "now" | "2027" | "2028" | "2029_30";
+export type RouteLane = "noregret" | "shaping" | "hedge";
+export type InitiativeKind = "shape" | "influence" | "research" | "hedge";
+export type InitiativeWind = "helps" | "neutral" | "hurts";
+
+// Which swimlane an approved initiative's route move lands in (design/strategy_handoff):
+// 'hedge' kind always goes to the hedge lane; one that helps in every scenario is a no-regret
+// move (it pays off regardless of which future arrives); everything else is shaping. `wind` is
+// validated to cover every project scenario before an initiative is ever inserted (the AI
+// action layer's job, not a DB trigger — see 0050_initiatives.sql's own comment on why), so
+// Object.values here is already the full set.
+export function initiativeLane(kind: InitiativeKind, wind: Record<string, InitiativeWind>): RouteLane {
+  if (kind === "hedge") return "hedge";
+  if (Object.values(wind).every((w) => w === "helps")) return "noregret";
+  return "shaping";
+}
+
+// Default phase->horizon anchor shared by Draft Route (ai-strategy-route.ts) and approving an
+// initiative (initiatives.ts) — until this existed, a route move's horizon was picked with no
+// knowledge of the SAME event's Storyline (or Monitor Events) placement at all, so the two
+// could flatly contradict each other for one event (e.g. "realized" in Storyline, "now" in the
+// route). Callers may still deviate from this default, but only with a stated reason — not
+// out of pure disconnection from the event's own timeline.
+export function horizonForPhase(phase: StorylinePhase): RouteHorizon {
+  switch (phase) {
+    case "precursors":
+    case "catalysts":
+      return "now";
+    case "first_order":
+      return "2027";
+    case "second_order":
+      return "2028";
+    case "realized":
+      return "2029_30";
+  }
+}
+
 export type MomentumLabel = "Building" | "Edging up" | "Steady" | "Easing" | "Fading";
 export type HealthLabel = "On course" | "Holding" | "At risk" | "Off course";
 export type HealthTone = "low" | "mid" | "high";
@@ -27,7 +64,10 @@ export interface TrackedEvent {
   eventId: string;
   impact: number; // 1-5
   phase: StorylinePhase;
-  lever: "influence" | "watch" | null;
+  // 'shape' = we make this happen directly, via our own initiative. 'influence' = partnership
+  // or coalition makes it more likely. 'watch' = outside our control. null = not yet classified
+  // — see LeversResult.unclassified below.
+  lever: "shape" | "influence" | "watch" | null;
   supports: string[]; // scenario ids this event's likelihood rising helps
   hist: LikelihoodLevel[]; // one level per window point, oldest first
 }
@@ -44,9 +84,15 @@ export interface MomentumResult {
 }
 
 export interface LeversResult {
+  shape: TrackedEvent[];
   influence: TrackedEvent[];
   watch: TrackedEvent[];
   block: TrackedEvent[];
+  // Supporting events with no lever classification yet (event_levers has no row for them).
+  // Not one of the reference's four columns — added because, unlike the mock, a real project
+  // starts with every event unclassified; without surfacing this list somewhere, Shape/
+  // Influence/Watch stay permanently empty with no way for a user to notice why.
+  unclassified: TrackedEvent[];
 }
 
 export interface HealthResult {
@@ -98,17 +144,20 @@ export function progress(scenarioId: string, tracked: TrackedEvent[]): number {
   return reached;
 }
 
-// influence/watch = events supporting the scenario, split by the project's own lever
-// classification (event_levers; null/unclassified events appear in neither). block = tracked
-// events that do NOT support this scenario — candidates to reduce (influenceable) or hedge
-// (watch-only), the UI distinction decision-ui.tsx already draws per event.lever.
+// shape/influence/watch = events supporting the scenario, split by the project's own lever
+// classification (event_levers; null/unclassified events appear in `unclassified`, not block).
+// block = tracked events that do NOT support this scenario — candidates to reduce
+// (influenceable) or hedge (watch-only), the UI distinction decision-ui.tsx already draws per
+// event.lever.
 export function levers(scenarioId: string, tracked: TrackedEvent[]): LeversResult {
   const supporting = tracked.filter((t) => t.supports.includes(scenarioId));
   const blocking = tracked.filter((t) => !t.supports.includes(scenarioId));
   return {
+    shape: supporting.filter((t) => t.lever === "shape"),
     influence: supporting.filter((t) => t.lever === "influence"),
     watch: supporting.filter((t) => t.lever === "watch"),
     block: blocking,
+    unclassified: supporting.filter((t) => t.lever === null),
   };
 }
 

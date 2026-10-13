@@ -24,11 +24,14 @@ import {
   createRouteMoves,
   getDecisionsData,
   reviewDiscoveredEvent,
+  setEventLever,
   setStrategyRevisionStatus,
   setStrategyTarget,
   type DecisionsData,
   type RouteMoveDraft,
 } from "@/lib/actions/decisions";
+import { setInitiativeStatus } from "@/lib/actions/initiatives";
+import { suggestInitiatives } from "@/lib/actions/ai-suggest-initiatives";
 
 const EVENT_NAME = "fm:decisions-updated";
 
@@ -41,6 +44,7 @@ export interface UseDecisionsResult {
   loading: boolean;
   refresh: () => Promise<void>;
   setTarget: (scenarioId: string, userId: string | null) => Promise<void>;
+  setLever: (eventId: string, lever: "shape" | "influence" | "watch" | null) => Promise<void>;
   actOnCard: (
     cardId: string,
     status: "accepted" | "deferred" | "dismissed" | "pending",
@@ -50,6 +54,11 @@ export interface UseDecisionsResult {
   reviewDiscovery: (discoveryId: string, status: "confirmed" | "sent_to_signals" | "rejected" | "pending", userId: string | null) => Promise<void>;
   setRevision: (revisionId: string, status: "applied" | "dismissed") => Promise<void>;
   createRoute: (scenarioId: string, moves: RouteMoveDraft[]) => Promise<void>;
+  actOnInitiative: (initiativeId: string, status: "approved" | "dismissed" | null, scenarioId: string) => Promise<void>;
+  // Returns how many new initiatives were actually added — the Strategy page's "Suggest more"
+  // button uses this (not a boolean) to know when to switch to "No more for now", same as the
+  // reference's own `const n = await api.suggestInitiatives(...); if (!n) setExhausted(true)`.
+  suggestMoreInitiatives: (scenarioId: string) => Promise<number>;
 }
 
 export function useDecisions(projectId: string | null): UseDecisionsResult {
@@ -107,6 +116,15 @@ export function useDecisions(projectId: string | null): UseDecisionsResult {
     [projectId]
   );
 
+  const setLever = React.useCallback(
+    async (eventId: string, lever: "shape" | "influence" | "watch" | null) => {
+      if (!projectId) return;
+      await setEventLever(projectId, eventId, lever);
+      dispatchUpdated(projectId);
+    },
+    [projectId]
+  );
+
   const actOnCard = React.useCallback(
     async (
       cardId: string,
@@ -156,5 +174,24 @@ export function useDecisions(projectId: string | null): UseDecisionsResult {
     [projectId]
   );
 
-  return { data, loading, refresh, setTarget, actOnCard, reviewDiscovery, setRevision, createRoute };
+  const actOnInitiative = React.useCallback(
+    async (initiativeId: string, status: "approved" | "dismissed" | null, scenarioId: string) => {
+      if (!projectId) return;
+      await setInitiativeStatus(projectId, initiativeId, status, scenarioId);
+      dispatchUpdated(projectId);
+    },
+    [projectId]
+  );
+
+  const suggestMoreInitiatives = React.useCallback(
+    async (scenarioId: string) => {
+      if (!projectId) return 0;
+      const { added } = await suggestInitiatives(projectId, scenarioId);
+      if (added > 0) dispatchUpdated(projectId);
+      return added;
+    },
+    [projectId]
+  );
+
+  return { data, loading, refresh, setTarget, setLever, actOnCard, reviewDiscovery, setRevision, createRoute, actOnInitiative, suggestMoreInitiatives };
 }

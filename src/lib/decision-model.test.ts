@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildHistFromHistory, compassPosition, health, levers, momentum, progress, windowPoints, type TrackedEvent } from "./decision-model";
+import { buildHistFromHistory, compassPosition, health, horizonForPhase, initiativeLane, levers, momentum, progress, windowPoints, type TrackedEvent } from "./decision-model";
 
 // Verbatim from design/2026-10-05/01-shared-decision-layer/decision-data.js's
 // window.FM_DECISIONS.tracked, with `phase` (smallint) translated to the phase enum
@@ -66,6 +66,26 @@ describe("levers", () => {
     expect(l.watch.map((t) => t.eventId).sort()).toEqual(["ev4", "ev7", "evi4"]);
     // ev5/evi5/ev6/ev8/ev1 don't support sc4 at all -> blockers, whatever their own lever is.
     expect(l.block.map((t) => t.eventId).sort()).toEqual(["ev1", "ev5", "ev6", "ev8", "evi5"]);
+    // None of TRACKED's seed rows carry 'shape' or null — both buckets are legitimately empty
+    // here, covered against separate local fixtures below instead of mutating the shared seed
+    // (momentum/health/progress's own acceptance values are keyed to TRACKED exactly as-is).
+    expect(l.shape).toEqual([]);
+    expect(l.unclassified).toEqual([]);
+  });
+
+  it("puts a 'shape' event (0049_event_levers_shape.sql) in its own bucket, separate from influence/watch", () => {
+    const withShape: TrackedEvent[] = [...TRACKED, { eventId: "evShape1", impact: 3, phase: "catalysts", lever: "shape", supports: [SC1], hist: [1, 1, 1, 2, 2, 2, 2] }];
+    const l = levers(SC1, withShape);
+    expect(l.shape.map((t) => t.eventId)).toEqual(["evShape1"]);
+    expect(l.influence.map((t) => t.eventId)).not.toContain("evShape1");
+    expect(l.watch.map((t) => t.eventId)).not.toContain("evShape1");
+  });
+
+  it("puts a supporting event with no event_levers row (lever: null) in `unclassified`, not `block`", () => {
+    const withUnclassified: TrackedEvent[] = [...TRACKED, { eventId: "evNull1", impact: 3, phase: "precursors", lever: null, supports: [SC1], hist: [1, 1, 1, 1, 1, 1, 1] }];
+    const l = levers(SC1, withUnclassified);
+    expect(l.unclassified.map((t) => t.eventId)).toEqual(["evNull1"]);
+    expect(l.block.map((t) => t.eventId)).not.toContain("evNull1");
   });
 });
 
@@ -109,6 +129,30 @@ describe("windowPoints / buildHistFromHistory", () => {
     // Every point before Sep 18 falls back to the seed level (2); Sep 20 and Oct 4 pick up
     // the Sep 18 row (2) and then the Sep 25 row (1) respectively.
     expect(hist).toEqual([2, 2, 2, 2, 2, 2, 1]);
+  });
+});
+
+describe("horizonForPhase", () => {
+  it("anchors each storyline phase to a default route horizon, never leaving the two disconnected", () => {
+    expect(horizonForPhase("precursors")).toBe("now");
+    expect(horizonForPhase("catalysts")).toBe("now");
+    expect(horizonForPhase("first_order")).toBe("2027");
+    expect(horizonForPhase("second_order")).toBe("2028");
+    expect(horizonForPhase("realized")).toBe("2029_30");
+  });
+});
+
+describe("initiativeLane", () => {
+  it("sends a 'hedge'-kind initiative to the hedge lane regardless of wind", () => {
+    expect(initiativeLane("hedge", { sc1: "helps", sc2: "helps", sc3: "helps", sc4: "helps" })).toBe("hedge");
+  });
+
+  it("sends a non-hedge initiative that helps in every scenario to no-regret", () => {
+    expect(initiativeLane("shape", { sc1: "helps", sc2: "helps", sc3: "helps", sc4: "helps" })).toBe("noregret");
+  });
+
+  it("sends a non-hedge initiative with mixed wind to shaping", () => {
+    expect(initiativeLane("influence", { sc1: "helps", sc2: "helps", sc3: "neutral", sc4: "hurts" })).toBe("shaping");
   });
 });
 

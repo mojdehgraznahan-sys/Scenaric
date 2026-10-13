@@ -16,9 +16,20 @@ import * as React from "react";
 import { Icons } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
 import type { Database } from "@/lib/supabase/types";
-import { LIKELIHOOD_LEVELS, type HealthResult, type LikelihoodLevel, type MomentumResult } from "@/lib/decision-model";
+import { LIKELIHOOD_LEVELS, type HealthResult, type LikelihoodLevel, type MomentumResult, type StorylinePhase } from "@/lib/decision-model";
 import type { HistoryEntry } from "@/lib/decision-tracking";
 import type { DecisionsData } from "@/lib/actions/decisions";
+import { DEFAULT_COLUMN_LABELS } from "@/components/storyline/data";
+
+// Shared by Monitoring (tracked events, storyline progress bar) and Strategy (route moves,
+// Phase B.1's "show the linked event's storyline phase inline" fix) — one label set, not two.
+export const PHASE_LABEL: Record<StorylinePhase, string> = {
+  precursors: DEFAULT_COLUMN_LABELS[0],
+  catalysts: DEFAULT_COLUMN_LABELS[1],
+  first_order: DEFAULT_COLUMN_LABELS[2],
+  second_order: DEFAULT_COLUMN_LABELS[3],
+  realized: DEFAULT_COLUMN_LABELS[4],
+};
 
 export type ActionCardRow = Database["public"]["Tables"]["action_cards"]["Row"];
 export type RouteMoveRow = Database["public"]["Tables"]["route_moves"]["Row"];

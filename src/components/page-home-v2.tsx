@@ -562,7 +562,7 @@ export function PageHomeV2() {
                 title="Route health"
                 sub={`Toward ${target.name}`}
                 right={
-                  <button onClick={() => navigate("/strategy")} className="text-[12.5px] font-medium text-muted-foreground hover:text-brand-dark">
+                  <button onClick={() => navigate("/strategy?tab=plan")} className="text-[12.5px] font-medium text-muted-foreground hover:text-brand-dark">
                     Route
                   </button>
                 }
@@ -654,7 +654,7 @@ export function PageHomeV2() {
           title={`Route to ${target.name}`}
           sub="Moves in motion from now to 2030. Accepted decisions update this map."
           right={
-            <button onClick={() => navigate("/strategy")} className="text-[12.5px] font-medium text-muted-foreground hover:text-brand-dark">
+            <button onClick={() => navigate("/strategy?tab=plan")} className="text-[12.5px] font-medium text-muted-foreground hover:text-brand-dark">
               Open Strategy
             </button>
           }

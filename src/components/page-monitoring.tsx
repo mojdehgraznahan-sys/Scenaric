@@ -14,20 +14,11 @@ import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 import { useNavigate } from "@/lib/use-navigate";
 import { useDecisions } from "@/lib/use-decisions";
-import { delta, windowPoints, LIKELIHOOD_LEVELS, STORYLINE_PHASES, type StorylinePhase } from "@/lib/decision-model";
+import { delta, windowPoints, LIKELIHOOD_LEVELS, STORYLINE_PHASES } from "@/lib/decision-model";
 import { toTrackedEvent, type TrackedEventRow } from "@/lib/decision-tracking";
-import { DcSpark, DcTrend, DcScenarioDots, DcActionCard, DcBriefing, type ScenarioLite } from "@/components/decision-ui";
+import { DcSpark, DcTrend, DcScenarioDots, DcActionCard, DcBriefing, PHASE_LABEL, type ScenarioLite } from "@/components/decision-ui";
 import { slPole } from "@/components/signals/pole";
-import { DEFAULT_COLUMN_LABELS } from "@/components/storyline/data";
 import type { ActionCardRow } from "@/components/decision-ui";
-
-const PHASE_LABEL: Record<StorylinePhase, string> = {
-  precursors: DEFAULT_COLUMN_LABELS[0],
-  catalysts: DEFAULT_COLUMN_LABELS[1],
-  first_order: DEFAULT_COLUMN_LABELS[2],
-  second_order: DEFAULT_COLUMN_LABELS[3],
-  realized: DEFAULT_COLUMN_LABELS[4],
-};
 
 type Filter = "All" | "Changed" | "Helps target" | "Works against";
 
@@ -193,7 +184,7 @@ export function PageMonitoring() {
                 {health.weakening[0] ? ` (${trackedById.get(health.weakening[0].eventId)?.title ?? "an untitled event"})` : ""}.{" "}
                 {health.blockersRising.length} blocker{health.blockersRising.length === 1 ? "" : "s"} rising.
               </div>
-              <Button variant="ghost" size="sm" onClick={() => navigate("/strategy")}>
+              <Button variant="ghost" size="sm" onClick={() => navigate("/strategy?tab=plan")}>
                 View route
               </Button>
             </div>

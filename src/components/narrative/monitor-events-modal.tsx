@@ -13,6 +13,8 @@ import { Chip } from "@/components/chip";
 import { eventCategory } from "@/components/signals/pole";
 import { addEventToMonitoring, removeEventFromMonitoring, type MonitoredEventRow } from "@/lib/actions/event-monitoring";
 import { suggestEventsToMonitor, type SuggestEventCandidate } from "@/lib/actions/ai-event-monitoring";
+import { PHASES, type Phase } from "@/lib/storyline-mapping";
+import { PHASE_LABEL } from "@/components/decision-ui";
 import type { EventItem, SteepCategory } from "@/lib/types";
 
 const STEEP_CATS: SteepCategory[] = ["Social", "Technology", "Economic", "Ecological", "Political"];
@@ -34,6 +36,11 @@ export function MonitorEventsModal({ open, onClose, projectId, scenarioId, initi
   const [filterStatus, setFilterStatus] = React.useState<"All" | "observed" | "possible">("All");
   const [checked, setChecked] = React.useState<Set<string>>(new Set());
   const [saving, setSaving] = React.useState(false);
+  // No picker at all previously — every event added here silently got 'precursors'
+  // regardless of how far along it actually is, which left Draft Route (and, once built,
+  // Suggest Initiatives) with a misleading phase signal for anything tracked via this modal
+  // instead of Storyline. Keyed by event id so each one can carry its own phase.
+  const [phaseByEventId, setPhaseByEventId] = React.useState<Map<string, Phase>>(new Map());
 
   const [suggesting, setSuggesting] = React.useState(false);
   const [suggestGap, setSuggestGap] = React.useState<string | null>(null);
@@ -47,9 +54,10 @@ export function MonitorEventsModal({ open, onClose, projectId, scenarioId, initi
     setFilterCat("All");
     setFilterStatus("All");
     setChecked(new Set(initialIds));
+    setPhaseByEventId(new Map(initiallyMonitored.map((m) => [m.eventId, m.phase])));
     setSuggestions([]);
     setSuggestGap(null);
-  }, [open, initialIds]);
+  }, [open, initialIds, initiallyMonitored]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -97,6 +105,11 @@ export function MonitorEventsModal({ open, onClose, projectId, scenarioId, initi
       else next.add(id);
       return next;
     });
+    setPhaseByEventId((prev) => (prev.has(id) ? prev : new Map(prev).set(id, "precursors")));
+  };
+
+  const setPhase = (id: string, phase: Phase) => {
+    setPhaseByEventId((prev) => new Map(prev).set(id, phase));
   };
 
   const runSuggest = async () => {
@@ -123,7 +136,13 @@ export function MonitorEventsModal({ open, onClose, projectId, scenarioId, initi
     try {
       const added = Array.from(checked).filter((id) => !initialIds.has(id));
       const removed = Array.from(initialIds).filter((id) => !checked.has(id));
-      await Promise.all([...added.map((id) => addEventToMonitoring(projectId, scenarioId, id)), ...removed.map((id) => removeEventFromMonitoring(scenarioId, id))]);
+      // Re-syncs every currently-checked event's phase, not just newly-added ones —
+      // syncEventScenarioLink upserts on (event_id, scenario_id), so this also picks up a
+      // phase edit on an already-monitored event, not only the picker's own default.
+      await Promise.all([
+        ...Array.from(checked).map((id) => addEventToMonitoring(projectId, scenarioId, id, phaseByEventId.get(id) ?? "precursors")),
+        ...removed.map((id) => removeEventFromMonitoring(scenarioId, id)),
+      ]);
       onSaved(added);
       onClose();
     } catch (err) {
@@ -276,6 +295,21 @@ export function MonitorEventsModal({ open, onClose, projectId, scenarioId, initi
                               <div className="truncate text-[13px] font-medium text-brand-dark">{e.title}</div>
                               <div className="font-mono text-[11px] tracking-[0.02em] text-text-3">{e.source || e.date}</div>
                             </div>
+                            {isChecked && (
+                              <select
+                                value={phaseByEventId.get(e.id) ?? "precursors"}
+                                onClick={(ev) => ev.stopPropagation()}
+                                onChange={(ev) => setPhase(e.id, ev.target.value as Phase)}
+                                className="flex-shrink-0 rounded-md border border-border bg-white px-1.5 py-1 text-[11px] text-text-3"
+                                aria-label={`Storyline phase for ${e.title}`}
+                              >
+                                {PHASES.map((p) => (
+                                  <option key={p} value={p}>
+                                    {PHASE_LABEL[p]}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
                           </li>
                         );
                       })}

@@ -15,6 +15,7 @@ import {
   type MomentumResult,
 } from "@/lib/decision-model";
 import { fetchTrackedEvents, toTrackedEvent, type TrackedEventRow } from "@/lib/decision-tracking";
+import { listInitiativesWithTargets, type InitiativeWithTargets } from "./initiatives";
 import type { Database } from "@/lib/supabase/types";
 
 type ActionCardRow = Database["public"]["Tables"]["action_cards"]["Row"];
@@ -42,6 +43,7 @@ export interface DecisionsData {
   inbox: DiscoveredEventRow[];
   actions: ActionCardRow[];
   route: RouteMoveRow[]; // route_moves for the current target scenario only; [] when no target set
+  initiatives: InitiativeWithTargets[]; // every initiative regardless of status — the UI filters by kind/status itself
   revision: StrategyRevisionRow | null; // latest row regardless of status — the UI only renders it when status = 'proposed'
   lastScan: ScanRunRow | null;
   axes: DecisionAxes | null;
@@ -53,7 +55,7 @@ export interface DecisionsData {
 export async function getDecisionsData(projectId: string): Promise<DecisionsData> {
   const supabase = createClient();
 
-  const [targetResult, scenarioRows, tracked, signpostsResult, inboxResult, actionsResult, revisionResult, lastScanResult, axesResult] = await Promise.all([
+  const [targetResult, scenarioRows, tracked, signpostsResult, inboxResult, actionsResult, revisionResult, lastScanResult, axesResult, initiatives] = await Promise.all([
     supabase.from("strategy_targets").select("scenario_id").eq("project_id", projectId).maybeSingle(),
     supabase.from("scenarios").select("id").eq("project_id", projectId).eq("is_archived", false),
     fetchTrackedEvents(supabase, projectId),
@@ -63,6 +65,7 @@ export async function getDecisionsData(projectId: string): Promise<DecisionsData
     supabase.from("strategy_revisions").select("*").eq("project_id", projectId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
     supabase.from("scan_runs").select("*").eq("project_id", projectId).order("ran_at", { ascending: false }).limit(1).maybeSingle(),
     supabase.from("axes").select("x_signal_id, y_signal_id").eq("project_id", projectId).eq("is_active", true).maybeSingle(),
+    listInitiativesWithTargets(projectId),
   ]);
   if (targetResult.error) throw targetResult.error;
   if (scenarioRows.error) throw scenarioRows.error;
@@ -122,6 +125,7 @@ export async function getDecisionsData(projectId: string): Promise<DecisionsData
     inbox: inboxResult.data,
     actions: actionsResult.data,
     route,
+    initiatives,
     revision: revisionResult.data,
     lastScan: lastScanResult.data,
     axes,
@@ -136,6 +140,30 @@ export async function setStrategyTarget(projectId: string, scenarioId: string, c
   const { error } = await supabase
     .from("strategy_targets")
     .upsert({ project_id: projectId, scenario_id: scenarioId, chosen_by: chosenBy, chosen_at: new Date().toISOString() }, { onConflict: "project_id" });
+  if (error) throw error;
+}
+
+// The Strategy page Levers section's classification control (design/strategy_handoff —
+// "shape" added to event_levers.lever, 0049_event_levers_shape.sql) — the first write path
+// event_levers has ever had; previously no UI/AI flow set it, so the Shape/Influence/Watch
+// columns had nothing to show on any real project. `lever: null` unclassifies (deletes the
+// row) rather than writing a fourth "unclassified" value, since the column is not-null and a
+// missing row is already how decision-model.ts's levers() represents "not yet classified."
+// eventId is scoped to projectId the same way every other id-only mutation in this codebase
+// was hardened earlier — RLS only scopes to the org, not this one project.
+export async function setEventLever(projectId: string, eventId: string, lever: "shape" | "influence" | "watch" | null): Promise<void> {
+  const supabase = createClient();
+
+  const { data: event, error: eventError } = await supabase.from("events").select("id").eq("id", eventId).eq("project_id", projectId).single();
+  if (eventError) throw eventError;
+
+  if (lever === null) {
+    const { error } = await supabase.from("event_levers").delete().eq("event_id", event.id);
+    if (error) throw error;
+    return;
+  }
+
+  const { error } = await supabase.from("event_levers").upsert({ project_id: projectId, event_id: event.id, lever }, { onConflict: "event_id" });
   if (error) throw error;
 }
 

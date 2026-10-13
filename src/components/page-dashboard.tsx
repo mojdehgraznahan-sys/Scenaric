@@ -122,7 +122,7 @@ export function PageDashboard() {
       label: "Strategic options",
       ...(dashboard?.kpis.strategicOptions ?? EMPTY_KPI),
       tone: "text-[#10B981]",
-      route: "/strategy",
+      route: "/strategy?tab=wind",
     },
   ];
 

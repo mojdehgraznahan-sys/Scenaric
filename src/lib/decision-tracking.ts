@@ -22,7 +22,7 @@ export interface TrackedEventRow {
   title: string;
   impact: number;
   phase: StorylinePhase;
-  lever: "influence" | "watch" | null;
+  lever: "shape" | "influence" | "watch" | null;
   forceId: string | null;
   forceTitle: string;
   pole: string;
@@ -95,7 +95,7 @@ export async function fetchTrackedEvents(supabase: SupabaseClient<Database>, pro
   if (editorsError) throw editorsError;
   const editorNameById = new Map(editorProfiles.map((p) => [p.id, p.name ?? p.email]));
 
-  const leverByEvent = new Map(leversResult.data.map((l) => [l.event_id, l.lever as "influence" | "watch"]));
+  const leverByEvent = new Map(leversResult.data.map((l) => [l.event_id, l.lever as "shape" | "influence" | "watch"]));
   const signalLinkByEvent = new Map<string, { signalId: string; side: "a" | "b" | null }>();
   for (const l of signalLinksResult.data) if (!signalLinkByEvent.has(l.event_id)) signalLinkByEvent.set(l.event_id, { signalId: l.signal_id, side: l.side });
 
