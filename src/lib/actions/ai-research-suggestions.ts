@@ -17,6 +17,7 @@ import { createSignal, type SteepCategory } from "./signals";
 import { scoreOneSignal } from "./ai-signals";
 import { buildSignalsContext } from "./signals-context";
 import { FORCE_FRAMING_RULES, isValidForceTitle } from "./force-writing-rules";
+import { PERSONA_COMPETITIVE_ANALYST, PERSONA_MACRO_SCOUT } from "@/lib/ai/personas";
 import type { Database } from "@/lib/supabase/types";
 
 export type ResearchSuggestionRow = Database["public"]["Tables"]["research_suggestions"]["Row"];
@@ -40,7 +41,9 @@ const LocalForceScanSchema = z.object({
     .max(8),
 });
 
-const LOCAL_FORCE_SCAN_TASK_PROMPT = `Task: Search the live web for REAL, currently-active local/task-
+const LOCAL_FORCE_SCAN_TASK_PROMPT = `${PERSONA_MACRO_SCOUT}
+
+Task: Search the live web for REAL, currently-active local/task-
 environment actors (Step 2, Key forces — customers, suppliers, competitors, regulators,
 partners the org would directly interact with) relevant to this project's focal question,
 that are not already covered by its existing local-actor insights.
@@ -87,7 +90,9 @@ const MacroTrendSweepSchema = z.object({
     .max(8),
 });
 
-const MACRO_TREND_SWEEP_TASK_PROMPT = `Task: You are helping a CEO map how their business could play
+const MACRO_TREND_SWEEP_TASK_PROMPT = `${PERSONA_MACRO_SCOUT}
+
+Task: You are helping a CEO map how their business could play
 out — not reporting current events. Search the live web for REAL, currently-relevant
 macro-environmental STEEP forces (Step 3, Driving forces — Social, Technological, Economic,
 Ecological, Political forces outside the org's direct control) relevant to this project's
@@ -394,7 +399,9 @@ const FindScanSchema = z.object({
   items: z.array(FindItemBase).max(10),
 });
 
-const FIND_SCAN_TASK_PROMPT = `Task: You are helping a CEO map how their business could play out —
+const FIND_SCAN_TASK_PROMPT = `${PERSONA_MACRO_SCOUT}
+
+Task: You are helping a CEO map how their business could play out —
 not reporting current events. Search the live web for REAL forces relevant to this project's
 focal question that are absent from its existing signals — split across Step 2 (Key forces:
 customers, suppliers, competitors, regulators the org directly interacts with) and Step 3
@@ -467,7 +474,9 @@ const FindOracleSchema = z.object({
   items: z.array(FindOracleItemSchema).max(9),
 });
 
-const FIND_ORACLE_TASK_PROMPT = `Task: Search the live web to turn the user's own "oracle
+const FIND_ORACLE_TASK_PROMPT = `${PERSONA_MACRO_SCOUT}
+
+Task: Search the live web to turn the user's own "oracle
 questions" (from onboarding: if an oracle would answer truthfully about their business, what
 would they ask it) into named forces — these are the user's own stated unknowns, high-priority
 candidates, not speculation.
@@ -550,7 +559,9 @@ const FindActorsSchema = z.object({
   items: z.array(FindActorItemSchema).max(6),
 });
 
-const FIND_ACTORS_TASK_PROMPT = `Task: The user named parties they depend on but do not control.
+const FIND_ACTORS_TASK_PROMPT = `${PERSONA_COMPETITIVE_ANALYST}
+
+Task: The user named parties they depend on but do not control.
 Identify the DISCRETE actors in that freeform text (it may name several in one sentence), then
 for each, search the live web for their current strategic posture, recent moves, and the single
 most consequential thing they could do over the horizon that would change this user's decision.
@@ -627,7 +638,9 @@ const FindWorstCaseSchema = z.object({
   items: z.array(FindWorstCaseItemSchema).max(10),
 });
 
-const FIND_WORST_CASE_TASK_PROMPT = `Task: Working backwards from the user's stated worst case,
+const FIND_WORST_CASE_TASK_PROMPT = `${PERSONA_MACRO_SCOUT}
+
+Task: Working backwards from the user's stated worst case,
 search the live web for the forces that would have to move for it to materialize — prioritize
 forces with observable present-day precursors over abstract risks.
 
@@ -707,7 +720,9 @@ const FindBlindSpotSchema = z.object({
   items: z.array(FindBlindSpotItemSchema).max(12),
 });
 
-const FIND_BLIND_SPOT_TASK_PROMPT = `Task: Given how this project's signals currently cluster
+const FIND_BLIND_SPOT_TASK_PROMPT = `${PERSONA_MACRO_SCOUT}
+
+Task: Given how this project's signals currently cluster
 across STEEP categories, identify which categories are under-represented relative to what the
 focal question actually depends on, then search the live web for 2-3 forces in each thin
 category.

@@ -7,6 +7,7 @@
 // project-scoped variants, each logging against a real projectId.
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
+import { PERSONA_DECISION_CLARIFIER } from "@/lib/ai/personas";
 import { z } from "zod";
 
 const FOCAL_QUESTION_FORM_RULES = `A well-formed focal question must:
@@ -28,7 +29,9 @@ const DraftFocalQuestionSchema = z.object({
   rationale: z.string(),
 });
 
-const DRAFT_TASK_PROMPT = `Task: Propose a focal question in Schwartz's required form (see rules
+const DRAFT_TASK_PROMPT = `${PERSONA_DECISION_CLARIFIER}
+
+Task: Propose a focal question in Schwartz's required form (see rules
 below) for this project, grounded in its name/industry/summary and any existing signals — a
 first draft the user must explicitly review and accept, never silently applied.
 
@@ -108,7 +111,9 @@ const SharpenFocalQuestionSchema = z.object({
     .max(3),
 });
 
-const SHARPEN_TASK_PROMPT = `Task: Tighten the project's current focal question into 2-3
+const SHARPEN_TASK_PROMPT = `${PERSONA_DECISION_CLARIFIER}
+
+Task: Tighten the project's current focal question into 2-3
 alternative, sharper phrasings per Schwartz's required form — the user picks one, never
 auto-applied.
 
@@ -160,7 +165,9 @@ const CritiqueFocalQuestionSchema = z.object({
   rationale: z.string(),
 });
 
-const CRITIQUE_TASK_PROMPT = `Task: Critique-only — judge whether the project's current focal
+const CRITIQUE_TASK_PROMPT = `${PERSONA_DECISION_CLARIFIER}
+
+Task: Critique-only — judge whether the project's current focal
 question is too broad, too narrow, or well-scoped per Schwartz's required form. Never propose
 a rewrite; this task only narrates a diagnosis.
 

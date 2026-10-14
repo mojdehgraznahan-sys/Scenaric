@@ -14,6 +14,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
 import { StorylineScenarioNotFoundError } from "@/lib/ai/errors";
+import { PERSONA_STRATEGIC_ADVISOR } from "@/lib/ai/personas";
 
 const CATEGORIES = ["capital", "hiring", "tech", "partners", "other"] as const;
 
@@ -36,7 +37,9 @@ const ImplicationsSchema = z.object({
     .max(5),
 });
 
-const IMPLICATIONS_TASK_PROMPT = `Task: Derive strategic implications of ONE scenario for the focal
+const IMPLICATIONS_TASK_PROMPT = `${PERSONA_STRATEGIC_ADVISOR}
+
+Task: Derive strategic implications of ONE scenario for the focal
 question — concrete "if this future happens, we would need to..."
 statements, not restated scenario facts.
 

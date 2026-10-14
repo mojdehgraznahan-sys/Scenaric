@@ -9,6 +9,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
 import { StorylineScenarioNotFoundError } from "@/lib/ai/errors";
+import { PERSONA_SCENARIO_SENTINEL } from "@/lib/ai/personas";
 import { z } from "zod";
 import { listImplications } from "./implications";
 
@@ -32,7 +33,9 @@ const SuggestEventsSchema = z.object({
     .max(5),
 });
 
-const SUGGEST_EVENTS_TASK_PROMPT = `Task: Pick which of this project's existing, untracked
+const SUGGEST_EVENTS_TASK_PROMPT = `${PERSONA_SCENARIO_SENTINEL}
+
+Task: Pick which of this project's existing, untracked
 events are worth monitoring for ONE scenario — concrete, externally observable occurrences that
 would tell an analyst this scenario is the one unfolding, distinguishable from the OTHER
 scenarios sharing this project's axes. You are SELECTING from candidate_events below — never

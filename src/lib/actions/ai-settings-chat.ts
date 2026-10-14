@@ -7,6 +7,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
 import { AIWebSearchError } from "@/lib/ai/errors";
+import { PERSONA_DECISION_CLARIFIER } from "@/lib/ai/personas";
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 
@@ -19,7 +20,9 @@ const SettingsChatSchema = z.object({
   inference: z.string().nullable(),
 });
 
-const SETTINGS_CHAT_TASK_PROMPT = `Task: Answer the user's question about this project's own
+const SETTINGS_CHAT_TASK_PROMPT = `${PERSONA_DECISION_CLARIFIER}
+
+Task: Answer the user's question about this project's own
 identity/setup — its focal question, horizon, industry, and name — grounded strictly in the
 project's own fields and signals already in this project. This is a narrower, settings-scoped
 variant of general project Q&A: do not reference scenarios, storyline, or indicators even if
@@ -56,7 +59,9 @@ const SettingsResearchChatSchema = z.object({
   webCitations: z.array(z.object({ title: z.string(), url: z.string() })),
 });
 
-const SETTINGS_RESEARCH_CHAT_TASK_PROMPT = `Task: The user has explicitly asked to research this
+const SETTINGS_RESEARCH_CHAT_TASK_PROMPT = `${PERSONA_DECISION_CLARIFIER}
+
+Task: The user has explicitly asked to research this
 question live rather than answer only from the project's own stored data — e.g. competitive
 landscape, regulatory/rules changes, geopolitical developments, tariffs, or international-market
 conditions relevant to this project's industry and focal question. You MUST call the web_search

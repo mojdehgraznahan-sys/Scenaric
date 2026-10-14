@@ -10,6 +10,7 @@
 // address — advisory-only for v1 here too, rendered straight into the Ask AI drawer.
 import { z } from "zod";
 import { runStructured } from "@/lib/ai/client";
+import { PERSONA_MACRO_SCOUT } from "@/lib/ai/personas";
 import { buildSignalsContext } from "./signals-context";
 
 // ---- 2.1 "Is this a force or an event?" ----
@@ -24,7 +25,9 @@ const SharpenForceOrEventSchema = z.object({
   flags: z.array(ForceOrEventItemSchema),
 });
 
-const SHARPEN_FORCE_OR_EVENT_TASK_PROMPT = `Task: Review every given signal. A FORCE is a
+const SHARPEN_FORCE_OR_EVENT_TASK_PROMPT = `${PERSONA_MACRO_SCOUT}
+
+Task: Review every given signal. A FORCE is a
 persistent driver that can resolve in more than one direction over the horizon. An EVENT is a
 single occurrence — usually evidence FOR a force, not a force itself.
 
@@ -91,7 +94,9 @@ const SharpenSplitCompoundSchema = z.object({
   splits: z.array(SplitCompoundItemSchema),
 });
 
-const SHARPEN_SPLIT_COMPOUND_TASK_PROMPT = `Task: Identify every given signal that bundles two
+const SHARPEN_SPLIT_COMPOUND_TASK_PROMPT = `${PERSONA_MACRO_SCOUT}
+
+Task: Identify every given signal that bundles two
 independently-resolving drivers (e.g. "regulatory and economic pressure") — these break the
 axis-independence requirement scenario-building depends on later.
 
@@ -156,7 +161,9 @@ const SharpenDedupeSchema = z.object({
   clusters: z.array(DedupeClusterSchema),
 });
 
-const SHARPEN_DEDUPE_TASK_PROMPT = `Task: Compare all given signals SEMANTICALLY, not by string
+const SHARPEN_DEDUPE_TASK_PROMPT = `${PERSONA_MACRO_SCOUT}
+
+Task: Compare all given signals SEMANTICALLY, not by string
 match. Identify pairs or clusters describing the same underlying force in different vocabulary.
 
 Input: { signals: [{ id: string, title: string, body: string, category: string }] }

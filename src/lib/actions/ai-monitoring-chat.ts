@@ -14,6 +14,7 @@ import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
 import { fetchTrackedEvents } from "@/lib/decision-tracking";
 import { LIKELIHOOD_LEVELS } from "@/lib/decision-model";
+import { PERSONA_SCENARIO_SENTINEL } from "@/lib/ai/personas";
 import { z } from "zod";
 
 const MonitoringChatSchema = z.object({
@@ -31,7 +32,9 @@ const MonitoringChatSchema = z.object({
     .optional(),
 });
 
-const MONITORING_CHAT_TASK_PROMPT = `Task: Answer the user's question about their tracked events
+const MONITORING_CHAT_TASK_PROMPT = `${PERSONA_SCENARIO_SENTINEL}
+
+Task: Answer the user's question about their tracked events
 — grounded strictly in the tracked events, their recent likelihood history, and the scenarios
 already in this project. Never answer from general market/industry knowledge as if it were
 project fact.

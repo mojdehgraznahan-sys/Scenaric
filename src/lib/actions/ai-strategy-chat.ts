@@ -13,6 +13,7 @@
 // option" in ask-ai.tsx).
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
+import { PERSONA_STRATEGIC_ADVISOR } from "@/lib/ai/personas";
 import { z } from "zod";
 
 const StrategyChatSchema = z.object({
@@ -29,7 +30,9 @@ const StrategyChatSchema = z.object({
     .optional(),
 });
 
-const STRATEGY_CHAT_TASK_PROMPT = `Task: Answer the user's question about their strategic options —
+const STRATEGY_CHAT_TASK_PROMPT = `${PERSONA_STRATEGIC_ADVISOR}
+
+Task: Answer the user's question about their strategic options —
 grounded strictly in the strategic_options, strategy_scenario_scores, scenarios, and implications
 already in this project. This is a project-scoped variant of general Q&A: never answer from
 general market/industry knowledge as if it were project fact.

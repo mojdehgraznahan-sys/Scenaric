@@ -11,6 +11,7 @@ import "server-only";
 import { runStructured } from "@/lib/ai/client";
 import { z } from "zod";
 import { arePolesWeak } from "@/lib/poles";
+import { PERSONA_MACRO_SCOUT } from "@/lib/ai/personas";
 import type { SteepCategory } from "./signals";
 
 // Interpolate this block into any task prompt that asks the model to name a driving force.
@@ -89,7 +90,9 @@ const DraftForcePolesSchema = z.object({
   pole_b: z.string(),
 });
 
-const DRAFT_FORCE_POLES_TASK_PROMPT = `Task: You are given a specific occurrence (a news item) that a
+const DRAFT_FORCE_POLES_TASK_PROMPT = `${PERSONA_MACRO_SCOUT}
+
+Task: You are given a specific occurrence (a news item) that a
 user is promoting into a tracked driving force. Reframe it as a forward-looking, two-sided
 force — not a restatement of the occurrence itself.
 

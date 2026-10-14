@@ -14,6 +14,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
 import { NotFoundError } from "@/lib/ai/errors";
+import { PERSONA_SCENARIO_SENTINEL } from "@/lib/ai/personas";
 import { z } from "zod";
 import { fetchTrackedEvents, toTrackedEvent } from "@/lib/decision-tracking";
 import { momentum, health, delta, windowPoints, LIKELIHOOD_LEVELS, type HealthTone, type LikelihoodLevel } from "@/lib/decision-model";
@@ -23,7 +24,9 @@ import { suggestEventsToMonitor, type SuggestEventsToMonitorResult } from "./ai-
 
 const RankScenariosRationaleSchema = z.object({ rationale: z.string() });
 
-const RANK_SCENARIOS_PROMPT = `Task: Explain, in grounded prose, why the given top-ranked scenario
+const RANK_SCENARIOS_PROMPT = `${PERSONA_SCENARIO_SENTINEL}
+
+Task: Explain, in grounded prose, why the given top-ranked scenario
 currently has the strongest momentum signal among this project's scenarios. The ranking itself
 has already been computed deterministically (sum of likelihood-delta*impact across every event
 supporting that scenario) — do not recompute or second-guess it, only narrate it.
@@ -143,7 +146,9 @@ export async function rankScenariosByEventSignal(projectId: string): Promise<Ran
 
 const ExplainEventSchema = z.object({ explanation: z.string().min(20) });
 
-const EXPLAIN_EVENT_PROMPT = `Task: Write a plain-language walkthrough of how ONE tracked
+const EXPLAIN_EVENT_PROMPT = `${PERSONA_SCENARIO_SENTINEL}
+
+Task: Write a plain-language walkthrough of how ONE tracked
 event's likelihood arrived at its current level, using ONLY the real, grounded readings given
 below — do not introduce a new reason not present in them.
 
@@ -217,7 +222,9 @@ export async function explainEventLikelihood(eventId: string): Promise<ExplainEv
 
 const RecentChangesSummarySchema = z.object({ summary: z.string() });
 
-const RECENT_CHANGES_PROMPT = `Task: Summarize which tracked events changed likelihood level in
+const RECENT_CHANGES_PROMPT = `${PERSONA_SCENARIO_SENTINEL}
+
+Task: Summarize which tracked events changed likelihood level in
 the last 7 days, grouped by scenario, using ONLY the real transitions given below.
 
 Input: { changes: [{ event_title: string, scenario_names: string[], from_level: string,

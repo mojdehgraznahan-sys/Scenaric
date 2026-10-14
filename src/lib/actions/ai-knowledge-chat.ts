@@ -8,6 +8,7 @@
 // attaches webSearch.
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
+import { PERSONA_MACRO_SCOUT } from "@/lib/ai/personas";
 import { z } from "zod";
 
 const KnowledgeChatSchema = z.object({
@@ -18,7 +19,9 @@ const KnowledgeChatSchema = z.object({
   inference: z.string().nullable(),
 });
 
-const KNOWLEDGE_CHAT_TASK_PROMPT = `Task: Answer the user's question about this project's
+const KNOWLEDGE_CHAT_TASK_PROMPT = `${PERSONA_MACRO_SCOUT}
+
+Task: Answer the user's question about this project's
 Knowledge Base — what's been uploaded/researched so far, what it says, and what's still
 missing — grounded strictly in the sources, insights, and interviews already in this project.
 

@@ -8,6 +8,7 @@
 // impact/uncertainty). Same runStructured pattern as ai-signals.ts/ai-insights.ts throughout.
 import { z } from "zod";
 import { runStructured, AIGenerationFailedError } from "@/lib/ai/client";
+import { PERSONA_UNCERTAINTY_CARTOGRAPHER } from "@/lib/ai/personas";
 import { createClient } from "@/lib/supabase/server";
 import { assertAxisCandidates } from "./matrix";
 import type { SteepCategory } from "./signals";
@@ -18,7 +19,9 @@ const IndependenceSchema = z.object({
   rationale: z.array(z.string()).min(1).max(3),
 });
 
-const INDEPENDENCE_TASK_PROMPT = `Task: Assess whether two candidate scenario axes resolve independently
+const INDEPENDENCE_TASK_PROMPT = `${PERSONA_UNCERTAINTY_CARTOGRAPHER}
+
+Task: Assess whether two candidate scenario axes resolve independently
 of one another. Schwartz's method requires the two axes to be able to
 combine into all 4 plausible quadrants — correlated axes collapse the
 matrix to effectively 2 scenarios, which is a methodology violation.
@@ -104,7 +107,9 @@ const BucketClassificationSchema = z.object({
 // reading comprehension, not a keyword list — so this single call evaluates shock-candidacy
 // itself as the literal first step of the same decision procedure, rather than requiring an
 // upstream pre-call. One AI call per signal either way.
-const BUCKET_CLASSIFICATION_TASK_PROMPT = `Task: Assign ONE signal to exactly one of Schwartz's four rank-forces
+const BUCKET_CLASSIFICATION_TASK_PROMPT = `${PERSONA_UNCERTAINTY_CARTOGRAPHER}
+
+Task: Assign ONE signal to exactly one of Schwartz's four rank-forces
 buckets, given its already-scored impact and uncertainty.
 
 Input: { signal: {title, body, category, impact(1-5), uncertainty(Low/Med/High)} }

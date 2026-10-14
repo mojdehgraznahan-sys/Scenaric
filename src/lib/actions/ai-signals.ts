@@ -16,6 +16,7 @@ import { z } from "zod";
 import { runStructured } from "@/lib/ai/client";
 import { createClient } from "@/lib/supabase/server";
 import { FORCE_FRAMING_RULES, validateForceCandidate, draftForcePoles } from "./force-writing-rules";
+import { PERSONA_MACRO_SCOUT, PERSONA_UNCERTAINTY_CARTOGRAPHER } from "@/lib/ai/personas";
 import type { Database } from "@/lib/supabase/types";
 import type { SteepCategory } from "./signals";
 
@@ -38,7 +39,9 @@ const SuggestSignalsSchema = z.object({
     .max(6),
 });
 
-const SUGGEST_TASK_PROMPT = `Task: You are helping a CEO map how their business could play out —
+const SUGGEST_TASK_PROMPT = `${PERSONA_MACRO_SCOUT}
+
+Task: You are helping a CEO map how their business could play out —
 not reporting what their documents already say. Convert local insights + the focal question
 into STEEP-classified driving forces: forward-looking uncertainties the scenario set must
 consider, each representing ONE distinct macro tension that could resolve two different ways.
@@ -73,7 +76,9 @@ const ScoreSignalSchema = z.object({
   rationale: z.string(),
 });
 
-const SCORE_TASK_PROMPT = `Task: Score ONE signal on Schwartz's two axes used for the ranking matrix:
+const SCORE_TASK_PROMPT = `${PERSONA_UNCERTAINTY_CARTOGRAPHER}
+
+Task: Score ONE signal on Schwartz's two axes used for the ranking matrix:
 IMPACT (how much would this reshape the focal decision if it occurred)
 and UNCERTAINTY (how unpredictable is its outcome/direction).
 
@@ -243,7 +248,9 @@ const CategorizeSignalSchema = z.object({
   rationale: z.string(),
 });
 
-const CATEGORIZE_TASK_PROMPT = `Task: Classify ONE piece of extracted evidence (an insight being
+const CATEGORIZE_TASK_PROMPT = `${PERSONA_MACRO_SCOUT}
+
+Task: Classify ONE piece of extracted evidence (an insight being
 turned into a Signal) into Schwartz's STEEP taxonomy — the macro-environmental
 category that best fits the underlying uncertainty it represents.
 
@@ -303,7 +310,9 @@ const SignalsChatSchema = z.object({
   cites: z.array(z.string()),
 });
 
-const SIGNALS_CHAT_TASK_PROMPT = `Task: Answer the user's question about their Signals Library —
+const SIGNALS_CHAT_TASK_PROMPT = `${PERSONA_MACRO_SCOUT}
+
+Task: Answer the user's question about their Signals Library —
 grounded strictly in the driving-force signals and extracted insights already in this
 project. This is a narrower, signals-scoped variant of general project Q&A: do not
 reference scenarios, storyline, or indicators even if asked — those aren't available in

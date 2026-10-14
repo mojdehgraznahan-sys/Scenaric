@@ -9,6 +9,7 @@
 // reviewed once, immediately, by the same person who requested it.
 import { z } from "zod";
 import { runStructured } from "@/lib/ai/client";
+import { PERSONA_STRATEGIC_ADVISOR } from "@/lib/ai/personas";
 import type { StorylinePhase } from "@/lib/decision-model";
 
 const RouteDraftSchema = z.object({
@@ -27,7 +28,9 @@ const RouteDraftSchema = z.object({
     .max(12),
 });
 
-const ROUTE_DRAFT_TASK_PROMPT = `Task: Draft a route of moves toward the given target scenario —
+const ROUTE_DRAFT_TASK_PROMPT = `${PERSONA_STRATEGIC_ADVISOR}
+
+Task: Draft a route of moves toward the given target scenario —
 a mix of no-regret moves (pay off regardless of which future arrives), shaping moves (make the
 events that lead to the target more likely), and hedges (held in reserve, triggered if another
 future gains ground instead).

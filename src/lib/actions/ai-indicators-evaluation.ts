@@ -9,6 +9,7 @@
 // indicators-monitoring.ts already pulled via pullNewsFeed.
 import { z } from "zod";
 import { runStructured } from "@/lib/ai/client";
+import { PERSONA_SCENARIO_SENTINEL } from "@/lib/ai/personas";
 
 const IndicatorEvaluationSchema = z.object({
   // No top-level sufficient_evidence/gap — an empty `updates` array is a normal, expected
@@ -29,7 +30,9 @@ const IndicatorEvaluationSchema = z.object({
     .max(40),
 });
 
-const INDICATOR_EVALUATION_TASK_PROMPT = `Task: Given today's freshly pulled news items and this
+const INDICATOR_EVALUATION_TASK_PROMPT = `${PERSONA_SCENARIO_SENTINEL}
+
+Task: Given today's freshly pulled news items and this
 project's existing Step 8 indicators (each with its own trigger_condition defining what On
 track/Watch/Alert mean for it), decide whether any item moves any indicator's status. This is a
 recurring daily monitoring pass, not indicator generation — never invent a new indicator, only

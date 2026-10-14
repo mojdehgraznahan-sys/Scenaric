@@ -10,6 +10,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
 import { StorylineScenarioNotFoundError } from "@/lib/ai/errors";
+import { PERSONA_SCENARIO_STORYTELLER } from "@/lib/ai/personas";
 import { z } from "zod";
 import { getStoryline } from "./storyline";
 import { listImplications } from "./implications";
@@ -45,7 +46,9 @@ const FidelitySchema = z.object({
   ),
 });
 
-const FIDELITY_TASK_PROMPT = `Task: Verify that a scenario's narrative prose faithfully represents its
+const FIDELITY_TASK_PROMPT = `${PERSONA_SCENARIO_STORYTELLER}
+
+Task: Verify that a scenario's narrative prose faithfully represents its
 approved storyline chain — the same discipline the narrative/expand prompt itself is held to,
 checked after the fact.
 
@@ -141,7 +144,9 @@ const StressTestSchema = z.object({
   ),
 });
 
-const STRESS_TEST_TASK_PROMPT = `Task: Stress-test ONE scenario's implications for genericness — for each
+const STRESS_TEST_TASK_PROMPT = `${PERSONA_SCENARIO_STORYTELLER}
+
+Task: Stress-test ONE scenario's implications for genericness — for each
 implication, would it plausibly hold even if one of the OTHER sibling scenarios (sharing the
 same two axes) happened instead? If yes, it's not actually scenario-specific and should be
 flagged, per the implications/generate rule that implications must be scenario-specific, not

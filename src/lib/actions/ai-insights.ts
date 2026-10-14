@@ -10,6 +10,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { runStructured, AIGenerationFailedError } from "@/lib/ai/client";
+import { PERSONA_MACRO_SCOUT } from "@/lib/ai/personas";
 import { createClient } from "@/lib/supabase/server";
 import type { Database } from "@/lib/supabase/types";
 
@@ -43,7 +44,9 @@ const ExtractInsightsSchema = z.object({
     .max(8),
 });
 
-const TASK_PROMPT = `Task: Extract key forces from ONE source document/transcript relevant to
+const TASK_PROMPT = `${PERSONA_MACRO_SCOUT}
+
+Task: Extract key forces from ONE source document/transcript relevant to
 the focal question — local/task-environment actors (stakeholders and actors that
 directly interact with the focal decision: customers, competitors, regulators the org
 negotiates with directly, suppliers, partners, internal capability constraints) AND

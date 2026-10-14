@@ -15,6 +15,7 @@ import { runStructured } from "@/lib/ai/client";
 import { createClient } from "@/lib/supabase/server";
 import { getOnboardingAnswers } from "./projects";
 import { FORCE_FRAMING_RULES, sharesVerbatimPhrase, validateForceCandidate } from "./force-writing-rules";
+import { PERSONA_MACRO_SCOUT, PERSONA_EVIDENCE_DRAFTER } from "@/lib/ai/personas";
 
 const STEEP = ["Social", "Technology", "Economic", "Ecological", "Political"] as const;
 
@@ -50,7 +51,9 @@ const DeriveForcesSchema = z.object({
   unused_insight_ids: z.array(z.string()),
 });
 
-const DERIVE_FORCES_TASK_PROMPT = `Task: You are helping a CEO map how their business could play
+const DERIVE_FORCES_TASK_PROMPT = `${PERSONA_MACRO_SCOUT}
+
+Task: You are helping a CEO map how their business could play
 out over the next {horizon} in {industry}, for the decision: {focal} — not summarizing their
 Knowledge Base back to them. Below are insights extracted from their own documents, interviews,
 surveys and web sources. Group them into driving forces: forward-looking uncertainties that
@@ -223,7 +226,9 @@ const DeriveEventsSchema = z.object({
     .max(4),
 });
 
-const DERIVE_EVENTS_TASK_PROMPT = `Task: You are helping a CEO see how this one force could play
+const DERIVE_EVENTS_TASK_PROMPT = `${PERSONA_EVIDENCE_DRAFTER}
+
+Task: You are helping a CEO see how this one force could play
 out — the point is what happens NEXT, not a recap of what your evidence already says. An event
 is ONE occurrence: who did what, where, and when. Someone reading the news must be able to say
 "that happened" or "it hasn't happened yet".

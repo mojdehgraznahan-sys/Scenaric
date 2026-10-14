@@ -15,6 +15,7 @@
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
+import { PERSONA_STRATEGIC_ADVISOR } from "@/lib/ai/personas";
 import { getProjectDashboard } from "./dashboard";
 import { STEP_LABELS, STEP_ROUTES } from "@/lib/step-tracker";
 
@@ -140,7 +141,9 @@ const RecommendationsSchema = z.object({
     .max(2),
 });
 
-const RECOMMENDATIONS_TASK_PROMPT = `Task: Write a one-sentence rationale for each candidate
+const RECOMMENDATIONS_TASK_PROMPT = `${PERSONA_STRATEGIC_ADVISOR}
+
+Task: Write a one-sentence rationale for each candidate
 action below, to display on the Home dashboard — deterministic classification/narration, not
 creative brainstorming. The candidates themselves are already decided by the app; you are not
 choosing what the actions ARE, only whether each is worth surfacing right now and why.

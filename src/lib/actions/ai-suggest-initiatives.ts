@@ -9,6 +9,7 @@
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
+import { PERSONA_STRATEGIC_ADVISOR } from "@/lib/ai/personas";
 import { fetchTrackedEvents, toTrackedEvent, type HistoryEntry } from "@/lib/decision-tracking";
 import { levers, windowPoints, LIKELIHOOD_LEVELS, type StorylinePhase, type TrackedEvent } from "@/lib/decision-model";
 
@@ -38,7 +39,9 @@ const InitiativeOutputSchema = z.object({
     .max(3),
 });
 
-const SUGGEST_INITIATIVES_TASK_PROMPT = `Task: Propose 1-3 NEW strategic initiatives toward the given target scenario — projects or
+const SUGGEST_INITIATIVES_TASK_PROMPT = `${PERSONA_STRATEGIC_ADVISOR}
+
+Task: Propose 1-3 NEW strategic initiatives toward the given target scenario — projects or
 research the org could launch. Each one either makes a supporting event more likely (shape/
 influence), investigates a watch-only event before committing (research), or protects against a
 blocker (hedge).

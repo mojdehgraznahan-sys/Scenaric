@@ -9,13 +9,16 @@
 // ai-strategy-recommendation.ts already uses for its rationale.
 import { z } from "zod";
 import { runStructured } from "@/lib/ai/client";
+import { PERSONA_STRATEGIC_ADVISOR } from "@/lib/ai/personas";
 
 const ActionCardDraftSchema = z.object({
   title: z.string(),
   body: z.string(),
 });
 
-const ACTION_CARD_DRAFT_TASK_PROMPT = `Task: Write the title and body for one action card — a
+const ACTION_CARD_DRAFT_TASK_PROMPT = `${PERSONA_STRATEGIC_ADVISOR}
+
+Task: Write the title and body for one action card — a
 short recommendation surfaced to the CEO or CSO because a specific threshold was crossed. The
 trigger, evidence, target scenario, and (if any) affected route move are already decided; just
 write clear, specific prose citing them.

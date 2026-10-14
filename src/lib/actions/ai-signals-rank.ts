@@ -16,6 +16,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { runStructured } from "@/lib/ai/client";
 import { NotFoundError } from "@/lib/ai/errors";
+import { PERSONA_UNCERTAINTY_CARTOGRAPHER } from "@/lib/ai/personas";
 import { createClient } from "@/lib/supabase/server";
 import { buildSignalsContext, type SignalsContextSignal } from "./signals-context";
 import type { Database } from "@/lib/supabase/types";
@@ -49,7 +50,9 @@ const RankImpactSchema = z.object({
   least_confident_signal_ids: z.array(z.string()).max(3),
 });
 
-const RANK_IMPACT_TASK_PROMPT = `Task: Score every given signal on IMPACT, defined strictly as
+const RANK_IMPACT_TASK_PROMPT = `${PERSONA_UNCERTAINTY_CARTOGRAPHER}
+
+Task: Score every given signal on IMPACT, defined strictly as
 how much this force's resolution would change the answer to the focal question — NOT general
 industry importance. A force can be enormous in the sector and low-impact for this specific
 decision; score that honestly when it's the case.
@@ -125,7 +128,9 @@ const RankUncertaintySchema = z.object({
   scores: z.array(RankUncertaintyItemSchema),
 });
 
-const RANK_UNCERTAINTY_TASK_PROMPT = `Task: Score every given signal on UNCERTAINTY over the
+const RANK_UNCERTAINTY_TASK_PROMPT = `${PERSONA_UNCERTAINTY_CARTOGRAPHER}
+
+Task: Score every given signal on UNCERTAINTY over the
 stated horizon — how unpredictable the DIRECTION of its resolution is within that window
 specifically, not how volatile it looks day-to-day.
 
@@ -227,7 +232,9 @@ const RankCriticalUncertaintiesSchema = z.object({
   gap: z.string().nullable(),
 });
 
-const RANK_CRITICAL_UNCERTAINTIES_TASK_PROMPT = `Task: The given candidates already sit in the
+const RANK_CRITICAL_UNCERTAINTIES_TASK_PROMPT = `${PERSONA_UNCERTAINTY_CARTOGRAPHER}
+
+Task: The given candidates already sit in the
 high-impact/high-uncertainty quadrant. Stress-test them as potential scenario axes and
 recommend a pair.
 
@@ -323,7 +330,9 @@ const RankPredeterminedSchema = z.object({
   elements: z.array(RankPredeterminedItemSchema).max(15),
 });
 
-const RANK_PREDETERMINED_TASK_PROMPT = `Task: The given candidates are already scored
+const RANK_PREDETERMINED_TASK_PROMPT = `${PERSONA_UNCERTAINTY_CARTOGRAPHER}
+
+Task: The given candidates are already scored
 low-uncertainty/high-impact — the predetermined elements. Apply the hard test: a predetermined
 element must hold true across ALL FOUR scenario quadrants. Any element that only holds in some
 futures is not predetermined — it's a critical uncertainty that's been misfiled.

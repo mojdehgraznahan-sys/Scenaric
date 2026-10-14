@@ -10,6 +10,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
 import { NotFoundError } from "@/lib/ai/errors";
+import { PERSONA_STRATEGIC_ADVISOR } from "@/lib/ai/personas";
 import { z } from "zod";
 import { riskFromRobustCount } from "@/lib/strategy-risk";
 
@@ -41,7 +42,9 @@ const StressTestSchema = z.object({
   ),
 });
 
-const STRESS_TEST_PROMPT = `Task: Stress-test ONE strategic option's currently-robust scenario
+const STRESS_TEST_PROMPT = `${PERSONA_STRATEGIC_ADVISOR}
+
+Task: Stress-test ONE strategic option's currently-robust scenario
 scores — actively try to find a reason it might actually FAIL in each scenario where it is
 currently marked robust, rather than restating why it currently passes.
 
@@ -251,7 +254,9 @@ const ExplainNonRobustSchema = z.object({
   explanation: z.string().min(20),
 });
 
-const EXPLAIN_NON_ROBUST_PROMPT = `Task: Expand ONE existing one-line "not robust here" rationale
+const EXPLAIN_NON_ROBUST_PROMPT = `${PERSONA_STRATEGIC_ADVISOR}
+
+Task: Expand ONE existing one-line "not robust here" rationale
 into a fuller explanation for a stakeholder — WHY this specific option fails in this specific
 scenario. Elaborate on the SAME cited mechanism(s) given below in more depth; do not introduce a
 new reason not already implied by existing_rationale or cited_material.
@@ -348,7 +353,9 @@ const SuggestHedgeSchema = z.object({
   grounded_in: z.array(z.string()).optional(),
 });
 
-const SUGGEST_HEDGE_PROMPT = `Task: Propose ONE new strategic option (or a modification framed as
+const SUGGEST_HEDGE_PROMPT = `${PERSONA_STRATEGIC_ADVISOR}
+
+Task: Propose ONE new strategic option (or a modification framed as
 a new option) aimed specifically at covering the project's currently weakest-covered scenario —
 the scenario where the fewest existing options are robust.
 

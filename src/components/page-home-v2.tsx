@@ -112,14 +112,32 @@ function HomeCompass({
   const P = (p: { x: number; y: number }): [number, number] => [c + p.x * r, c - p.y * r];
   const now = P(trail[trail.length - 1]);
   const qRect: Record<Quadrant, [number, number]> = { TL: [pad, pad], TR: [c, pad], BL: [pad, c], BR: [c, c] };
+  // Multiple scenarios land in the SAME quadrant whenever there's no tracked-event evidence
+  // yet to tell them apart (see this component's header comment on the (0,0) degeneracy) —
+  // without this, their labels all draw at the identical anchor point and render as illegible
+  // overlapping text. Stack same-quadrant labels instead, growing inward from the edge the
+  // single-label case already anchored to.
+  const byQuadrant = new Map<Quadrant, ScenarioLite[]>();
+  for (const s of scenarios) {
+    const q = quadrantOf(s.id);
+    const list = byQuadrant.get(q);
+    if (list) list.push(s);
+    else byQuadrant.set(q, [s]);
+  }
+  const LABEL_LINE_HEIGHT = 15;
+  // SVG text doesn't wrap or clip on its own — a long/unfixed pole (e.g. a full sentence
+  // instead of a short 2-5 word outcome) would otherwise sprawl across or past the chart.
+  const truncatePole = (s: string, max = 26) => (s.length > max ? s.slice(0, max - 1).trimEnd() + "…" : s);
   return (
     <svg viewBox={`0 0 ${S} ${S}`} className="block w-full" style={{ maxWidth: 440, margin: "0 auto" }}>
       {scenarios.map((s) => {
         const q = quadrantOf(s.id);
         const [x, y] = qRect[q];
         const isT = s.id === targetId;
+        const siblings = byQuadrant.get(q)!;
+        const idx = siblings.indexOf(s);
         const lx = q[1] === "L" ? x + 10 : x + r - 10;
-        const ly = q[0] === "T" ? y + 20 : y + r - 12;
+        const ly = q[0] === "T" ? y + 20 + idx * LABEL_LINE_HEIGHT : y + r - 12 - idx * LABEL_LINE_HEIGHT;
         const color = s.color ?? "#9CA3AF";
         return (
           <g key={s.id}>
@@ -147,16 +165,16 @@ function HomeCompass({
       <line x1={pad} x2={S - pad} y1={c} y2={c} stroke="#D1D5DB" />
       <line y1={pad} y2={S - pad} x1={c} x2={c} stroke="#D1D5DB" />
       <text x={c} y={pad - 10} textAnchor="middle" fontSize={10} fill="#6B7280">
-        {axes.yPoleB} ↑
+        {truncatePole(axes.yPoleB)} ↑
       </text>
       <text x={c} y={S - pad + 18} textAnchor="middle" fontSize={10} fill="#6B7280">
-        ↓ {axes.yPoleA}
+        ↓ {truncatePole(axes.yPoleA)}
       </text>
       <text x={pad - 8} y={c} textAnchor="middle" fontSize={10} fill="#6B7280" transform={`rotate(-90 ${pad - 10} ${c})`}>
-        ← {axes.xPoleA}
+        ← {truncatePole(axes.xPoleA)}
       </text>
       <text x={S - pad + 10} y={c} textAnchor="middle" fontSize={10} fill="#6B7280" transform={`rotate(90 ${S - pad + 12} ${c})`}>
-        {axes.xPoleB} →
+        {truncatePole(axes.xPoleB)} →
       </text>
       <polyline points={trail.map((p) => P(p).join(",")).join(" ")} fill="none" stroke="#1E1B2E" strokeOpacity={0.35} strokeWidth={1.5} strokeDasharray="3 3" />
       {trail.slice(0, -1).map((p, i) => {

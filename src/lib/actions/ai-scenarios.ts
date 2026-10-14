@@ -8,6 +8,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { runStructured } from "@/lib/ai/client";
+import { PERSONA_SCENARIO_ARCHITECT } from "@/lib/ai/personas";
 import { createClient } from "@/lib/supabase/server";
 import { SCENARIO_NAME_POOL } from "@/components/matrix/axis-data";
 import { assertAxisCandidates } from "./matrix";
@@ -33,7 +34,9 @@ const ScenarioLogicsSchema = z.object({
     .length(4),
 });
 
-const SCENARIO_LOGICS_TASK_PROMPT = `Task: Generate the 4 scenario logics for a 2x2 built from axis_a
+const SCENARIO_LOGICS_TASK_PROMPT = `${PERSONA_SCENARIO_ARCHITECT}
+
+Task: Generate the 4 scenario logics for a 2x2 built from axis_a
 (vertical) and axis_b (horizontal). A "logic" is the causal argument for
 why that combination of pole outcomes is an internally consistent world
 — not just a mashup of two adjectives.

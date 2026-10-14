@@ -23,6 +23,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
 import { StorylineScenarioNotFoundError, AIWebSearchError } from "@/lib/ai/errors";
+import { PERSONA_SCENARIO_SENTINEL } from "@/lib/ai/personas";
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import type { Database } from "@/lib/supabase/types";
@@ -61,7 +62,9 @@ const ScenarioGroundingSchema = z.object({
     .max(6),
 });
 
-const GROUNDING_TASK_PROMPT = `Task: Produce two different judgments about ONE scenario in a single pass.
+const GROUNDING_TASK_PROMPT = `${PERSONA_SCENARIO_SENTINEL}
+
+Task: Produce two different judgments about ONE scenario in a single pass.
 
 (1) Plausibility — does this scenario's storyline chain (chain_nodes,
     chain_edges, given below) actually hold together as a causal

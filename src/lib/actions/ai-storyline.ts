@@ -16,6 +16,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
 import { StorylineScenarioNotFoundError, ValidationError } from "@/lib/ai/errors";
+import { PERSONA_SCENARIO_STORYTELLER } from "@/lib/ai/personas";
 import { getProjectAiSettings } from "./project-ai-settings";
 import { listEventsWithLinks } from "./events";
 import { syncEventScenarioLink } from "./storyline";
@@ -81,7 +82,9 @@ const StorylineChainSchema = z.object({
   ),
 });
 
-const STORYLINE_TASK_PROMPT = `Task: Build the causal chain for ONE scenario across Schwartz's 5 phases:
+const STORYLINE_TASK_PROMPT = `${PERSONA_SCENARIO_STORYTELLER}
+
+Task: Build the causal chain for ONE scenario across Schwartz's 5 phases:
 Precursors (conditions already true today) → Catalysts (near-term
 triggering events) → First-order effects → Second-order effects →
 Scenario realized (the end state at the horizon) — in service of the
@@ -476,7 +479,9 @@ const FindSignalSchema = z.object({
     .max(5),
 });
 
-const FIND_SIGNAL_TASK_PROMPT = `Task: The user is filling a gap in one scenario's storyline causal
+const FIND_SIGNAL_TASK_PROMPT = `${PERSONA_SCENARIO_STORYTELLER}
+
+Task: The user is filling a gap in one scenario's storyline causal
 chain at a specific phase. Search the project's real signals below and
 SELECT the ones that plausibly cause or connect to the surrounding chain
 at that point — you are not inventing a new signal, only ranking which
@@ -613,7 +618,9 @@ const FindEventSchema = z.object({
     .max(5),
 });
 
-const FIND_EVENT_TASK_PROMPT = `Task: The user is filling a gap in one scenario's storyline causal
+const FIND_EVENT_TASK_PROMPT = `${PERSONA_SCENARIO_STORYTELLER}
+
+Task: The user is filling a gap in one scenario's storyline causal
 chain at a specific phase. Search the project's real tracked events below
 and SELECT the ones that plausibly cause or connect to the surrounding
 chain at that point — you are not inventing a new event, only ranking

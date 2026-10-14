@@ -25,6 +25,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
 import { AIWebSearchError } from "@/lib/ai/errors";
+import { PERSONA_MACRO_SCOUT } from "@/lib/ai/personas";
 import { extractInsightsForProject } from "./ai-insights";
 import type { Database } from "@/lib/supabase/types";
 
@@ -49,7 +50,9 @@ const NewsFeedSchema = z.object({
     .max(8),
 });
 
-const NEWS_FEED_TASK_PROMPT = `Task: Search for RECENT, real, dated news items relevant to this
+const NEWS_FEED_TASK_PROMPT = `${PERSONA_MACRO_SCOUT}
+
+Task: Search for RECENT, real, dated news items relevant to this
 project's focal question and STEEP categories (Social, Technological, Economic, Ecological,
 Political) — current-events grounding for a scenario-planning knowledge base, not analysis
 or speculation about what the news means.

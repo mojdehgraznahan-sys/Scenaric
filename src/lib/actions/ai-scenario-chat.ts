@@ -9,6 +9,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
 import { StorylineScenarioNotFoundError } from "@/lib/ai/errors";
+import { PERSONA_SCENARIO_STORYTELLER } from "@/lib/ai/personas";
 import { z } from "zod";
 import { getStoryline } from "./storyline";
 import { listImplications } from "./implications";
@@ -19,7 +20,9 @@ const ScenarioChatSchema = z.object({
   cites: z.array(z.string()),
 });
 
-const SCENARIO_CHAT_TASK_PROMPT = `Task: Answer the user's question about ONE scenario —
+const SCENARIO_CHAT_TASK_PROMPT = `${PERSONA_SCENARIO_STORYTELLER}
+
+Task: Answer the user's question about ONE scenario —
 grounded strictly in that scenario's own storyline chain, narrative, implications, and
 indicators already in this project. This is a scenario-scoped variant of general project
 Q&A: do not reference other scenarios, other projects, or general world knowledge even if

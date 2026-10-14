@@ -9,6 +9,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
 import { StorylineScenarioNotFoundError } from "@/lib/ai/errors";
+import { PERSONA_SCENARIO_STORYTELLER } from "@/lib/ai/personas";
 import { getStoryline } from "./storyline";
 import { PHASE_ORDER, type Phase } from "../storyline-mapping";
 
@@ -23,7 +24,9 @@ const NarrativeExpandSchema = z.object({
   gap: z.string().nullable(),
 });
 
-const NARRATIVE_EXPAND_TASK_PROMPT = `Task: Turn an approved storyline chain (nodes+edges) into the scenario's
+const NARRATIVE_EXPAND_TASK_PROMPT = `${PERSONA_SCENARIO_STORYTELLER}
+
+Task: Turn an approved storyline chain (nodes+edges) into the scenario's
 readable narrative paragraph, in past-tense retrospective voice ("by
 {horizon}, X had happened...") per Schwartz's convention of writing
 scenarios as history remembered from the future. Write it so it reads as

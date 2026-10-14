@@ -14,6 +14,7 @@ import { runStructured } from "@/lib/ai/client";
 import { AIWebSearchError, NotFoundError } from "@/lib/ai/errors";
 import { createClient } from "@/lib/supabase/server";
 import { arePolesWeak } from "@/lib/poles";
+import { PERSONA_MACRO_SCOUT, PERSONA_EVIDENCE_DRAFTER } from "@/lib/ai/personas";
 import { createSignal } from "./signals";
 import { scoreOneSignal } from "./ai-signals";
 import { createEvent, linkEvent } from "./events";
@@ -41,7 +42,9 @@ const SuggestForceSchema = z.object({
   rationale: z.string().nullable(),
 });
 
-const SUGGEST_FORCE_TASK_PROMPT = `Task: Given a draft event headline, decide whether it pulls on
+const SUGGEST_FORCE_TASK_PROMPT = `${PERSONA_MACRO_SCOUT}
+
+Task: Given a draft event headline, decide whether it pulls on
 one of this project's existing forces (signals) — and if so, toward which of that force's two
 named poles.
 
@@ -121,7 +124,9 @@ const GroupInboxSchema = z.object({
   leftover_event_ids: z.array(z.string()),
 });
 
-const GROUP_INBOX_TASK_PROMPT = `Task: The given events have no force yet ("Inbox"). For each,
+const GROUP_INBOX_TASK_PROMPT = `${PERSONA_MACRO_SCOUT}
+
+Task: The given events have no force yet ("Inbox"). For each,
 decide whether it should attach to an EXISTING force (and which pole it pulls toward), or
 whether it's evidence of a genuinely NEW force this project hasn't captured — in which case
 cluster it with any other inbox events describing the same underlying force.
@@ -355,7 +360,9 @@ const GenerateForPoleSchema = z.object({
     .max(3),
 });
 
-const GENERATE_FOR_POLE_TASK_PROMPT = `Task: Draft plausible future events that would pull ONE
+const GENERATE_FOR_POLE_TASK_PROMPT = `${PERSONA_EVIDENCE_DRAFTER}
+
+Task: Draft plausible future events that would pull ONE
 named force toward ONE of its two poles — grounded in real current news, geopolitics,
 supply-chain, technology, or discovery trends, never fabricated wholesale.
 

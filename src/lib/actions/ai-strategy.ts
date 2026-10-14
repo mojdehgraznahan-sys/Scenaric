@@ -13,6 +13,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
 import { NotFoundError, ValidationError } from "@/lib/ai/errors";
+import { PERSONA_STRATEGIC_ADVISOR } from "@/lib/ai/personas";
 import { getProjectAiSettings } from "./project-ai-settings";
 import { riskFromRobustCount } from "@/lib/strategy-risk";
 
@@ -42,7 +43,9 @@ const StrategyOptionsSchema = z.object({
   options: z.array(StrategyOptionSchema).min(2).max(4),
 });
 
-const STRATEGY_TASK_PROMPT = `Task: Propose strategic options for the focal question and
+const STRATEGY_TASK_PROMPT = `${PERSONA_STRATEGIC_ADVISOR}
+
+Task: Propose strategic options for the focal question and
 "wind-tunnel" each one against all 4 of the project's scenarios — does this concrete action
 still work if this future happens? This is the product's own extension of Schwartz's method
 (standard Shell/GBN "wind-tunnelling" practice), not one of the book's own named steps — never

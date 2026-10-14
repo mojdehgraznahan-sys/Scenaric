@@ -34,6 +34,7 @@ import { z } from "zod";
 import Anthropic from "@anthropic-ai/sdk";
 import { runStructured } from "@/lib/ai/client";
 import { AIWebSearchError } from "@/lib/ai/errors";
+import { PERSONA_DECISION_CLARIFIER } from "@/lib/ai/personas";
 
 const PAGE = "onboarding";
 
@@ -65,7 +66,9 @@ const CheckFocalCriteriaSchema = z.object({
   action: z.object({ ok: z.boolean(), reason: z.string() }),
 });
 
-const CHECK_TASK_PROMPT = `Task: Score a draft focal question against Schwartz's 4 requirements for
+const CHECK_TASK_PROMPT = `${PERSONA_DECISION_CLARIFIER}
+
+Task: Score a draft focal question against Schwartz's 4 requirements for
 a well-formed focal question — a live checklist shown while the user is still typing, not a
 final judgment.
 
@@ -129,7 +132,9 @@ const ClarifyFocalQuestionSchema = z.object({
     .max(2),
 });
 
-const CLARIFY_TASK_PROMPT = `Task: The user's draft focal question is missing one or more of Schwartz's
+const CLARIFY_TASK_PROMPT = `${PERSONA_DECISION_CLARIFIER}
+
+Task: The user's draft focal question is missing one or more of Schwartz's
 4 requirements. Ask 1-2 short, specific questions that would let you fix the SPECIFIC thing(s)
 missing — never a generic "tell me more."
 
@@ -177,7 +182,9 @@ const RefineFocalQuestionSchema = z.object({
   alternatives: z.array(z.string()).length(2),
 });
 
-const REFINE_TASK_PROMPT = `Task: Sharpen the user's rough focal question into Schwartz's required form:
+const REFINE_TASK_PROMPT = `${PERSONA_DECISION_CLARIFIER}
+
+Task: Sharpen the user's rough focal question into Schwartz's required form:
 a single decision-oriented question, bounded by the stated time horizon, specific about WHO is
 deciding and WHAT the decision changes. Produce one primary rewrite plus 2 alternative framings.
 
@@ -238,7 +245,9 @@ const SuggestFocalHorizonSchema = z.object({
   rationale: z.string(),
 });
 
-const SUGGEST_HORIZON_TASK_PROMPT = `Task: Given a finalized focal question, suggest which of 4 fixed time
+const SUGGEST_HORIZON_TASK_PROMPT = `${PERSONA_DECISION_CLARIFIER}
+
+Task: Given a finalized focal question, suggest which of 4 fixed time
 horizons best fits the decision it describes — pre-selecting Step 2's horizon picker, which the
 user can still freely override.
 
@@ -301,7 +310,9 @@ const ResearchContextSchema = z.object({
   citations: z.array(z.object({ title: z.string(), url: z.string() })),
 });
 
-const RESEARCH_CONTEXT_TASK_PROMPT = `Task: Research the given company (or, if it isn't a
+const RESEARCH_CONTEXT_TASK_PROMPT = `${PERSONA_DECISION_CLARIFIER}
+
+Task: Research the given company (or, if it isn't a
 findable public entity, its stated industry generally) using web_search, producing 5 short
 sections of background a strategist would want before an interview about a pending decision.
 You MUST call the web_search tool at least once and read real results before writing your
@@ -431,7 +442,9 @@ const DraftCandidatesSchema = z.object({
   candidates: z.array(CandidateSchema).length(3),
 });
 
-const DRAFT_CANDIDATES_TASK_PROMPT = `Task: Synthesize the user's own interview answers (4
+const DRAFT_CANDIDATES_TASK_PROMPT = `${PERSONA_DECISION_CLARIFIER}
+
+Task: Synthesize the user's own interview answers (4
 blocks, any subset possibly empty/skipped) plus company/industry plus optional research
 findings, into exactly 3 candidate focal questions — Schwartz's required form: a single
 decision-oriented question, specific about WHO decides and WHAT changes. Each candidate is
@@ -545,7 +558,9 @@ export async function draftFocalQuestionCandidates(
 
 const DraftSummarySchema = z.object({ summary: z.string() });
 
-const DRAFT_SUMMARY_TASK_PROMPT = `Task: Write a short project summary (1-2 sentences) — the
+const DRAFT_SUMMARY_TASK_PROMPT = `${PERSONA_DECISION_CLARIFIER}
+
+Task: Write a short project summary (1-2 sentences) — the
 kind of blurb that shows on a project card, not a restatement of the focal question itself —
 synthesizing the user's picked focal question, company/industry, and whichever interview block
 answers are non-empty.

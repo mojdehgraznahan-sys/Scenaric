@@ -5,6 +5,7 @@
 // logic wherever it exists rather than duplicating it.
 import { z } from "zod";
 import { runStructured } from "@/lib/ai/client";
+import { PERSONA_SCENARIO_STORYTELLER } from "@/lib/ai/personas";
 import { createClient } from "@/lib/supabase/server";
 import { getScenarios } from "./scenarios";
 import { explainPredeterminedElements, type BucketSummaryResult } from "./ai-matrix-tasks";
@@ -82,7 +83,9 @@ export async function findWeakestStoryline(projectId: string): Promise<WeakestSt
 
 const SummarizeAllSchema = z.object({ summary: z.string() });
 
-const SUMMARIZE_ALL_TASK_PROMPT = `Task: Write one paragraph (4-6 sentences) comparing these
+const SUMMARIZE_ALL_TASK_PROMPT = `${PERSONA_SCENARIO_STORYTELLER}
+
+Task: Write one paragraph (4-6 sentences) comparing these
 scenarios for a quick briefing — what distinguishes each from the others, grounded strictly in
 their given name/quadrant/tagline/summary/narrative.
 

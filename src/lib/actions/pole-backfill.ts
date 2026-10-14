@@ -17,13 +17,16 @@ import { z } from "zod";
 import { runStructured } from "@/lib/ai/client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { arePolesWeak } from "@/lib/poles";
+import { PERSONA_MACRO_SCOUT } from "@/lib/ai/personas";
 
 const RegeneratePolesSchema = z.object({
   pole_a: z.string(),
   pole_b: z.string(),
 });
 
-const REGENERATE_POLES_TASK_PROMPT = `Task: This existing force's poles are too generic to compare
+const REGENERATE_POLES_TASK_PROMPT = `${PERSONA_MACRO_SCOUT}
+
+Task: This existing force's poles are too generic to compare
 against each other — rename both ends so they're real, opposite outcomes a strategist could
 picture by the horizon. Keep the force's own title and meaning; only the pole wording is wrong.
 

@@ -13,6 +13,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
 import { StorylineScenarioNotFoundError } from "@/lib/ai/errors";
+import { PERSONA_SCENARIO_STORYTELLER } from "@/lib/ai/personas";
 import { z } from "zod";
 import { findSignalForGap, type FindSignalForGapResult } from "./ai-storyline";
 import { PHASES } from "@/lib/storyline-mapping";
@@ -58,7 +59,9 @@ const ValidatePlausibilitySchema = z.object({
   ),
 });
 
-const VALIDATE_PLAUSIBILITY_PROMPT = `Task: Assess whether ONE scenario's storyline causal chain holds together as a
+const VALIDATE_PLAUSIBILITY_PROMPT = `${PERSONA_SCENARIO_STORYTELLER}
+
+Task: Assess whether ONE scenario's storyline causal chain holds together as a
 logical argument, and flag every specific weak link found.
 
 Reason ONLY over chain_nodes/chain_edges/scenario_logic given below — this is a
@@ -158,7 +161,9 @@ const ValidateChainSchema = z.object({
   ),
 });
 
-const VALIDATE_CHAIN_PROMPT = `Task: For ONE specific path through a scenario's storyline (a subset of its full
+const VALIDATE_CHAIN_PROMPT = `${PERSONA_SCENARIO_STORYTELLER}
+
+Task: For ONE specific path through a scenario's storyline (a subset of its full
 chain, e.g. what the user has highlighted in the UI), check every edge in that
 path and flag any that doesn't plausibly follow from its source node.
 
@@ -253,7 +258,9 @@ const ExplainChainSchema = z.object({
   explanation: z.string().min(20),
 });
 
-const EXPLAIN_CHAIN_PROMPT = `Task: Write a plain-language walkthrough of ONE specific path through a
+const EXPLAIN_CHAIN_PROMPT = `${PERSONA_SCENARIO_STORYTELLER}
+
+Task: Write a plain-language walkthrough of ONE specific path through a
 scenario's storyline (a subset of its full chain, e.g. what the user has
 highlighted in the UI), suitable for sharing with a stakeholder who hasn't
 seen the underlying data.

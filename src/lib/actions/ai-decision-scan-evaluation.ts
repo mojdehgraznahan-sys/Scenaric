@@ -10,6 +10,7 @@
 // knowledge (methodology guardrail #3 in design/2026-10-05/README.md).
 import { z } from "zod";
 import { runStructured } from "@/lib/ai/client";
+import { PERSONA_SCENARIO_SENTINEL } from "@/lib/ai/personas";
 
 const DecisionScanEvaluationSchema = z.object({
   // Omitted entirely for an event no news item concerns, same "no entry = no change" shape as
@@ -45,7 +46,9 @@ const DecisionScanEvaluationSchema = z.object({
     .max(20),
 });
 
-const DECISION_SCAN_EVALUATION_TASK_PROMPT = `Task: Given today's freshly pulled news items, this
+const DECISION_SCAN_EVALUATION_TASK_PROMPT = `${PERSONA_SCENARIO_SENTINEL}
+
+Task: Given today's freshly pulled news items, this
 project's tracked events (each with a current likelihood level and the force/pole it supports),
 and this project's existing forces, do two things:
 

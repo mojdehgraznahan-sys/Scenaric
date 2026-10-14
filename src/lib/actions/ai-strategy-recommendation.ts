@@ -18,6 +18,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
+import { PERSONA_STRATEGIC_ADVISOR } from "@/lib/ai/personas";
 
 const RISK_RANK: Record<string, number> = { Low: 0, Medium: 1, High: 2 };
 const riskRankOf = (risk: string | null): number => (risk != null && risk in RISK_RANK ? RISK_RANK[risk] : 3);
@@ -26,7 +27,9 @@ const RecommendationRationaleSchema = z.object({
   rationale: z.string(),
 });
 
-const RATIONALE_TASK_PROMPT = `Task: Write a short recommendation rationale for a strategic-options
+const RATIONALE_TASK_PROMPT = `${PERSONA_STRATEGIC_ADVISOR}
+
+Task: Write a short recommendation rationale for a strategic-options
 wind-tunnel result. The primary option and (if given) the pairing option have ALREADY been
 selected by a deterministic rule (most scenarios robust in, lowest risk as tiebreak; the pairing
 is whichever other option covers the most of the primary's remaining weak scenarios) — your job

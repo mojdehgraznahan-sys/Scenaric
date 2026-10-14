@@ -13,6 +13,7 @@
 import { z } from "zod";
 import { runStructured } from "@/lib/ai/client";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { PERSONA_SCENARIO_STORYTELLER } from "@/lib/ai/personas";
 
 const BackfillSchema = z.object({
   matches: z
@@ -26,7 +27,9 @@ const BackfillSchema = z.object({
     .max(200),
 });
 
-const BACKFILL_TASK_PROMPT = `Task: For each storyline node below, decide which (if any) of its
+const BACKFILL_TASK_PROMPT = `${PERSONA_SCENARIO_STORYTELLER}
+
+Task: For each storyline node below, decide which (if any) of its
 candidate events it is actually describing. Each node already names a force; its candidates are
 every event linked to that same force, on either pole. Only mark confidence "high" when the
 node's own title/body clearly and specifically point at one candidate — a generic restatement of

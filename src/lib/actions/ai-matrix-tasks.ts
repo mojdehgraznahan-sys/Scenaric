@@ -8,6 +8,7 @@
 // directly rather than duplicating an independence-check prompt.
 import { z } from "zod";
 import { runStructured } from "@/lib/ai/client";
+import { PERSONA_UNCERTAINTY_CARTOGRAPHER } from "@/lib/ai/personas";
 import { createClient } from "@/lib/supabase/server";
 import type { MatrixBucket } from "@/lib/matrix-mapping";
 
@@ -21,7 +22,9 @@ const LOCAL_ACTOR_TYPES = ["competitor", "regulator", "customer", "supplier", "p
 
 const ExplainDotSchema = z.object({ explanation: z.string() });
 
-const EXPLAIN_DOT_TASK_PROMPT = `Task: Narrate, in 2-3 plain sentences, why this signal landed in
+const EXPLAIN_DOT_TASK_PROMPT = `${PERSONA_UNCERTAINTY_CARTOGRAPHER}
+
+Task: Narrate, in 2-3 plain sentences, why this signal landed in
 its current Rank Forces bucket — grounded strictly in its already-computed impact/uncertainty
 scores and bucket_rationale below. Do not re-judge the bucket or second-guess it; your job is to
 explain the existing classification clearly, not produce a new one.
@@ -100,7 +103,9 @@ const CoverageGapsSchema = z.object({
     .max(6),
 });
 
-const COVERAGE_GAPS_TASK_PROMPT = `Task: Given this project's current signal coverage across the 5
+const COVERAGE_GAPS_TASK_PROMPT = `${PERSONA_UNCERTAINTY_CARTOGRAPHER}
+
+Task: Given this project's current signal coverage across the 5
 STEEP categories and local-actor types, identify which categories/types are genuinely
 underrepresented AND relevant to the focal question — not just mechanically empty.
 
@@ -185,7 +190,9 @@ const AlternateAxisPairSchema = z.object({
   rationale: z.string().nullable(),
 });
 
-const ALTERNATE_AXIS_PAIR_TASK_PROMPT = `Task: Propose an alternative candidate scenario-axis pair,
+const ALTERNATE_AXIS_PAIR_TASK_PROMPT = `${PERSONA_UNCERTAINTY_CARTOGRAPHER}
+
+Task: Propose an alternative candidate scenario-axis pair,
 different from the current pick, that might be more decision-relevant to the focal question.
 
 Input: { focal_question: string, current_pair_titles: string[],
@@ -346,7 +353,9 @@ async function summarizeBucket(projectId: string, bucket: "predetermined" | "wil
   return { count: items.length, summary: output.summary };
 }
 
-const PREDETERMINED_TASK_PROMPT = `Task: Summarize this project's predetermined-bucketed signals
+const PREDETERMINED_TASK_PROMPT = `${PERSONA_UNCERTAINTY_CARTOGRAPHER}
+
+Task: Summarize this project's predetermined-bucketed signals
 in 2-4 sentences, grounded strictly in the given signals and their bucket_rationale — explain
 WHY each will hold constant across all 4 scenarios regardless of which axis pair is chosen
 (Schwartz's hard constraint: predetermined elements must never contradict any one scenario's
@@ -360,7 +369,9 @@ Rules:
 
 Output schema: { summary: string }`;
 
-const WILDCARD_TASK_PROMPT = `Task: Summarize this project's wildcard-bucketed signals in 2-4
+const WILDCARD_TASK_PROMPT = `${PERSONA_UNCERTAINTY_CARTOGRAPHER}
+
+Task: Summarize this project's wildcard-bucketed signals in 2-4
 sentences, grounded strictly in the given signals and their bucket_rationale — for each, surface
 the discrete shock mechanism (the sudden, low-probability, high-consequence event) that makes it
 a wildcard rather than a continuous trend.

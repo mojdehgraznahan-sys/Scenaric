@@ -7,6 +7,7 @@
 // rendered straight into the Ask AI drawer.
 import { z } from "zod";
 import { runStructured } from "@/lib/ai/client";
+import { PERSONA_UNCERTAINTY_CARTOGRAPHER } from "@/lib/ai/personas";
 import { buildSignalsContext } from "./signals-context";
 
 // ---- 4.1 "What would a sceptic say I've got wrong?" ----
@@ -21,7 +22,9 @@ const TestSkepticSchema = z.object({
   blind_spot: z.string(),
 });
 
-const TEST_SKEPTIC_TASK_PROMPT = `Task: Take the position of a well-informed sceptic reviewing
+const TEST_SKEPTIC_TASK_PROMPT = `${PERSONA_UNCERTAINTY_CARTOGRAPHER}
+
+Task: Take the position of a well-informed sceptic reviewing
 this signal set before the scenario matrix is built. Be specific and cite signals by name. Do
 not soften — the value here is the objection, not the balance.
 
@@ -92,7 +95,9 @@ const TestCoverageSchema = z.object({
   most_important_gap: z.string().nullable(),
 });
 
-const TEST_COVERAGE_TASK_PROMPT = `Task: Audit the current signal set against 3 statements the
+const TEST_COVERAGE_TASK_PROMPT = `${PERSONA_UNCERTAINTY_CARTOGRAPHER}
+
+Task: Audit the current signal set against 3 statements the
 user made during onboarding: what keeps them awake at night, their best case, and their worst
 case. For each (when given — some may be null, meaning the user didn't answer that one; skip
 those, set them null in your output), state whether the project has signals that would let the
@@ -169,7 +174,9 @@ const TestWildcardsSchema = z.object({
   items: z.array(WildcardItemSchema).max(5),
 });
 
-const TEST_WILDCARDS_TASK_PROMPT = `Task: Identify low-probability, high-impact discontinuities
+const TEST_WILDCARDS_TASK_PROMPT = `${PERSONA_UNCERTAINTY_CARTOGRAPHER}
+
+Task: Identify low-probability, high-impact discontinuities
 relevant to the focal question over the horizon that the current signal set does not cover —
 the ones that would invalidate the whole scenario frame rather than move a variable inside it.
 

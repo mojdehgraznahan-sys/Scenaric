@@ -20,6 +20,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { runStructured } from "@/lib/ai/client";
 import { NotFoundError } from "@/lib/ai/errors";
+import { PERSONA_SCENARIO_SENTINEL } from "@/lib/ai/personas";
 import { assertSafeExternalUrl } from "@/lib/url-safety";
 import { searchNewsItems } from "./ai-news-feed";
 import { extractInsightsForProject } from "./ai-insights";
@@ -58,7 +59,9 @@ const NewsImpactSchema = z.object({
 // below) have no inherent STEEP category the way ai-news-feed.ts's web-search step already
 // assigns its own items, so rather than build a second classification path, every candidate
 // (search-found or RSS-found) is classified here uniformly, regardless of origin.
-const NEWS_IMPACT_TASK_PROMPT = `Task: For each news item, classify its STEEP category and score
+const NEWS_IMPACT_TASK_PROMPT = `${PERSONA_SCENARIO_SENTINEL}
+
+Task: For each news item, classify its STEEP category and score
 its impact on this project's focal decision, using fixed rubrics — deterministic
 classification, not creative judgment.
 
@@ -334,7 +337,9 @@ const MatchEventSchema = z.object({
   rationale: z.string(),
 });
 
-const MATCH_EVENT_TASK_PROMPT = `Task: Decide whether this news item is evidence that one of the
+const MATCH_EVENT_TASK_PROMPT = `${PERSONA_SCENARIO_SENTINEL}
+
+Task: Decide whether this news item is evidence that one of the
 project's already-tracked POSSIBLE events has now happened — i.e. the news item and the event
 describe the same real-world occurrence, not just a related topic.
 

@@ -12,6 +12,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
 import { StorylineScenarioNotFoundError } from "@/lib/ai/errors";
+import { PERSONA_SCENARIO_SENTINEL } from "@/lib/ai/personas";
 import { getStoryline } from "./storyline";
 import { listImplications } from "./implications";
 import { PHASE_ORDER, type Phase } from "../storyline-mapping";
@@ -43,7 +44,9 @@ const IndicatorsSchema = z.object({
     .max(4),
 });
 
-const INDICATORS_TASK_PROMPT = `Task: Generate leading indicators (Step 8) for ONE scenario —
+const INDICATORS_TASK_PROMPT = `${PERSONA_SCENARIO_SENTINEL}
+
+Task: Generate leading indicators (Step 8) for ONE scenario —
 concrete, externally observable events that would tell an analyst this scenario is the one
 unfolding, distinguishable from the OTHER scenarios sharing this project's axes.
 
