@@ -15,6 +15,8 @@ import { createClient } from "@/lib/supabase/server";
 import { runStructured } from "@/lib/ai/client";
 import { StorylineScenarioNotFoundError } from "@/lib/ai/errors";
 import { PERSONA_STRATEGIC_ADVISOR } from "@/lib/ai/personas";
+import { getOnboardingAnswers } from "./projects";
+import { decisionFraming } from "@/lib/onboarding/prompt-context";
 
 const CATEGORIES = ["capital", "hiring", "tech", "partners", "other"] as const;
 
@@ -46,7 +48,11 @@ statements, not restated scenario facts.
 Input: { focal_question: string, scenario: {name: string, narrative: string},
          categories: ["capital","hiring","tech","partners","other"] /* capital = capital
          allocation, hiring = hiring/org, tech = technology/product, partners =
-         partnerships, other = anything else */ }
+         partnerships, other = anything else */,
+         onboarding: { decision: string|null, owner: string|null, stakes: string|null } | null
+         /* the user's own onboarding answers on what's being decided and what's at stake —
+         context only, for prioritizing AMONG implications you can already ground in
+         scenario.narrative; never a grounding source itself */ }
 
 Rules:
 - Each implication must name a decision or resource shift the organization in
@@ -55,6 +61,9 @@ Rules:
   exact sentence in scenario.narrative that triggered this implication). Never invent an
   implication you cannot ground this way — if you cannot cite a real sentence from the
   narrative, drop it rather than include it.
+- When onboarding is given, among the implications you can genuinely ground in the narrative,
+  prioritize the ones that bear on the stated decision/stakes over generic scenario color — but
+  grounded_in_text must still cite the narrative, never onboarding text.
 - No generic implications that would apply to any scenario ("invest in talent") — must be
   scenario-specific, tied to what THIS scenario's narrative actually says happens.
 - 3-5 implications, each exactly 1 sentence, each tagged with exactly one category.
@@ -99,6 +108,8 @@ export async function generateImplicationsForScenario(scenarioId: string, opts?:
     return { sufficientEvidence: false, gap: "This scenario doesn't have a narrative yet — write or generate one before generating implications.", count: 0 };
   }
 
+  const onboarding = await getOnboardingAnswers(scenario.project_id);
+
   const output = await runStructured({
     step: "implications.generate",
     projectId: scenario.project_id,
@@ -107,6 +118,7 @@ export async function generateImplicationsForScenario(scenarioId: string, opts?:
       focal_question: project.refined_focal_question ?? project.focal_question,
       scenario: { name: scenario.name, narrative: scenario.narrative },
       categories: CATEGORIES,
+      onboarding: decisionFraming(onboarding),
     },
     schema: ImplicationsSchema,
     effort: "low",

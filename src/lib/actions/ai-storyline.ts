@@ -20,6 +20,8 @@ import { PERSONA_SCENARIO_STORYTELLER } from "@/lib/ai/personas";
 import { getProjectAiSettings } from "./project-ai-settings";
 import { listEventsWithLinks } from "./events";
 import { syncEventScenarioLink } from "./storyline";
+import { getOnboardingAnswers } from "./projects";
+import { bothEndings } from "@/lib/onboarding/prompt-context";
 import { z } from "zod";
 import type { Database } from "@/lib/supabase/types";
 import { PHASES, isPhaseOrderValid, type Phase } from "../storyline-mapping";
@@ -121,9 +123,17 @@ Input: { focal_question: string,
          settled background, never as a variable this scenario's argument
          turns on */,
          library_events: [{id, title, body, category, status, likelihood}],
-         horizon: string }
+         horizon: string,
+         onboarding: { good: string|null, bad: string|null, turns: string|null } | null
+         /* the user's own stated best/worst endings and turning points from onboarding —
+         context only, for judging which library items and phase framing fit this scenario's
+         trajectory; never a license to invent a node not in library_signals/library_events */ }
 
 Rules:
+- When onboarding is given and this scenario's own logic/quadrant plausibly resembles the user's
+  stated good or bad ending, let their stated turning points inform which library items you pick
+  for catalysts/first_order/second_order and how you frame the connections between them — still
+  drawn only from library_signals/library_events, never new content.
 - Every node in phases precursors/catalysts/first_order/second_order MUST
   set EXACTLY ONE of signal_id/event_id to an id copied VERBATIM from
   library_signals or library_events — never both, never a fabricated id.
@@ -335,6 +345,8 @@ async function runAutoSuggestStoryline(
     return EMPTY_FAILURE(gap);
   }
 
+  const onboarding = await getOnboardingAnswers(scenario.project_id);
+
   const output = await runStructured({
     step: "storyline.auto_suggest",
     projectId: scenario.project_id,
@@ -347,6 +359,7 @@ async function runAutoSuggestStoryline(
       library_signals: librarySignals,
       library_events: libraryEvents,
       horizon: project.horizon,
+      onboarding: bothEndings(onboarding),
     },
     schema: StorylineChainSchema,
     effort: "medium",

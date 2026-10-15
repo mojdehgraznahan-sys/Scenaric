@@ -4,6 +4,7 @@
 // scopes every query to the caller's org; no manual org/user filtering needed here.
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { validateOnboardingAnswerPatch } from "@/lib/onboarding/validate";
 import type { Database } from "@/lib/supabase/types";
 
 export type ProjectRow = Database["public"]["Tables"]["projects"]["Row"];
@@ -123,6 +124,57 @@ export interface OnboardingAnswers {
   given: string | null;
   open: string | null;
   actors: string | null;
+}
+
+// Only ever touches onboarding_answers — never projects.focal_question/refined_focal_question,
+// so editing these answers can't silently rewrite the (possibly AI-refined) focal question
+// everything else in the app reads. Upserts rather than requiring an existing row: a project
+// created before the onboarding_answers table existed, or whose createProject call skipped
+// onboardingAnswers, has no row yet — the first edit here creates one. Postgres's
+// ON CONFLICT DO UPDATE only sets the columns actually passed, so this is a true merge against
+// whatever other blocks' answers are already there, never a full-row overwrite.
+export async function updateOnboardingAnswers(projectId: string, patch: Record<string, string>): Promise<OnboardingAnswers> {
+  const { clean } = validateOnboardingAnswerPatch(patch);
+
+  const supabase = createClient();
+  // Explicit token-id -> column assignment (the exact reverse of getOnboardingAnswers's mapping
+  // below), rather than a dynamic Record keyed by computed column name — keeps this checked
+  // against onboarding_answers' real Insert type instead of silently accepting an unknown column.
+  const row: Database["public"]["Tables"]["onboarding_answers"]["Insert"] = { project_id: projectId };
+  if ("awake" in clean) row.keeps_awake = clean.awake;
+  if ("decision" in clean) row.decision_5to10yr = clean.decision;
+  if ("owner" in clean) row.owner_and_deadline = clean.owner;
+  if ("stakes" in clean) row.if_wrong_breaks = clean.stakes;
+  if ("o1" in clean) row.oracle_q1 = clean.o1;
+  if ("o2" in clean) row.oracle_q2 = clean.o2;
+  if ("o3" in clean) row.oracle_q3 = clean.o3;
+  if ("good" in clean) row.best_case_and_path = clean.good;
+  if ("bad" in clean) row.worst_case_and_pivots = clean.bad;
+  if ("turns" in clean) row.turning_points = clean.turns;
+  if ("given" in clean) row.inevitable = clean.given;
+  if ("open" in clean) row.genuinely_uncertain = clean.open;
+  if ("actors" in clean) row.dependencies = clean.actors;
+
+  const { data, error } = await supabase.from("onboarding_answers").upsert(row, { onConflict: "project_id" }).select("*").single();
+  if (error) throw error;
+
+  revalidatePath("/settings");
+  return {
+    companyName: data.company_name,
+    awake: data.keeps_awake,
+    decision: data.decision_5to10yr,
+    owner: data.owner_and_deadline,
+    stakes: data.if_wrong_breaks,
+    o1: data.oracle_q1,
+    o2: data.oracle_q2,
+    o3: data.oracle_q3,
+    good: data.best_case_and_path,
+    bad: data.worst_case_and_pivots,
+    turns: data.turning_points,
+    given: data.inevitable,
+    open: data.genuinely_uncertain,
+    actors: data.dependencies,
+  };
 }
 
 export async function getOnboardingAnswers(projectId: string): Promise<OnboardingAnswers | null> {

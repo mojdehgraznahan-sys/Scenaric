@@ -16,6 +16,8 @@ import { NotFoundError, ValidationError } from "@/lib/ai/errors";
 import { PERSONA_STRATEGIC_ADVISOR } from "@/lib/ai/personas";
 import { getProjectAiSettings } from "./project-ai-settings";
 import { riskFromRobustCount } from "@/lib/strategy-risk";
+import { getOnboardingAnswers } from "./projects";
+import { decisionFraming } from "@/lib/onboarding/prompt-context";
 
 const StrategyScoreSchema = z.object({
   scenario_id: z.string(),
@@ -56,13 +58,19 @@ Input: { focal_question: string,
     implications: [{ id: string, text: string, category: "capital"|"hiring"|"tech"|"partners"|"other" }] }]
   /* always exactly 4 */,
   predetermined_elements: [{ id: string, title: string, body: string }]
-  /* signals that hold true across ALL 4 scenarios — may be empty */ }
+  /* signals that hold true across ALL 4 scenarios — may be empty */,
+  onboarding: { decision: string|null, owner: string|null, stakes: string|null } | null
+  /* the user's own onboarding answers on what's actually being decided, who decides it, and
+  what breaks if it's gotten wrong — context only, never a substitute for real grounding */ }
 
 Rules:
 - Propose 2-4 strategic options. Each must be a concrete, actionable operating/investment choice
   the organization could take now (a real market-entry mode, partnership structure, capability
   investment, etc.) — never a restated goal ("succeed in all markets") and never phrased as a
   scenario or a prediction.
+- When onboarding is given, options should be the kind of thing \`owner\` actually decides and
+  that visibly addresses \`stakes\` — not a generic playbook move that could apply to any company
+  in this industry.
 - For EACH option, produce exactly one score against EACH of the 4 given scenarios — 4 score
   entries per option, one scenario_id matching each input scenario id, no duplicates, none
   omitted.
@@ -206,6 +214,8 @@ export async function generateStrategicOptions(projectId: string): Promise<Gener
   const implicationCategoryById = new Map(implicationRows.map((row) => [row.id, row.category]));
   const validGroundingIds = new Set<string>([...implicationRows.map((r) => r.id), ...predeterminedSignals.map((s) => s.id)]);
 
+  const onboarding = await getOnboardingAnswers(projectId);
+
   const output = await runStructured({
     step: "strategy.generate",
     projectId,
@@ -219,6 +229,7 @@ export async function generateStrategicOptions(projectId: string): Promise<Gener
         implications: (implicationsByScenario.get(s.id) ?? []).map((imp) => ({ id: imp.id, text: imp.text, category: imp.category })),
       })),
       predetermined_elements: predeterminedSignals.map((s) => ({ id: s.id, title: s.title, body: s.body })),
+      onboarding: decisionFraming(onboarding),
     },
     schema: StrategyOptionsSchema,
     effort: "low",

@@ -11,6 +11,8 @@ import { z } from "zod";
 import { runStructured } from "@/lib/ai/client";
 import { PERSONA_STRATEGIC_ADVISOR } from "@/lib/ai/personas";
 import type { StorylinePhase } from "@/lib/decision-model";
+import { getOnboardingAnswers } from "./projects";
+import { decisionFraming } from "@/lib/onboarding/prompt-context";
 
 const RouteDraftSchema = z.object({
   moves: z
@@ -41,7 +43,9 @@ Input: { target_scenario_name: string,
          watch_events: [{ id: string, title: string, phase: string|null }],       // events you can only prepare for
          blocker_events: [{ id: string, title: string, phase: string|null }],     // events that pull toward other futures
          signposts: [{ id: string, name: string }],
-         options: [{ id: string, name: string }] }            // existing strategic options
+         options: [{ id: string, name: string }],              // existing strategic options
+         onboarding: { decision: string|null, owner: string|null, stakes: string|null } | null
+         /* the user's own onboarding answers — context only, for sequencing/urgency */ }
 
 Each event carries its Storyline phase (precursors/catalysts/first_order/second_order/realized
 — how far its own causal chain has already progressed, independent of this route). Default
@@ -63,6 +67,8 @@ Rules:
   everything in one lane or one horizon.
 - title is a short, specific action (e.g. "Pre-qualify a Vietnam hosting partner"), not a
   restatement of the linked event/option/signpost name.
+- When onboarding is given, sequence with the stated stakes in mind — what's urgent is what the
+  user said breaks if this goes wrong, not just what's structurally earliest in the chain.
 
 Output schema: { moves: [{ lane, horizon, title, link_kind, link_id, pushes }] }`;
 
@@ -97,6 +103,8 @@ export async function draftRouteForTarget(
     options: RouteDraftCandidate[];
   }
 ): Promise<RouteDraftMove[]> {
+  const onboarding = await getOnboardingAnswers(projectId);
+
   const output = await runStructured({
     step: "strategy.draft_route",
     projectId,
@@ -109,6 +117,7 @@ export async function draftRouteForTarget(
       blocker_events: candidates.blockerEvents,
       signposts: candidates.signposts,
       options: candidates.options,
+      onboarding: decisionFraming(onboarding),
     },
     schema: RouteDraftSchema,
     effort: "medium",

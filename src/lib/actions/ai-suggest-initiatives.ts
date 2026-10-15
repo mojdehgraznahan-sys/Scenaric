@@ -12,6 +12,8 @@ import { runStructured } from "@/lib/ai/client";
 import { PERSONA_STRATEGIC_ADVISOR } from "@/lib/ai/personas";
 import { fetchTrackedEvents, toTrackedEvent, type HistoryEntry } from "@/lib/decision-tracking";
 import { levers, windowPoints, LIKELIHOOD_LEVELS, type StorylinePhase, type TrackedEvent } from "@/lib/decision-model";
+import { getOnboardingAnswers } from "./projects";
+import { decisionFraming } from "@/lib/onboarding/prompt-context";
 
 const InitiativeOutputSchema = z.object({
   initiatives: z
@@ -50,9 +52,14 @@ Input: { target_scenario_name: string, scenario_ids: string[],
   shape_events / influence_events / watch_events / blocker_events:
     [{ id, title, phase, current_level, change: {date, source, cite} | null }],
   existing_initiatives: [{ title, force_label }],   // do NOT propose a close duplicate of any of these
-  evidence_pool: [{ source, cite }] }                // the ONLY material you may cite as evidence
+  evidence_pool: [{ source, cite }],                 // the ONLY material you may cite as evidence
+  onboarding: { decision: string|null, owner: string|null, stakes: string|null } | null
+  /* the user's own onboarding answers — context only, for prioritizing among valid candidates;
+  never a source of evidence/quotes */ }
 
 Rules:
+- When onboarding is given, prefer initiatives that visibly move the stated stakes over ones
+  that merely shape a generic lever — but evidence must still come only from evidence_pool.
 - kind must match the lever of your initiative's PRIMARY target (targets[0]): a shape_events
   target -> kind "shape"; an influence_events target -> kind "influence"; a watch_events target
   -> kind "research" or "hedge" (your choice); a blocker_events target -> kind "hedge".
@@ -142,6 +149,8 @@ export async function suggestInitiatives(projectId: string, scenarioId: string):
       .map((i) => ({ source: i.source_id ? sourceNameById.get(i.source_id) ?? "Knowledge Base" : "Knowledge Base", cite: (i.quote || i.text)! })),
   ];
 
+  const onboarding = await getOnboardingAnswers(projectId);
+
   const input = {
     target_scenario_name: scenario.name,
     scenario_ids: scenarioIds,
@@ -150,6 +159,7 @@ export async function suggestInitiatives(projectId: string, scenarioId: string):
     watch_events: lev.watch.map(toCandidateContext),
     blocker_events: lev.block.map(toCandidateContext),
     existing_initiatives: existing.map((e) => ({ title: e.title, force_label: e.force_label })),
+    onboarding: decisionFraming(onboarding),
     evidence_pool: evidencePool,
   };
 

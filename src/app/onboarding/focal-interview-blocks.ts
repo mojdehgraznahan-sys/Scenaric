@@ -5,7 +5,22 @@
 
 export const EYEBROW = "mb-3.5 font-mono text-[11px] font-medium uppercase tracking-[0.08em] text-brand-orange";
 
-export const INDUSTRIES = ["Technology", "Financial Services", "Energy", "Healthcare", "Consumer Goods", "Public Sector"];
+export const INDUSTRIES = [
+  "Technology",
+  "Financial Services",
+  "Healthcare",
+  "Energy",
+  "Industrials & Manufacturing",
+  "Consumer Goods",
+  "Retail & E-commerce",
+  "Media & Telecommunications",
+  "Real Estate",
+  "Transportation & Logistics",
+  "Agriculture & Food",
+  "Professional Services",
+  "Education",
+  "Public Sector",
+];
 
 export const INTRO_COPY = {
   title: "Let's shape your focal question",

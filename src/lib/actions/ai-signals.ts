@@ -17,6 +17,7 @@ import { runStructured } from "@/lib/ai/client";
 import { createClient } from "@/lib/supabase/server";
 import { FORCE_FRAMING_RULES, validateForceCandidate, draftForcePoles } from "./force-writing-rules";
 import { PERSONA_MACRO_SCOUT, PERSONA_UNCERTAINTY_CARTOGRAPHER } from "@/lib/ai/personas";
+import { getOnboardingAnswers } from "./projects";
 import type { Database } from "@/lib/supabase/types";
 import type { SteepCategory } from "./signals";
 
@@ -47,11 +48,22 @@ into STEEP-classified driving forces: forward-looking uncertainties the scenario
 consider, each representing ONE distinct macro tension that could resolve two different ways.
 
 Input: { focal_question: string, horizon: string, industry: string,
-         insights: [{id, text, actor_type}], existing_signals: [{id,title,category}] }
+         insights: [{id, text, actor_type}], existing_signals: [{id,title,category}],
+         onboarding: { awake: string|null, decision: string|null, given: string|null,
+           open: string|null, actors: string|null } | null
+         /* the user's own onboarding answers on the decision at stake, what's predetermined/
+         uncertain, and who they depend on — context only, never a substitute for real insight
+         grounding */ }
 
 ${FORCE_FRAMING_RULES}
 
 Further rules:
+- When onboarding is given, ground candidate forces in it where it fits: \`awake\`/\`decision\`
+  frame what actually matters here, \`given\`/\`open\` are the user's own predetermined-vs-uncertain
+  read, and \`actors\` names real dependencies (customers, suppliers, competitors, regulators) that
+  may deserve their own force. Never invent a force from onboarding text alone with no insight
+  behind it — it's context for shaping/prioritizing grounded candidates, not its own source of
+  grounding.
 - Every new signal must be grounded_in >= 1 insight id, OR explicitly
   flagged \`origin:"external_pattern"\` if it names a well-established
   macro trend for this industry/horizon not present in insights (allowed,
@@ -132,6 +144,8 @@ export async function suggestSignals(projectId: string): Promise<SuggestSignalsR
     .eq("project_id", projectId);
   if (signalsError) throw signalsError;
 
+  const onboarding = await getOnboardingAnswers(projectId);
+
   const insightTextById = new Map(insights.map((i) => [i.id, i.text]));
   const runOnce = () =>
     runStructured({
@@ -144,6 +158,11 @@ export async function suggestSignals(projectId: string): Promise<SuggestSignalsR
         industry: project.industry,
         insights: insights.map((i) => ({ id: i.id, text: i.text, actor_type: i.actor_type })),
         existing_signals: existingSignals.map((s) => ({ id: s.id, title: s.title, category: s.category })),
+        // Same field subset/shape as ai-signals-derive.ts's deriveForcesFromInsights (the KB
+        // sibling of this producer) for consistency between the two force-generating prompts.
+        onboarding: onboarding
+          ? { awake: onboarding.awake, decision: onboarding.decision, given: onboarding.given, open: onboarding.open, actors: onboarding.actors }
+          : null,
       },
       schema: SuggestSignalsSchema,
       effort: "medium",

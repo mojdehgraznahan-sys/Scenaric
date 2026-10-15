@@ -12,6 +12,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
+import { INTERVIEW, type InterviewBlock } from "@/lib/onboarding/interview";
+import type { OnboardingAnswers as OnboardingAnswersData } from "@/lib/actions/projects";
 import { avatarFgFor } from "@/lib/user-display";
 import type { TeamMember } from "@/lib/actions/team";
 import type { ProjectSettings } from "@/lib/actions/project-settings";
@@ -67,6 +69,169 @@ function Toggle({ on, onChange, disabled }: { on: boolean; onChange: (next: bool
         style={{ left: on ? 18 : 2 }}
       />
     </button>
+  );
+}
+
+// Settings → Project's "Onboarding answers" (design/settings_onboarding_handoff) — a read-back
+// of the four-block framing interview from onboarding (src/lib/onboarding/interview.ts), with
+// per-block edit. Self-contained (own fetch/state) rather than threaded through PageSettings'
+// own state, same as Field/Toggle above being pure presentational pieces — projectId/toast are
+// its only inputs from the parent.
+function OnboardingAnswers({ projectId, toast }: { projectId: string | null; toast: (message: string) => void }) {
+  const [answers, setAnswers] = React.useState<OnboardingAnswersData | null>(null);
+  const [loadError, setLoadError] = React.useState(false);
+  const [openTag, setOpenTag] = React.useState<InterviewBlock["tag"] | null>("A");
+  const [editingTag, setEditingTag] = React.useState<InterviewBlock["tag"] | null>(null);
+  const [draft, setDraft] = React.useState<Record<string, string>>({});
+  const [saving, setSaving] = React.useState(false);
+
+  const load = React.useCallback(async (id: string) => {
+    setLoadError(false);
+    try {
+      const res = await fetch(`/api/projects/${id}/onboarding-answers`);
+      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+      // null when the project has no onboarding_answers row yet — getAnswer below already
+      // treats that the same as every field being unanswered, nothing to normalize here.
+      setAnswers(await res.json());
+    } catch (err) {
+      console.error("[settings] failed to load onboarding answers", err);
+      setLoadError(true);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (!projectId) return;
+    load(projectId);
+  }, [projectId, load]);
+
+  if (!projectId) return null;
+
+  const getAnswer = (id: string): string => (answers ? ((answers as unknown as Record<string, string | null>)[id] ?? "") : "");
+  const answered = INTERVIEW.reduce((n, b) => n + b.qs.filter((q) => getAnswer(q.id).trim()).length, 0);
+  const total = INTERVIEW.reduce((n, b) => n + b.qs.length, 0);
+
+  const startEdit = (b: InterviewBlock) => {
+    setDraft(Object.fromEntries(b.qs.map((q) => [q.id, getAnswer(q.id)])));
+    setEditingTag(b.tag);
+    setOpenTag(b.tag);
+  };
+
+  const save = async () => {
+    setSaving(true);
+    const prev = answers;
+    try {
+      const res = await fetch(`/api/projects/${projectId}/onboarding-answers`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Request failed (${res.status}).`);
+      setAnswers(data);
+      setEditingTag(null);
+    } catch (err) {
+      console.error("[settings] failed to save onboarding answers", err);
+      setAnswers(prev);
+      toast(err instanceof Error ? err.message : "Couldn't save — try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-2.5 border-t border-[#F3F4F6] pt-[18px]">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-brand-dark">Onboarding answers</div>
+          <div className="mt-0.5 text-xs leading-[1.45] text-muted-foreground">
+            What you told us when framing the project. The focal question, key forces and scenarios were drawn from these.
+          </div>
+        </div>
+        <span className="font-mono text-[10.5px] tracking-[0.06em] text-text-3">
+          {answered} OF {total} ANSWERED
+        </span>
+      </div>
+
+      {loadError ? (
+        <div className="rounded-[10px] border border-border bg-card p-3 text-[13px] text-muted-foreground">
+          Couldn&apos;t load answers.{" "}
+          <button onClick={() => load(projectId)} className="font-medium text-brand-orange700 underline">
+            Retry.
+          </button>
+        </div>
+      ) : (
+        INTERVIEW.map((b) => {
+          const isOpen = openTag === b.tag;
+          const isEdit = editingTag === b.tag;
+          const count = b.qs.filter((q) => getAnswer(q.id).trim()).length;
+          return (
+            <div key={b.tag} className="overflow-hidden rounded-[10px] border border-border bg-card">
+              <button
+                onClick={() => setOpenTag(isOpen ? null : b.tag)}
+                className={cn("flex w-full items-center gap-2.5 px-3.5 py-[11px] text-left", isOpen ? "bg-[#FAFAFA]" : "bg-card")}
+              >
+                <span className="inline-flex h-[22px] w-[22px] flex-shrink-0 items-center justify-center rounded-[6px] bg-brand-orangeLight text-[11.5px] font-bold text-brand-orange700">
+                  {b.tag}
+                </span>
+                <span className="flex-1 font-mono text-[10.5px] tracking-[0.06em] text-[#374151]">{b.eyebrow}</span>
+                <span className={cn("text-[11.5px]", count ? "text-muted-foreground" : "text-[#B45309]")}>
+                  {count ? `${count}/${b.qs.length}` : "Not answered"}
+                </span>
+                <Icons.ArrowRight size={11} className={cn("flex-shrink-0 text-text-3 transition-transform", isOpen && "rotate-90")} />
+              </button>
+              {isOpen && (
+                <div className="flex flex-col gap-3 px-3.5 pb-3.5 pt-1">
+                  {b.qs.map((q) => {
+                    const a = getAnswer(q.id).trim();
+                    return (
+                      <div key={q.id} className="flex flex-col gap-1.5">
+                        <div className="text-xs font-medium text-muted-foreground">
+                          {q.q}
+                          {q.opt && <span className="font-normal text-text-3"> (optional)</span>}
+                        </div>
+                        {isEdit ? (
+                          <Textarea
+                            rows={q.big ? 3 : 2}
+                            value={draft[q.id] ?? ""}
+                            onChange={(e) => setDraft((d) => ({ ...d, [q.id]: e.target.value }))}
+                            className={q.big ? "min-h-[72px]" : "min-h-[48px]"}
+                          />
+                        ) : (
+                          <div className={cn("whitespace-pre-wrap text-[13.5px] leading-[1.55]", a ? "text-brand-dark" : "italic text-text-3")}>
+                            {a || "No answer"}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  <div className="flex gap-2">
+                    {isEdit ? (
+                      <>
+                        <Button variant="primary" size="sm" disabled={saving} onClick={() => save()}>
+                          {saving ? "Saving…" : "Save answers"}
+                        </Button>
+                        <Button variant="ghost" size="sm" disabled={saving} onClick={() => setEditingTag(null)}>
+                          Cancel
+                        </Button>
+                      </>
+                    ) : (
+                      <Button variant="ghost" size="sm" onClick={() => startEdit(b)}>
+                        Edit answers
+                      </Button>
+                    )}
+                  </div>
+                  {isEdit && (
+                    <div className="text-[11.5px] text-text-3">
+                      Editing these won&apos;t rewrite your focal question. Use the assistant below to re-sharpen it.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })
+      )}
+    </div>
   );
 }
 
@@ -496,6 +661,8 @@ export function PageSettings() {
                   {savingProject ? "Saving…" : "Save changes"}
                 </Button>
               </div>
+
+              <OnboardingAnswers projectId={projectId} toast={toast} />
 
               <div className="border-t border-[#F3F4F6] py-4">
                 <div className="mb-3 flex items-center gap-1.5 text-[13.5px] font-semibold">

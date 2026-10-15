@@ -12,6 +12,8 @@ import { PERSONA_SCENARIO_ARCHITECT } from "@/lib/ai/personas";
 import { createClient } from "@/lib/supabase/server";
 import { SCENARIO_NAME_POOL } from "@/components/matrix/axis-data";
 import { assertAxisCandidates } from "./matrix";
+import { getOnboardingAnswers } from "./projects";
+import { bothEndings } from "@/lib/onboarding/prompt-context";
 import type { Database } from "@/lib/supabase/types";
 
 type Quadrant = "TL" | "TR" | "BL" | "BR";
@@ -48,9 +50,16 @@ Input: { focal_question, horizon, axis_a: {label, pole_pos, pole_neg},
          they are discrete, low-probability events, not part of the continuous 2x2 structure */,
          name_pool: string[] /* curated evocative names, model must pick
          from or closely riff on this pool — never invent unrelated
-         proper nouns */ }
+         proper nouns */,
+         onboarding: { good: string|null, bad: string|null, turns: string|null } | null
+         /* the user's own stated best/worst endings and turning points from onboarding —
+         context only, never a reason to force a quadrant's logic */ }
 
 Rules:
+- When onboarding is given and a quadrant's combination of poles plausibly resembles the user's
+  own stated good or bad ending, let it resonate — echo the texture, not necessarily the exact
+  wording. Never force a contradiction between the axes' actual logic and onboarding just to
+  make a quadrant match; the axis combination always wins.
 - Produce exactly 4 scenarios, one per quadrant (TL/TR/BL/BR), each
   combining one pole of axis_a with one pole of axis_b. TL = axis_a
   pole_pos + axis_b pole_neg; TR = axis_a pole_pos + axis_b pole_pos;
@@ -144,6 +153,8 @@ async function generateScenarioLogics(
   // query here; this is an AI-prompt label, not something rendered in the UI.
   const wildcardSignals = wildcardEvents.map((e) => ({ title: e.title, body: e.description ?? "", category: e.category ?? "Political" }));
 
+  const onboarding = await getOnboardingAnswers(projectId);
+
   const output = await runStructured({
     step,
     projectId,
@@ -156,6 +167,7 @@ async function generateScenarioLogics(
       predetermined_signals: predeterminedSignals,
       wildcard_signals: wildcardSignals,
       name_pool: SCENARIO_NAME_POOL,
+      onboarding: bothEndings(onboarding),
     },
     schema: ScenarioLogicsSchema,
     effort: "high",

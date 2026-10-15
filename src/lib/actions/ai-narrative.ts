@@ -12,6 +12,8 @@ import { StorylineScenarioNotFoundError } from "@/lib/ai/errors";
 import { PERSONA_SCENARIO_STORYTELLER } from "@/lib/ai/personas";
 import { getStoryline } from "./storyline";
 import { PHASE_ORDER, type Phase } from "../storyline-mapping";
+import { getOnboardingAnswers } from "./projects";
+import { bothEndings } from "@/lib/onboarding/prompt-context";
 
 const NarrativeExpandSchema = z.object({
   sufficient_evidence: z.boolean(),
@@ -41,9 +43,15 @@ Input: { focal_question: string, scenario: {name, tagline, summary}, horizon: st
          present for the pole this scenario landed on, the narrative should
          read as a natural continuation of that headline rather than
          inventing its own opening fact */,
-         storyline_nodes: [...ordered by phase], storyline_edges: [...] }
+         storyline_nodes: [...ordered by phase], storyline_edges: [...],
+         onboarding: { good: string|null, bad: string|null, turns: string|null } | null
+         /* the user's own stated best/worst endings and turning points from onboarding —
+         context only, for voice/emphasis; never a source of new facts */ }
 
 Rules:
+- When onboarding is given and this scenario plausibly resembles the user's own stated good or
+  bad ending, let the retrospective voice echo it — but only using facts already present in
+  storyline_nodes; onboarding text is never something to quote or restate as a new fact.
 - The narrative must mention every node's core fact in causal order —
   do not invent connective events not present in the chain.
 - Do not introduce any named company, person, statistic, or policy not
@@ -149,6 +157,7 @@ export async function expandNarrativeWithAI(scenarioId: string, opts?: { allowCa
   }
 
   const orderedNodes = [...nodes].sort((a, b) => PHASE_ORDER[a.phase as Phase] - PHASE_ORDER[b.phase as Phase]);
+  const onboarding = await getOnboardingAnswers(scenario.project_id);
 
   const output = await runStructured({
     step: "narrative.expand",
@@ -162,6 +171,7 @@ export async function expandNarrativeWithAI(scenarioId: string, opts?: { allowCa
       axis_b: axisB,
       storyline_nodes: orderedNodes.map((n) => ({ phase: n.phase, title: n.title, body: n.body, year: n.year })),
       storyline_edges: edges.map((e) => ({ from: e.from_node_id, to: e.to_node_id, relationship: e.relationship })),
+      onboarding: bothEndings(onboarding),
     },
     schema: NarrativeExpandSchema,
     effort: "medium",
