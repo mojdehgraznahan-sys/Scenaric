@@ -233,6 +233,7 @@ async function logRun(args: {
   batchId: string | null;
   usedWebSearch: boolean;
   page: string | null;
+  usage: Anthropic.Usage | null;
 }) {
   // Service-role client: audit-log writes shouldn't depend on the acting user's own row
   // permissions, and this is the only way to log a pre-project call (project_id: null),
@@ -249,6 +250,10 @@ async function logRun(args: {
     batch_id: args.batchId,
     used_web_search: args.usedWebSearch,
     page: args.page,
+    input_tokens: args.usage?.input_tokens ?? null,
+    output_tokens: args.usage?.output_tokens ?? null,
+    cache_creation_input_tokens: args.usage?.cache_creation_input_tokens ?? null,
+    cache_read_input_tokens: args.usage?.cache_read_input_tokens ?? null,
   });
   if (error) console.error("[ai/client] failed to log ai_runs", error);
 }
@@ -371,10 +376,22 @@ export async function runStructured<T extends z.ZodTypeAny>(opts: RunStructuredO
       batchId,
       usedWebSearch: !!webSearch,
       page,
+      usage: response.usage,
     });
     return response.parsed_output;
   }
 
-  await logRun({ projectId, step, promptVersion, inputHash, outputJson: null, confidence: null, batchId, usedWebSearch: !!webSearch, page });
+  await logRun({
+    projectId,
+    step,
+    promptVersion,
+    inputHash,
+    outputJson: null,
+    confidence: null,
+    batchId,
+    usedWebSearch: !!webSearch,
+    page,
+    usage: null,
+  });
   throw new AIGenerationFailedError(step, lastReason, 2);
 }

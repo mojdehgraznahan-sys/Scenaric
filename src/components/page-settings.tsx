@@ -20,6 +20,7 @@ import type { ProjectSettings } from "@/lib/actions/project-settings";
 import type { ProjectAiSettings } from "@/lib/actions/project-ai-settings";
 import type { IntegrationCard } from "@/lib/actions/project-integrations";
 import type { ProjectBilling } from "@/lib/actions/billing";
+import type { ProjectAiUsage } from "@/lib/actions/ai-usage";
 import type { SharpenFocalQuestionResult, CritiqueFocalQuestionResult } from "@/lib/actions/ai-settings-tasks";
 import type { SettingsChatResult } from "@/lib/actions/ai-settings-chat";
 
@@ -605,6 +606,7 @@ export function PageSettings() {
 
   // ---- Billing tab ----
   const [billing, setBilling] = React.useState<ProjectBilling | null>(null);
+  const [aiUsage, setAiUsage] = React.useState<ProjectAiUsage | null>(null);
 
   React.useEffect(() => {
     if (!projectId) return;
@@ -617,6 +619,24 @@ export function PageSettings() {
         if (!cancelled) setBilling(data);
       } catch (err) {
         console.error("[settings] failed to load billing", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  React.useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/ai-usage`);
+        if (!res.ok) throw new Error(`Request failed (${res.status}).`);
+        const data = await res.json();
+        if (!cancelled) setAiUsage(data);
+      } catch (err) {
+        console.error("[settings] failed to load AI usage", err);
       }
     })();
     return () => {
@@ -935,6 +955,35 @@ export function PageSettings() {
               >
                 Manage subscription
               </Button>
+
+              <div className="mt-6 rounded-[10px] border border-border bg-bg p-4">
+                <div className="mb-1 font-mono text-[11px] uppercase tracking-[0.06em] text-text-3">AI USAGE — THIS PROJECT</div>
+                {aiUsage ? (
+                  <>
+                    <div className="mt-2 grid grid-cols-3 gap-3">
+                      <div>
+                        <div className="text-xl font-semibold tracking-[-0.015em]">{aiUsage.callCount.toLocaleString()}</div>
+                        <div className="text-[12px] text-muted-foreground">AI calls logged</div>
+                      </div>
+                      <div>
+                        <div className="text-xl font-semibold tracking-[-0.015em]">
+                          {(aiUsage.inputTokens + aiUsage.outputTokens).toLocaleString()}
+                        </div>
+                        <div className="text-[12px] text-muted-foreground">tokens (in + out)</div>
+                      </div>
+                      <div>
+                        <div className="text-xl font-semibold tracking-[-0.015em]">${aiUsage.estimatedCostUsd.toFixed(2)}</div>
+                        <div className="text-[12px] text-muted-foreground">estimated spend</div>
+                      </div>
+                    </div>
+                    <p className="m-0 mt-3 text-[12px] text-muted-foreground">
+                      Estimated from logged token counts at Claude Sonnet 5&apos;s published rates — not an actual invoice.
+                    </p>
+                  </>
+                ) : (
+                  <div className="text-[13px] text-muted-foreground">Loading…</div>
+                )}
+              </div>
             </div>
           )}
         </div>

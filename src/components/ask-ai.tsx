@@ -70,7 +70,7 @@ import type { MonitoringChatResult } from "@/lib/actions/ai-monitoring-chat";
 import { addEventToMonitoring } from "@/lib/actions/event-monitoring";
 import type { NextStepsResult, SummarizeWeekSignalsResult, WhatsChangedResult, ExplainProgressResult } from "@/lib/actions/ai-home-tasks";
 import type { HomeChatResult } from "@/lib/actions/ai-home-chat";
-import type { DraftFocalQuestionResult, SharpenFocalQuestionResult, CritiqueFocalQuestionResult } from "@/lib/actions/ai-settings-tasks";
+import type { SharpenFocalQuestionResult, CritiqueFocalQuestionResult } from "@/lib/actions/ai-settings-tasks";
 import type { SettingsChatResult } from "@/lib/actions/ai-settings-chat";
 import type { KnowledgeChatResult } from "@/lib/actions/ai-knowledge-chat";
 import type { ExplainDotResult, CoverageGapsResult, AlternateAxisPairResult, BucketSummaryResult } from "@/lib/actions/ai-matrix-tasks";
@@ -384,10 +384,14 @@ interface HomeResultEntry {
 // under a different label, bundled onto Settings only because the industry field happens to
 // live on this page. That's Knowledge Base's job — use its own "Pull recent news"/"Scan for
 // local actors" tasks instead.
-type SettingsTaskId = "draft_focal_question" | "sharpen_focal_question" | "critique_focal_question";
+// "Draft a focal question from my project description" used to live here too — removed (Ask
+// AI audit, 2026-10-14 follow-up): onboarding won't let a project launch without a
+// focal_question already picked, and Settings' own inline Ask-AI panel (page-settings.tsx)
+// never offered a draft chip in the first place. Onboarding's gap is re-checking/re-sharpening
+// that question afterward, not drafting a first one — the two tasks below.
+type SettingsTaskId = "sharpen_focal_question" | "critique_focal_question";
 
 const SETTINGS_TASKS: { id: SettingsTaskId; label: string }[] = [
-  { id: "draft_focal_question", label: "Draft a focal question from my project description" },
   { id: "sharpen_focal_question", label: "Sharpen my focal question" },
   { id: "critique_focal_question", label: "Is this focal question too broad/narrow?" },
 ];
@@ -397,7 +401,6 @@ interface SettingsResultEntry {
   ts: number;
   ok: boolean;
   error?: string;
-  draft?: DraftFocalQuestionResult;
   sharpen?: SharpenFocalQuestionResult;
   critique?: CritiqueFocalQuestionResult;
   // Set once "Accept"/"Use this" succeeds, so the button can't fire twice — same convention
@@ -1359,8 +1362,8 @@ export function AskAI({
   // Settings mode — fixed task menu, never freeform (freeform is settingsChatMessages below),
   // same convention as Home/Strategy/Monitoring above. Results are ephemeral for the same
   // reason (diagnostics/drafts tied to the current live project fields, not a conversation
-  // worth keeping) — except draft_focal_question/sharpen_focal_question, which can have a
-  // real, persisted side effect once "Accept"/"Use this" is explicitly clicked (PATCHes
+  // worth keeping) — except sharpen_focal_question, which can have a
+  // real, persisted side effect once "Use this" is explicitly clicked (PATCHes
   // /settings, same confirm-before-write contract as suggestedSignal/suggestedOption/
   // suggestedIndicator elsewhere in this file); the result card here is just the offer, not
   // the only record of what happened.
@@ -1380,8 +1383,7 @@ export function AskAI({
       if (!res.ok) throw new Error(`Request failed (${res.status}).`);
       const data = await res.json();
       const entry: SettingsResultEntry = { task: taskId, ts: Date.now(), ok: true };
-      if (taskId === "draft_focal_question") entry.draft = data as DraftFocalQuestionResult;
-      else if (taskId === "sharpen_focal_question") entry.sharpen = data as SharpenFocalQuestionResult;
+      if (taskId === "sharpen_focal_question") entry.sharpen = data as SharpenFocalQuestionResult;
       else entry.critique = data as CritiqueFocalQuestionResult;
       setSettingsResults((r) => [entry, ...r]);
     } catch (err) {
@@ -1392,8 +1394,8 @@ export function AskAI({
     }
   };
 
-  // Fires the actual write (PATCH /settings) behind "Accept"/"Use this" on a
-  // draft_focal_question or sharpen_focal_question result card, then tells page-settings.tsx
+  // Fires the actual write (PATCH /settings) behind "Use this" on a
+  // sharpen_focal_question result card, then tells page-settings.tsx
   // (if open) to refetch — same fm:project-settings-updated cross-component resync
   // project-settings.ts's own consumers already use.
   const applySettingsSuggestion = async (index: number, patch: { focal_question?: string; horizon?: string; refined_focal_question?: string | null }, appliedIndex?: number) => {
@@ -2644,8 +2646,8 @@ export function AskAI({
               </div>
             ) : context === "settings" ? (
               // Fixed task menu, never freeform, PLUS the real "Ask anything…" freeform panel
-              // below it — same structure as the Home branch above. draft_focal_question/
-              // sharpen_focal_question results carry an explicit "Accept"/"Use this" button
+              // below it — same structure as the Home branch above.
+              // sharpen_focal_question results carry an explicit "Use this" button
               // (confirm-before-write, same contract as suggestedSignal/suggestedOption/
               // suggestedIndicator cards) — critique_focal_question never writes anything.
               <div className="scroll-y flex flex-1 flex-col gap-2.5 p-4">
@@ -2678,33 +2680,6 @@ export function AskAI({
                             <span className="font-mono text-[10px] text-text-3">{new Date(r.ts).toLocaleTimeString()}</span>
                           </div>
                           {!r.ok && <div className="text-[12.5px] text-[#EF4444]">{r.error}</div>}
-
-                          {r.ok && r.draft && (
-                            <div className="text-[12.5px] leading-[1.5]">
-                              {!r.draft.sufficientEvidence ? (
-                                <p className="m-0 text-muted-foreground">{r.draft.gap || "Not enough project detail to draft one yet."}</p>
-                              ) : (
-                                <>
-                                  <div className="mb-1 text-[13px] font-semibold">{r.draft.focalQuestion}</div>
-                                  <div className="mb-1 font-mono text-[10.5px] uppercase tracking-[0.04em] text-brand-orange">
-                                    Horizon: {r.draft.horizon}
-                                  </div>
-                                  <p className="m-0 mb-2 text-muted-foreground">{r.draft.rationale}</p>
-                                  <Button
-                                    variant={r.applied ? "ghost" : "soft"}
-                                    size="sm"
-                                    className="w-full"
-                                    disabled={r.applied}
-                                    onClick={() =>
-                                      applySettingsSuggestion(i, { focal_question: r.draft!.focalQuestion, horizon: r.draft!.horizon, refined_focal_question: null })
-                                    }
-                                  >
-                                    {r.applied ? "Applied ✓" : "Accept"}
-                                  </Button>
-                                </>
-                              )}
-                            </div>
-                          )}
 
                           {r.ok && r.sharpen && (
                             <ul className="m-0 flex list-none flex-col gap-2 p-0 text-[12.5px] leading-[1.5]">

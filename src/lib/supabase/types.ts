@@ -1126,6 +1126,10 @@ export interface Database {
           batch_id: string | null;
           used_web_search: boolean;
           page: string | null;
+          input_tokens: number | null;
+          output_tokens: number | null;
+          cache_creation_input_tokens: number | null;
+          cache_read_input_tokens: number | null;
           created_at: string;
         };
         Insert: {
@@ -1140,6 +1144,10 @@ export interface Database {
           batch_id?: string | null;
           used_web_search?: boolean;
           page?: string | null;
+          input_tokens?: number | null;
+          output_tokens?: number | null;
+          cache_creation_input_tokens?: number | null;
+          cache_read_input_tokens?: number | null;
           created_at?: string;
         };
         Update: {
@@ -1154,6 +1162,10 @@ export interface Database {
           batch_id?: string | null;
           used_web_search?: boolean;
           page?: string | null;
+          input_tokens?: number | null;
+          output_tokens?: number | null;
+          cache_creation_input_tokens?: number | null;
+          cache_read_input_tokens?: number | null;
           created_at?: string;
         };
         Relationships: [];
@@ -1988,6 +2000,17 @@ export interface Database {
       set_axes: {
         Args: { p_project: string; p_ids: string[] };
         Returns: Database["public"]["Tables"]["axes"]["Row"];
+      };
+      // Settings → Billing's per-project AI usage rollup (0051_ai_runs_token_usage.sql).
+      project_ai_token_totals: {
+        Args: { p_project_id: string };
+        Returns: {
+          call_count: number;
+          input_tokens: number;
+          output_tokens: number;
+          cache_creation_input_tokens: number;
+          cache_read_input_tokens: number;
+        }[];
       };
     };
     Enums: Record<string, never>;

@@ -21,3 +21,11 @@ export function bothEndings(o: OnboardingAnswers | null): { good: string | null;
   if (!o || !(o.good || o.bad || o.turns)) return null;
   return { good: o.good, bad: o.bad, turns: o.turns };
 }
+
+// Block B — the user's own "oracle questions": what they'd ask a truthful oracle about their
+// business's future. These are the user's own first-draft framings of their real
+// uncertainties. For prompts that draft, sharpen, or critique the project's focal question.
+export function theUnknowns(o: OnboardingAnswers | null): { o1: string | null; o2: string | null; o3: string | null } | null {
+  if (!o || !(o.o1 || o.o2 || o.o3)) return null;
+  return { o1: o.o1, o2: o.o2, o3: o.o3 };
+}
