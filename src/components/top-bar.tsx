@@ -15,6 +15,8 @@ const TITLES: Record<string, string> = {
   knowledge: "Knowledge Base",
   signals: "Signals Library",
   matrix: "Matrix",
+  futures: "Futures",
+  chains: "Event Chains",
   storyline: "Storyline",
   canvas: "Scenario Canvas",
   narrative: "Narrative",

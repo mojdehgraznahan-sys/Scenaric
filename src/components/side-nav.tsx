@@ -50,8 +50,13 @@ export function SideNav({ navigate, page }: { navigate: Navigate; page: string }
       items: [{ id: "matrix", label: "Matrix", icon: <Icons.Grid size={14} /> }],
     },
     {
+      // Futures/Event chains (design/futures_chains_handoff/) are the replacements for
+      // Canvas/Storyline/Narrative — added alongside them for now rather than instead; the old
+      // three are retired in a later pass once Futures/Event chains are validated.
       label: "SCENARIOS",
       items: [
+        { id: "futures", label: "Futures", icon: <Icons.Map size={14} /> },
+        { id: "chains", label: "Event chains", icon: <Icons.Link size={14} /> },
         { id: "canvas", label: "Canvas", icon: <Icons.Compass size={14} /> },
         { id: "storyline", label: "Storyline", icon: <Icons.Trending size={14} />, shortcut: "2" },
         { id: "narrative", label: "Narrative", icon: <Icons.Edit3 size={14} />, shortcut: "3" },

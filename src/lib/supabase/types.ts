@@ -651,6 +651,212 @@ export interface Database {
         };
         Relationships: [];
       };
+      // Futures + Event chains (0052_futures_chains.sql) — replaces Canvas/Storyline/Narrative.
+      futures_state: {
+        Row: {
+          project_id: string;
+          target_year: number | null;
+          generated_at: string | null;
+          chain_scenario_id: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          project_id: string;
+          target_year?: number | null;
+          generated_at?: string | null;
+          chain_scenario_id?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          project_id?: string;
+          target_year?: number | null;
+          generated_at?: string | null;
+          chain_scenario_id?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      scenario_postcards: {
+        Row: {
+          scenario_id: string;
+          project_id: string;
+          headline: string;
+          story: string;
+          day: string;
+          us: string;
+          updated_by: "ai" | "user";
+          updated_at: string;
+        };
+        Insert: {
+          scenario_id: string;
+          project_id: string;
+          headline: string;
+          story: string;
+          day: string;
+          us: string;
+          updated_by: "ai" | "user";
+          updated_at?: string;
+        };
+        Update: {
+          scenario_id?: string;
+          project_id?: string;
+          headline?: string;
+          story?: string;
+          day?: string;
+          us?: string;
+          updated_by?: "ai" | "user";
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      scenario_narratives: {
+        Row: {
+          scenario_id: string;
+          project_id: string;
+          story: unknown;
+          life: unknown;
+          us_up: unknown;
+          us_down: unknown;
+          postcard_headline: string | null;
+          updated_by: "ai" | "user";
+          updated_at: string;
+        };
+        Insert: {
+          scenario_id: string;
+          project_id: string;
+          story: unknown;
+          life: unknown;
+          us_up: unknown;
+          us_down: unknown;
+          postcard_headline?: string | null;
+          updated_by: "ai" | "user";
+          updated_at?: string;
+        };
+        Update: {
+          scenario_id?: string;
+          project_id?: string;
+          story?: unknown;
+          life?: unknown;
+          us_up?: unknown;
+          us_down?: unknown;
+          postcard_headline?: string | null;
+          updated_by?: "ai" | "user";
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      scenario_ratings: {
+        Row: {
+          scenario_id: string;
+          project_id: string;
+          desirability: number | null;
+          stance: "want" | "live" | "avoid";
+          rated_by: string | null;
+          rated_at: string | null;
+        };
+        Insert: {
+          scenario_id: string;
+          project_id: string;
+          desirability?: number | null;
+          rated_by?: string | null;
+          rated_at?: string | null;
+        };
+        Update: {
+          scenario_id?: string;
+          project_id?: string;
+          desirability?: number | null;
+          rated_by?: string | null;
+          rated_at?: string | null;
+        };
+        Relationships: [];
+      };
+      scenario_early_signs: {
+        Row: {
+          scenario_id: string;
+          signal_id: string;
+          project_id: string;
+          sort: number;
+        };
+        Insert: {
+          scenario_id: string;
+          signal_id: string;
+          project_id: string;
+          sort?: number;
+        };
+        Update: {
+          scenario_id?: string;
+          signal_id?: string;
+          project_id?: string;
+          sort?: number;
+        };
+        Relationships: [];
+      };
+      chain_events: {
+        Row: {
+          id: string;
+          project_id: string;
+          scenario_id: string;
+          start_year: number;
+          target_year: number;
+          year: number;
+          title: string;
+          why: string | null;
+          forces: string[];
+          indicator: string | null;
+          threshold: string | null;
+          influence: "high" | "some" | "none";
+          move: string | null;
+          likelihood: number | null;
+          impact: number | null;
+          created_by: "ai" | "user";
+          sort: number;
+          promoted_event_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          scenario_id: string;
+          start_year: number;
+          target_year: number;
+          year: number;
+          title: string;
+          why?: string | null;
+          forces?: string[];
+          indicator?: string | null;
+          threshold?: string | null;
+          influence: "high" | "some" | "none";
+          move?: string | null;
+          likelihood?: number | null;
+          impact?: number | null;
+          created_by?: "ai" | "user";
+          sort?: number;
+          promoted_event_id?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          scenario_id?: string;
+          start_year?: number;
+          target_year?: number;
+          year?: number;
+          title?: string;
+          why?: string | null;
+          forces?: string[];
+          indicator?: string | null;
+          threshold?: string | null;
+          influence?: "high" | "some" | "none";
+          move?: string | null;
+          likelihood?: number | null;
+          impact?: number | null;
+          created_by?: "ai" | "user";
+          sort?: number;
+          promoted_event_id?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       storyline_nodes: {
         Row: {
           id: string;
@@ -2000,6 +2206,12 @@ export interface Database {
       set_axes: {
         Args: { p_project: string; p_ids: string[] };
         Returns: Database["public"]["Tables"]["axes"]["Row"];
+      };
+      // Futures + Event chains (0052_futures_chains.sql) — replaces all chain_events rows for
+      // one (scenario_id, target_year) in a single call.
+      save_chain: {
+        Args: { p_scenario: string; p_start_year: number; p_target_year: number; p_events: unknown };
+        Returns: Database["public"]["Tables"]["chain_events"]["Row"][];
       };
       // Settings → Billing's per-project AI usage rollup (0051_ai_runs_token_usage.sql).
       project_ai_token_totals: {
