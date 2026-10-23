@@ -164,6 +164,9 @@ export interface UseEventChainResult {
   generating: boolean;
   regenerate: () => Promise<void>;
   save: (events: ChainEventResult[]) => Promise<void>;
+  // Debounced (400ms per event) — for likelihood/impact clicks only. Drag/insert/remove/
+  // link/edit go through `save` directly and persist immediately, per the Storyline handoff.
+  rate: (eventId: string, patch: { likelihood?: number; impact?: number }) => void;
 }
 
 export function useEventChain(scenarioId: string | null, startYear: number, targetYear: number): UseEventChainResult {
@@ -222,5 +225,39 @@ export function useEventChain(scenarioId: string | null, startYear: number, targ
     [scenarioId, startYear, targetYear]
   );
 
-  return { events, loading, generating, regenerate, save };
+  const rateTimers = React.useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  React.useEffect(() => {
+    // Switching scenario/year cancels any pending debounced rating save rather than letting
+    // it fire against state that's since moved on — same guard as projectIdRef in useFutures.
+    const timers = rateTimers.current;
+    return () => {
+      timers.forEach((t) => clearTimeout(t));
+      timers.clear();
+    };
+  }, [scenarioId, targetYear]);
+
+  const rate = React.useCallback(
+    (eventId: string, patch: { likelihood?: number; impact?: number }) => {
+      if (!scenarioId) return;
+      setEvents((prev) => {
+        if (!prev) return prev;
+        const next = prev.map((e) => (e.id === eventId ? { ...e, ...patch } : e));
+        const existing = rateTimers.current.get(eventId);
+        if (existing) clearTimeout(existing);
+        rateTimers.current.set(
+          eventId,
+          setTimeout(() => {
+            rateTimers.current.delete(eventId);
+            saveChainEvents(scenarioId, startYear, targetYear, next)
+              .then(setEvents)
+              .catch((err) => console.error("[use-futures] failed to save rating", err));
+          }, 400)
+        );
+        return next;
+      });
+    },
+    [scenarioId, startYear, targetYear]
+  );
+
+  return { events, loading, generating, regenerate, save, rate };
 }

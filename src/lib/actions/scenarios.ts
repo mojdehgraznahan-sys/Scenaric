@@ -86,23 +86,5 @@ export async function setScenarioArchived(projectId: string, scenarioId: string,
   const supabase = createClient();
   const { error } = await supabase.from("scenarios").update({ is_archived: archived }).eq("id", scenarioId).eq("project_id", projectId).select("id").single();
   if (error) throw error;
-  revalidatePath("/canvas");
-}
-
-// PATCH .../scenarios/:id — Narrative page's manual Edit mode (Build Plan §9, Step 6). Plain
-// field update, no AI. Always stamps narrative_edited_by_user:true — this is a human typing
-// into the textarea, the exact case that flag exists to record — so a later "Expand with AI"
-// run on this scenario knows to confirm before overwriting (expandNarrativeWithAI, in
-// ai-narrative.ts, clears the flag again once the user has accepted an AI regeneration).
-export async function updateScenarioNarrative(projectId: string, scenarioId: string, fields: { narrative?: string; summary?: string }): Promise<void> {
-  const supabase = createClient();
-  const { error } = await supabase
-    .from("scenarios")
-    .update({ ...fields, narrative_edited_by_user: true })
-    .eq("id", scenarioId)
-    .eq("project_id", projectId)
-    .select("id")
-    .single();
-  if (error) throw error;
-  revalidatePath("/narrative");
+  revalidatePath("/futures");
 }

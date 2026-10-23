@@ -110,7 +110,7 @@ export function PageDashboard() {
       label: "Scenarios drafted",
       ...(dashboard?.kpis.scenarios ?? EMPTY_KPI),
       tone: "text-[#3B82F6]",
-      route: "/canvas",
+      route: "/futures",
     },
     {
       label: "Events monitored",

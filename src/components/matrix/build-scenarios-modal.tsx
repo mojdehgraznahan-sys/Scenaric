@@ -137,7 +137,7 @@ export function BuildScenariosModal({
       onClose();
       const w = window as FmWindow;
       if (w.FM_toast) w.FM_toast({ message: "4 scenarios created", actionText: "Open Canvas", action: "open-canvas", duration: 4000 });
-      if (openCanvas && navigate) navigate("/canvas");
+      if (openCanvas && navigate) navigate("/futures");
     } catch (err) {
       console.error("[matrix] buildScenarios failed", err);
       setError("Couldn't build scenarios. Try again or pick different axes.");

@@ -162,7 +162,7 @@ export function PageMatrix({ navigate }: { navigate: Navigate }) {
           api={api}
           lockAxes={hasScenarios}
           onReaxis={() => setReaxisOpen(true)}
-          onBuildScenarios={() => (hasScenarios ? navigate("/canvas") : setBuildOpen(true))}
+          onBuildScenarios={() => (hasScenarios ? navigate("/futures") : setBuildOpen(true))}
           buildLabel={hasScenarios ? "View Scenarios →" : undefined}
           onNavigate={navigate}
           initialSelected={focusId ?? undefined}

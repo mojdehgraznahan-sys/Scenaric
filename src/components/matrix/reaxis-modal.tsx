@@ -235,7 +235,7 @@ export function ReAxisModal({
     const w = window as FmWindow;
     w.__fmUndo = snapshot;
     if (w.FM_toast) w.FM_toast({ message: "Re-axis applied", actionText: "Undo", action: "undo-reax", duration: 30000 });
-    if (navigate) navigate("/canvas");
+    if (navigate) navigate("/futures");
   };
   applyReaxisRef.current = applyReaxis;
 

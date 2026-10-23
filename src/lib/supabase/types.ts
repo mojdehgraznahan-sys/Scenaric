@@ -810,6 +810,7 @@ export interface Database {
           impact: number | null;
           created_by: "ai" | "user";
           sort: number;
+          analog: string | null;
           promoted_event_id: string | null;
           created_at: string;
         };
@@ -831,6 +832,7 @@ export interface Database {
           impact?: number | null;
           created_by?: "ai" | "user";
           sort?: number;
+          analog?: string | null;
           promoted_event_id?: string | null;
           created_at?: string;
         };
@@ -852,7 +854,29 @@ export interface Database {
           impact?: number | null;
           created_by?: "ai" | "user";
           sort?: number;
+          analog?: string | null;
           promoted_event_id?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      chain_event_links: {
+        Row: {
+          from_event_id: string;
+          to_event_id: string;
+          project_id: string;
+          created_at: string;
+        };
+        Insert: {
+          from_event_id: string;
+          to_event_id: string;
+          project_id: string;
+          created_at?: string;
+        };
+        Update: {
+          from_event_id?: string;
+          to_event_id?: string;
+          project_id?: string;
           created_at?: string;
         };
         Relationships: [];

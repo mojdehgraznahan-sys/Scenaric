@@ -6,7 +6,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { yearOptions } from "@/lib/scenarios/backcast";
-import type { ChainEventResult } from "./ai-futures";
+import { attachLinks, type ChainEventResult } from "./ai-futures";
 
 export interface FuturesScenario {
   id: string;
@@ -205,24 +205,16 @@ export async function getChainEvents(scenarioId: string, targetYear: number): Pr
     .eq("target_year", targetYear)
     .order("sort");
   if (error) throw error;
-  return data.map((r) => ({
-    id: r.id,
-    year: r.year,
-    title: r.title,
-    why: r.why ?? "",
-    forces: r.forces,
-    indicator: r.indicator ?? "",
-    threshold: r.threshold ?? "",
-    influence: r.influence,
-    likelihood: r.likelihood,
-    impact: r.impact,
-    createdBy: r.created_by,
-  }));
+  return attachLinks(supabase, data);
 }
 
-// Single mutation entry point for every chain edit (add/remove/edit/rate) — always resends the
-// whole chain for (scenario, target_year); save_chain (0052_futures_chains.sql) replaces it in
-// one transaction. Matches the handoff's own setChain(scId, events) contract exactly. Each
+// Single mutation entry point for every chain edit (drag/insert/remove/link/edit/rate) —
+// always resends the whole chain for (scenario, target_year) in sequence order; save_chain
+// (0053_storyline_chain_merge.sql) upserts by id so ids and links survive a save, and
+// resolves each event's `links` (real ids, from this array) into 0-based array indices for
+// the wire call — a brand-new, not-yet-saved event has no real id yet, so index-based
+// reference is the only thing that works for it. New events carry a client-generated
+// "new-…" id (never sent as `id` in the payload, so the server creates a real one). Each
 // event carries its own createdBy through the round-trip — rating L/I on an AI-written event
 // must not relabel its title/why as user-authored.
 export async function saveChainEvents(
@@ -232,14 +224,18 @@ export async function saveChainEvents(
   events: ChainEventResult[]
 ): Promise<ChainEventResult[]> {
   const supabase = createClient();
-  const { data, error } = await supabase.rpc("save_chain", {
+  const idToIndex = new Map(events.map((e, i) => [e.id, i]));
+
+  const { data: rows, error } = await supabase.rpc("save_chain", {
     p_scenario: scenarioId,
     p_start_year: startYear,
     p_target_year: targetYear,
     p_events: events.map((e) => ({
+      ...(e.id.startsWith("new-") ? {} : { id: e.id }),
       year: e.year,
       title: e.title,
       why: e.why,
+      analog: e.analog,
       forces: e.forces,
       indicator: e.indicator,
       threshold: e.threshold,
@@ -247,21 +243,10 @@ export async function saveChainEvents(
       likelihood: e.likelihood,
       impact: e.impact,
       created_by: e.createdBy,
+      links: e.links.map((id) => idToIndex.get(id)).filter((i): i is number => i != null),
     })),
   });
   if (error) throw error;
-  revalidatePath("/chains");
-  return data.map((r) => ({
-    id: r.id,
-    year: r.year,
-    title: r.title,
-    why: r.why ?? "",
-    forces: r.forces,
-    indicator: r.indicator ?? "",
-    threshold: r.threshold ?? "",
-    influence: r.influence,
-    likelihood: r.likelihood,
-    impact: r.impact,
-    createdBy: r.created_by,
-  }));
+  revalidatePath("/storyline");
+  return attachLinks(supabase, rows);
 }

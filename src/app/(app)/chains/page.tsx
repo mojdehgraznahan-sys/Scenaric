@@ -1,5 +1,6 @@
-import { PageChains } from "@/components/scenarios/chains/page-chains";
+import { redirect } from "next/navigation";
 
+// Event chains merged into Storyline (design/storyline_handoff/) — permanent redirect.
 export default function ChainsPage() {
-  return <PageChains />;
+  redirect("/storyline");
 }

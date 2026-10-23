@@ -28,18 +28,23 @@ export function fmt(s: string | null | undefined, targetYear: number, startYear:
     .replace(/\{S\}/g, String(startYear));
 }
 
+// Storyline rule (design/storyline_handoff/) — supersedes the original Event-chains rule
+// (min(3*yrs, yrs+2), max 3/year). Max 2 events per year now.
+export const MAX_PER_YEAR = 2;
+
 export function chainSize(yrs: number): number {
   const y = Math.max(1, yrs);
-  return Math.min(3 * y, y + 2);
+  return Math.min(MAX_PER_YEAR * y, y + 3);
 }
 
-// Re-spreads events evenly across startYear+1..targetYear so no single year holds more than 3,
-// preserving relative order. Ported from the standalone's BC.spread, adapted to real year ints.
+// Re-spreads events evenly across startYear+1..targetYear so no single year holds more than
+// MAX_PER_YEAR, preserving relative order. Ported from the standalone's BC.spread (Storyline
+// version), adapted to real year ints.
 export function spread<T extends { year: number }>(events: T[], startYear: number, targetYear: number): T[] {
   const yrs = Math.max(1, targetYear - startYear);
   const sorted = [...events].sort((a, b) => a.year - b.year);
   const m = sorted.length;
-  return sorted.map((e, i) => ({ ...e, year: startYear + Math.max(1, Math.ceil(((i + 1) * yrs) / m)) }));
+  return sorted.map((e, i) => ({ ...e, year: startYear + Math.max(1, Math.min(yrs, Math.ceil(((i + 1) * yrs) / m))) }));
 }
 
 export function yearCounts<T extends { year: number }>(events: T[]): Map<number, number> {

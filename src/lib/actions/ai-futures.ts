@@ -15,7 +15,7 @@ import { z } from "zod";
 import { runStructured } from "@/lib/ai/client";
 import { PERSONA_SCENARIO_STORYTELLER } from "@/lib/ai/personas";
 import { createClient } from "@/lib/supabase/server";
-import { chainSize, spread, yearOptions } from "@/lib/scenarios/backcast";
+import { chainSize, spread, yearOptions, MAX_PER_YEAR } from "@/lib/scenarios/backcast";
 import type { Database } from "@/lib/supabase/types";
 
 type ScenarioRow = Database["public"]["Tables"]["scenarios"]["Row"];
@@ -340,6 +340,7 @@ const ChainEventSchema = z.object({
   year: z.number(),
   title: z.string(),
   why: z.string(),
+  analog: z.string().min(1),
   forces: z.array(z.string()).max(2),
   indicator: z.string(),
   threshold: z.string(),
@@ -351,30 +352,37 @@ const CHAIN_TASK_PROMPT = `${PERSONA_SCENARIO_STORYTELLER}
 
 Task: Backcast — walk from this scenario's end state back to today through a chain of
 causally-linked events. Each event must make the next one possible; the last one produces the
-end state.
+end state. Before writing, look for precedents in other industries and regions (telecoms,
+autos, pharma, payments, cloud, mining, energy, and the like) where a similar shift already
+happened, and use them to make each step plausible and concrete.
 
 Input: { focal_question: string, start_year: number, target_year: number, event_count: number,
   scenario: { name: string, end_state_story: string } }
 
 Rules:
 - Produce exactly event_count events.
-- Years must be between start_year+1 and target_year inclusive, earliest first, no more than 3
-  events in any single year.
+- Years must be between start_year+1 and target_year inclusive, earliest first, no more than
+  ${MAX_PER_YEAR} events in any single year.
 - Each event's why explains why it had to happen before the next one in the chain — not a
   restatement of the title.
+- analog: one sentence naming a REAL precedent from another industry or region — never vague
+  ("this has happened before") and never invented; if you can't name a specific real one,
+  choose a different event instead.
 - forces: 1-2 short driving-force labels per event.
 - influence: can a mid-size company realistically move this event? "high"|"some"|"none".
 - Never invent a named entity, statistic, or date not implied by scenario.end_state_story.
 
-Output schema: { events: [{ year: number, title: string, why: string, forces: string[1-2],
-  indicator: string, threshold: string, influence: "high"|"some"|"none" }] } (exactly
-  event_count items)`;
+Output schema: { events: [{ year: number, title: string, why: string, analog: string,
+  forces: string[1-2], indicator: string, threshold: string, influence: "high"|"some"|"none" }] }
+  (exactly event_count items)`;
 
 export interface ChainEventResult {
   id: string;
   year: number;
+  sort: number;
   title: string;
   why: string;
+  analog: string;
   forces: string[];
   indicator: string;
   threshold: string;
@@ -382,6 +390,45 @@ export interface ChainEventResult {
   likelihood: number | null;
   impact: number | null;
   createdBy: "ai" | "user";
+  links: string[];
+}
+
+// Shared by generateChain and futures.ts's getChainEvents/saveChainEvents — chain_event_links
+// isn't part of chain_events' own row shape (save_chain returns setof chain_events only), so
+// every read path attaches each event's outgoing links from a separate query.
+type RawChainEventRow = Database["public"]["Tables"]["chain_events"]["Row"];
+
+export async function attachLinks(supabase: ReturnType<typeof createClient>, rows: RawChainEventRow[]): Promise<ChainEventResult[]> {
+  const ids = rows.map((r) => r.id);
+  let linkRows: { from_event_id: string; to_event_id: string }[] = [];
+  if (ids.length > 0) {
+    const { data, error } = await supabase.from("chain_event_links").select("from_event_id, to_event_id").in("from_event_id", ids);
+    if (error) throw error;
+    linkRows = data;
+  }
+  const linksByFrom = new Map<string, string[]>();
+  for (const l of linkRows) {
+    linksByFrom.set(l.from_event_id, [...(linksByFrom.get(l.from_event_id) ?? []), l.to_event_id]);
+  }
+  return rows
+    .slice()
+    .sort((a, b) => a.year - b.year || a.sort - b.sort)
+    .map((r) => ({
+      id: r.id,
+      year: r.year,
+      sort: r.sort,
+      title: r.title,
+      why: r.why ?? "",
+      analog: r.analog ?? "",
+      forces: r.forces,
+      indicator: r.indicator ?? "",
+      threshold: r.threshold ?? "",
+      influence: r.influence,
+      likelihood: r.likelihood,
+      impact: r.impact,
+      createdBy: r.created_by,
+      links: linksByFrom.get(r.id) ?? [],
+    }));
 }
 
 export async function generateChain(scenarioId: string, targetYear: number): Promise<ChainEventResult[]> {
@@ -415,10 +462,12 @@ export async function generateChain(scenarioId: string, targetYear: number): Pro
 
   const counts = new Map<number, number>();
   events.forEach((e) => counts.set(e.year, (counts.get(e.year) ?? 0) + 1));
-  if (Array.from(counts.values()).some((c) => c > 3)) {
+  if (Array.from(counts.values()).some((c) => c > MAX_PER_YEAR)) {
     events = spread(events, startYear, targetYear);
   }
 
+  // No `id` or `links` on a freshly-generated chain — every event is new, and links are a
+  // user-editing feature, not something the model proposes.
   const { data: rows, error } = await supabase.rpc("save_chain", {
     p_scenario: scenarioId,
     p_start_year: startYear,
@@ -427,29 +476,19 @@ export async function generateChain(scenarioId: string, targetYear: number): Pro
       year: e.year,
       title: e.title,
       why: e.why,
+      analog: e.analog,
       forces: e.forces,
       indicator: e.indicator,
       threshold: e.threshold,
       influence: e.influence,
       created_by: "ai",
+      links: [],
     })),
   });
   if (error) throw error;
 
-  revalidatePath("/chains");
-  return rows.map((r) => ({
-    id: r.id,
-    year: r.year,
-    title: r.title,
-    why: r.why ?? "",
-    forces: r.forces,
-    indicator: r.indicator ?? "",
-    threshold: r.threshold ?? "",
-    influence: r.influence,
-    likelihood: r.likelihood,
-    impact: r.impact,
-    createdBy: r.created_by,
-  }));
+  revalidatePath("/storyline");
+  return attachLinks(supabase, rows);
 }
 
 // ─────────────────────── Orchestrator ───────────────────────

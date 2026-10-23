@@ -3,11 +3,10 @@
 // Floating "Ask AI" launcher + chat drawer — available on every app page.
 // Faithful Tailwind/shadcn port of the handoff ask-ai.jsx (canned-reply demo chat). Real
 // paths now: context="signals" (Signals page) calls askSignalsChat for real, grounded
-// freeform chat; context="storyline"/"narrative" (Storyline/Narrative pages) are each a
-// fixed task menu — see STORYLINE_TASKS/NARRATIVE_TASKS below — PLUS a real grounded
-// "Ask anything…" freeform input alongside it (ScenarioChatPanel, backed by
-// askScenarioChat), never in place of the scoped tasks. Every other page keeps the
-// original canned-reply demo behavior untouched.
+// freeform chat; other contexts (strategy, monitoring, home, settings, knowledge, matrix)
+// are each a fixed task menu, several PLUS a real grounded "Ask anything…" freeform input
+// alongside it (ScenarioChatPanel). Every other page keeps the original canned-reply demo
+// behavior untouched.
 import * as React from "react";
 import { Icons } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
@@ -51,17 +50,6 @@ import {
   type TestWildcardsResult,
 } from "@/lib/actions/ai-signals-test";
 import { AIGenerationFailedError } from "@/lib/ai/errors";
-import { createStorylineNode } from "@/lib/actions/storyline";
-import type { Phase } from "@/lib/storyline-mapping";
-import type {
-  ValidatePlausibilityResult,
-  ValidateChainResult,
-  MissingLinksResult,
-} from "@/lib/actions/ai-storyline-tasks";
-import type {
-  CheckNarrativeFidelityResult,
-  StressTestImplicationsResult,
-} from "@/lib/actions/ai-narrative-tasks";
 import type { StressTestOptionResult, SuggestHedgeResult } from "@/lib/actions/ai-strategy-tasks";
 import type { StrategyChatResult } from "@/lib/actions/ai-strategy-chat";
 import { createManualStrategicOption } from "@/lib/actions/strategy";
@@ -124,54 +112,6 @@ const SUGGESTED = [
   "Stress-test my current strategy",
   "Summarise this week's signals",
 ];
-
-type StorylineTaskId = "validate_plausibility" | "validate_chain" | "find_missing_links" | "explain_chain";
-
-const STORYLINE_TASKS: { id: StorylineTaskId; label: string; needsPath: boolean }[] = [
-  { id: "validate_plausibility", label: "Validate plausibility", needsPath: false },
-  { id: "validate_chain", label: "Validate this chain", needsPath: true },
-  { id: "find_missing_links", label: "Find missing links", needsPath: false },
-  { id: "explain_chain", label: "Explain this chain", needsPath: true },
-];
-
-interface StorylineResultEntry {
-  task: StorylineTaskId;
-  ts: number;
-  ok: boolean;
-  error?: string;
-  plausibility?: ValidatePlausibilityResult;
-  chain?: ValidateChainResult;
-  missing?: MissingLinksResult;
-  explanation?: string;
-  // find_missing_links candidates used to be a dead end — surfaced, never actionable from
-  // here (the side panel's own single-gap "Find signals" flow was the only way to act on
-  // one). Tracks which gap phases have had a candidate added to the chain from this result
-  // card (Ask AI audit, design/2026-10-05 follow-up).
-  usedGapPhases?: Set<string>;
-}
-
-// "Regenerate implications" and "Suggest indicators from this narrative" used to live here
-// too — removed (Ask AI audit, design/2026-10-05 follow-up): both were thin, zero-added-logic
-// pass-throughs to functions the Narrative page already exposes as its own primary buttons
-// ("Regenerate" on the Implications card, "Monitor events"), so they only duplicated existing
-// page functionality rather than adding anything Ask AI-specific. Monitoring's own
-// `suggest_events` task (ai-monitoring-tasks.ts) is the better version of that anyway — it
-// picks the weakest-covered scenario and has a safety gate this one never had.
-type NarrativeTaskId = "check_fidelity" | "stress_test_implications";
-
-const NARRATIVE_TASKS: { id: NarrativeTaskId; label: string; needsImplications: boolean }[] = [
-  { id: "check_fidelity", label: "Check narrative fidelity to storyline", needsImplications: false },
-  { id: "stress_test_implications", label: "Stress-test implications", needsImplications: true },
-];
-
-interface NarrativeResultEntry {
-  task: NarrativeTaskId;
-  ts: number;
-  ok: boolean;
-  error?: string;
-  fidelity?: CheckNarrativeFidelityResult;
-  stressTest?: StressTestImplicationsResult;
-}
 
 type StrategyTaskId = "stress_test_option" | "explain_non_robust" | "suggest_hedge";
 
@@ -337,26 +277,6 @@ interface MatrixResultEntry {
   coverageGaps?: CoverageGapsResult;
   alternatePair?: AlternateAxisPairResult;
   bucketSummary?: BucketSummaryResult;
-}
-
-// Canvas mode — fixed task menu, never freeform, same no-chat shape as Storyline/Narrative/
-// Matrix. All 3 tasks are project-wide (no per-scenario selection context needed).
-type CanvasTaskId = "predetermined_elements" | "weakest_storyline" | "summarize_all";
-
-const CANVAS_TASKS: { id: CanvasTaskId; label: string }[] = [
-  { id: "predetermined_elements", label: "What predetermined elements show up in every scenario?" },
-  { id: "weakest_storyline", label: "Which scenario has the weakest storyline?" },
-  { id: "summarize_all", label: "Summarize all 4 scenarios" },
-];
-
-// All 3 tasks normalize to one shared summary shape, same convention Knowledge/Signals above
-// already use — no per-task result union needed.
-interface CanvasResultEntry {
-  task: CanvasTaskId;
-  ts: number;
-  ok: boolean;
-  error?: string;
-  summary?: string;
 }
 
 type HomeTaskId = "next_steps" | "summarize_week_signals" | "whats_changed" | "explain_progress";
@@ -609,7 +529,7 @@ function ScenarioChatPanel({
 export function AskAI({
   context,
 }: {
-  context?: "signals" | "storyline" | "narrative" | "strategy" | "monitoring" | "home" | "settings" | "knowledge" | "matrix" | "canvas";
+  context?: "signals" | "strategy" | "monitoring" | "home" | "settings" | "knowledge" | "matrix";
 }) {
   const store = useStore();
   const [open, setOpen] = React.useState(false);
@@ -669,89 +589,8 @@ export function AskAI({
     }, 900 + Math.random() * 500);
   };
 
-  // Storyline mode — fixed task menu, never freeform. Results are ephemeral (not persisted
-  // to localStorage like the other two modes' text-only messages), since they're structured
-  // diagnostics tied to the current live chain rather than a conversation worth keeping.
-  const [storylineResults, setStorylineResults] = React.useState<StorylineResultEntry[]>([]);
-  const [runningTask, setRunningTask] = React.useState<StorylineTaskId | null>(null);
-
-  const runStorylineTask = async (taskId: StorylineTaskId) => {
-    const ctx = store.storylineAskAiContext;
-    if (!ctx) return;
-    setRunningTask(taskId);
-    try {
-      const res = await fetch(`/api/scenarios/${ctx.scenarioId}/storyline/ask-ai`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task: taskId, nodeIds: ctx.nodeIds }),
-      });
-      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
-      const data = await res.json();
-      const entry: StorylineResultEntry = { task: taskId, ts: Date.now(), ok: true };
-      if (taskId === "validate_plausibility") entry.plausibility = data as ValidatePlausibilityResult;
-      else if (taskId === "validate_chain") entry.chain = data as ValidateChainResult;
-      else if (taskId === "find_missing_links") entry.missing = data as MissingLinksResult;
-      else entry.explanation = (data as { explanation: string }).explanation;
-      setStorylineResults((r) => [entry, ...r]);
-    } catch (err) {
-      console.error("[ask-ai] storyline task failed", err);
-      setStorylineResults((r) => [{ task: taskId, ts: Date.now(), ok: false, error: "Something went wrong running that task." }, ...r]);
-    } finally {
-      setRunningTask(null);
-    }
-  };
-
-  // Backing action for find_missing_links's "Use this" button — the confirm-before-write step
-  // that candidate list never had a way to act on at all (the side panel's own "Find signals"
-  // gap-filler was the only real path). Places the chosen signal in the gap phase exactly like
-  // the event-picker-modal's library-tab flow does, then tells the Storyline page to refetch.
-  const onUseGapCandidate = async (resultIndex: number, phase: string, signalId: string) => {
-    const ctx = store.storylineAskAiContext;
-    if (!ctx) return;
-    try {
-      await createStorylineNode({ scenarioId: ctx.scenarioId, phase: phase as Phase, signalId });
-      setStorylineResults((r) =>
-        r.map((e, i) => (i === resultIndex ? { ...e, usedGapPhases: new Set(e.usedGapPhases).add(phase) } : e))
-      );
-      window.dispatchEvent(new CustomEvent("fm:storyline-updated", { detail: { scenarioId: ctx.scenarioId } }));
-    } catch (err) {
-      console.error("[ask-ai] failed to add signal to storyline gap", err);
-    }
-  };
-
-  // Narrative mode — fixed task menu, never freeform, same convention as storyline mode
-  // above. Results are ephemeral for the same reason (structured diagnostics tied to the
-  // current live scenario, not a conversation worth keeping).
-  const [narrativeResults, setNarrativeResults] = React.useState<NarrativeResultEntry[]>([]);
-  const [runningNarrativeTask, setRunningNarrativeTask] = React.useState<NarrativeTaskId | null>(null);
-
-  const runNarrativeTask = async (taskId: NarrativeTaskId) => {
-    const ctx = store.narrativeAskAiContext;
-    if (!ctx) return;
-    if (taskId === "stress_test_implications" && !ctx.hasImplications) return;
-    setRunningNarrativeTask(taskId);
-    try {
-      const res = await fetch(`/api/scenarios/${ctx.scenarioId}/narrative/ask-ai`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task: taskId }),
-      });
-      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
-      const data = await res.json();
-      const entry: NarrativeResultEntry = { task: taskId, ts: Date.now(), ok: true };
-      if (taskId === "check_fidelity") entry.fidelity = data as CheckNarrativeFidelityResult;
-      else entry.stressTest = data as StressTestImplicationsResult;
-      setNarrativeResults((r) => [entry, ...r]);
-    } catch (err) {
-      console.error("[ask-ai] narrative task failed", err);
-      setNarrativeResults((r) => [{ task: taskId, ts: Date.now(), ok: false, error: "Something went wrong running that task." }, ...r]);
-    } finally {
-      setRunningNarrativeTask(null);
-    }
-  };
-
-  // Strategy mode — fixed task menu, never freeform (freeform is strategyChatMessages below),
-  // same convention as storyline/narrative modes above. Results are ephemeral for the same
+  // Strategy mode — fixed task menu, never freeform (freeform is strategyChatMessages below).
+  // Results are ephemeral for the same
   // reason (structured diagnostics tied to the current live options/scores, not a conversation
   // worth keeping) — except stress_test_option, which can have a real, persisted side effect
   // (ai-strategy-tasks.ts flips a score's robust flag when it finds a genuine failure mode);
@@ -1200,33 +1039,6 @@ export function AskAI({
     }
   };
 
-  // Canvas mode — fixed task menu, never freeform, same no-chat convention as Storyline/
-  // Narrative/Matrix. All 3 tasks are project-wide, so no page-context/gating checks are needed
-  // — just store.activeProjectId, same as Knowledge/Signals' simplest tasks.
-  const [canvasResults, setCanvasResults] = React.useState<CanvasResultEntry[]>([]);
-  const [runningCanvasTask, setRunningCanvasTask] = React.useState<CanvasTaskId | null>(null);
-
-  const runCanvasTask = async (taskId: CanvasTaskId) => {
-    const projectId = store.activeProjectId;
-    if (!projectId) return;
-    setRunningCanvasTask(taskId);
-    try {
-      const res = await fetch(`/api/projects/${projectId}/canvas/ask-ai`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task: taskId }),
-      });
-      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
-      const data: { summary: string } = await res.json();
-      setCanvasResults((r) => [{ task: taskId, ts: Date.now(), ok: true, summary: data.summary }, ...r]);
-    } catch (err) {
-      console.error("[ask-ai] canvas task failed", err);
-      setCanvasResults((r) => [{ task: taskId, ts: Date.now(), ok: false, error: "Something went wrong running that task." }, ...r]);
-    } finally {
-      setRunningCanvasTask(null);
-    }
-  };
-
   // Knowledge mode — fixed task menu, never freeform (freeform is knowledgeChatMessages below),
   // same convention as Home/Strategy/Monitoring. Results are ephemeral for the same reason (a
   // one-line summary of what a scan/pull found, not a conversation worth keeping) — the actual
@@ -1458,46 +1270,6 @@ export function AskAI({
   // research-mode section and RESEARCH_MODE_ALLOWED_STEPS's "settings.research_chat" entry.
   const sendSettingsResearchChat = (text?: string) => sendSettingsChat(text, true);
 
-  // "Ask anything…" alongside the fixed task menus above — shared between storyline and
-  // narrative context since both are scoped to the same scenario and hit the same grounded
-  // chat endpoint. Ephemeral like storylineResults/narrativeResults (not persisted to
-  // localStorage): resets whenever the scoped scenario id changes, including switching
-  // between the Storyline and Narrative pages for a DIFFERENT scenario — but a scenario
-  // stays continuous across those two pages if it's the same one, since both draw the id
-  // from the same underlying source (fm.storylineScenario).
-  const scenarioChatScenarioId =
-    context === "storyline" ? store.storylineAskAiContext?.scenarioId : context === "narrative" ? store.narrativeAskAiContext?.scenarioId : undefined;
-  const [scenarioChatMessages, setScenarioChatMessages] = React.useState<ChatMsg[]>([]);
-  const [scenarioChatInput, setScenarioChatInput] = React.useState("");
-  const [scenarioChatThinking, setScenarioChatThinking] = React.useState(false);
-
-  React.useEffect(() => {
-    setScenarioChatMessages([]);
-  }, [scenarioChatScenarioId]);
-
-  const sendScenarioChat = async (text?: string) => {
-    const t = (text || scenarioChatInput).trim();
-    if (!t || !scenarioChatScenarioId) return;
-    setScenarioChatMessages((m) => [...m, { role: "user", text: t }]);
-    setScenarioChatInput("");
-    setScenarioChatThinking(true);
-    try {
-      const res = await fetch(`/api/scenarios/${scenarioChatScenarioId}/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: t }),
-      });
-      if (!res.ok) throw new Error(`Request failed (${res.status}).`);
-      const data: { answer: string; cites: string[] } = await res.json();
-      setScenarioChatMessages((m) => [...m, { role: "ai", text: data.answer, cites: data.cites }]);
-    } catch (err) {
-      console.error("[ask-ai] scenario chat failed", err);
-      setScenarioChatMessages((m) => [...m, { role: "ai", text: "Something went wrong answering that — try again." }]);
-    } finally {
-      setScenarioChatThinking(false);
-    }
-  };
-
   const suggested = SUGGESTED;
   const emptyGreetingCount = INITIAL.length;
 
@@ -1530,19 +1302,13 @@ export function AskAI({
               <div className="flex-1">
                 <div className="text-sm font-semibold tracking-[-0.01em]">Ask AI</div>
                 <div className="font-mono text-[11px] tracking-[0.04em] text-text-3">
-                  {context === "canvas"
-                    ? "CANVAS MODE · SCOPED TASKS ONLY"
-                    : context === "matrix"
+                  {context === "matrix"
                     ? "MATRIX MODE · SCOPED TASKS ONLY"
                     : context === "knowledge"
                       ? "KNOWLEDGE MODE · SCOPED TASKS + GROUNDED CHAT"
                       : context === "signals"
                       ? "SIGNALS MODE · SCOPED TASKS + GROUNDED CHAT"
-                      : context === "storyline"
-                      ? "STORYLINE MODE · SCOPED TASKS ONLY"
-                      : context === "narrative"
-                        ? "NARRATIVE MODE · SCOPED TASKS ONLY"
-                        : context === "strategy"
+                      : context === "strategy"
                           ? "STRATEGY MODE · SCOPED TASKS + GROUNDED CHAT"
                           : context === "monitoring"
                             ? "MONITORING MODE · SCOPED TASKS + GROUNDED CHAT"
@@ -1555,17 +1321,14 @@ export function AskAI({
               </div>
               <button
                 onClick={() => {
-                  if (context === "canvas") setCanvasResults([]);
-                  else if (context === "matrix") setMatrixResults([]);
+                  if (context === "matrix") setMatrixResults([]);
                   else if (context === "knowledge") {
                     setKnowledgeResults([]);
                     setKnowledgeChatMessages([]);
                   } else if (context === "signals") {
                     setSignalsResults([]);
                     setSignalsChatMessages([]);
-                  } else if (context === "storyline") setStorylineResults([]);
-                  else if (context === "narrative") setNarrativeResults([]);
-                  else if (context === "strategy") {
+                  } else if (context === "strategy") {
                     setStrategyResults([]);
                     setStrategyChatMessages([]);
                   } else if (context === "monitoring") {
@@ -1580,12 +1343,9 @@ export function AskAI({
                   } else setMessages([{ role: "ai", text: "Cleared. What would you like to explore?" }]);
                 }}
                 title={
-                  context === "canvas" ||
                   context === "matrix" ||
                   context === "knowledge" ||
                   context === "signals" ||
-                  context === "storyline" ||
-                  context === "narrative" ||
                   context === "strategy" ||
                   context === "monitoring" ||
                   context === "home" ||
@@ -1602,235 +1362,9 @@ export function AskAI({
               </button>
             </div>
 
-            {context === "storyline" ? (
-              // Fixed task menu, never freeform — no input bar at all for this mode (replaced,
-              // not just hidden). Results render as cards below the menu, newest first.
-              <div className="scroll-y flex flex-1 flex-col gap-2.5 p-4">
-                <div className="flex flex-col gap-1.5">
-                  <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">TASKS</div>
-                  {STORYLINE_TASKS.map((t) => {
-                    const pathEmpty = (store.storylineAskAiContext?.nodeIds.length ?? 0) === 0;
-                    const disabled = !!runningTask || !store.storylineAskAiContext || (t.needsPath && pathEmpty);
-                    return (
-                      <button
-                        key={t.id}
-                        onClick={() => runStorylineTask(t.id)}
-                        disabled={disabled}
-                        title={t.needsPath && pathEmpty ? "Select a node to highlight a path first" : undefined}
-                        className="rounded-[10px] border border-border bg-white px-3 py-2.5 text-left text-[12.5px] text-[#374151] transition-[border,background] duration-[120ms] hover:border-brand-orange100 hover:bg-brand-orangeLight disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        {runningTask === t.id ? "Running…" : t.label}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {storylineResults.length > 0 && (
-                  <div className="mt-1 flex flex-col gap-2.5">
-                    <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">RESULTS</div>
-                    {storylineResults.map((r, i) => {
-                      const label = STORYLINE_TASKS.find((t) => t.id === r.task)?.label ?? r.task;
-                      const titleFor = (id: string) => store.storylineAskAiContext?.nodeTitleById[id] ?? id;
-                      return (
-                        <div key={i} className="rounded-[10px] border border-border bg-bg p-3 text-brand-dark">
-                          <div className="mb-1.5 flex items-center justify-between gap-2">
-                            <span className="text-[12.5px] font-semibold">{label}</span>
-                            <span className="font-mono text-[10px] text-text-3">{new Date(r.ts).toLocaleTimeString()}</span>
-                          </div>
-                          {!r.ok && <div className="text-[12.5px] text-[#EF4444]">{r.error}</div>}
-                          {r.ok && r.plausibility && (
-                            <div className="text-[12.5px] leading-[1.5]">
-                              <div className="mb-1 font-mono text-xs font-semibold text-brand-orange">{r.plausibility.score}%</div>
-                              <p className="m-0 text-muted-foreground">{r.plausibility.rationale}</p>
-                              {r.plausibility.weakLinks.length > 0 && (
-                                <ul className="m-0 mt-2 flex list-none flex-col gap-1 p-0">
-                                  {r.plausibility.weakLinks.map((w, j) => (
-                                    <li key={j} className="text-[11.5px] text-[#92400E]">
-                                      — {titleFor(w.fromNodeId)} → {titleFor(w.toNodeId)}: {w.issue}
-                                    </li>
-                                  ))}
-                                </ul>
-                              )}
-                            </div>
-                          )}
-                          {r.ok && r.chain && (
-                            <div className="text-[12.5px] leading-[1.5]">
-                              {r.chain.findings.length === 0 ? (
-                                <p className="m-0 text-muted-foreground">Not enough of a path selected to validate.</p>
-                              ) : (
-                                <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
-                                  {r.chain.findings.map((f, j) => (
-                                    <li key={j} className={f.sound ? "text-[#065F46]" : "text-[#92400E]"}>
-                                      {f.sound ? "✓" : "⚠"} {titleFor(f.fromNodeId)} → {titleFor(f.toNodeId)}
-                                      {f.issue ? `: ${f.issue}` : ""}
-                                    </li>
-                                  ))}
-                                </ul>
-                              )}
-                            </div>
-                          )}
-                          {r.ok && r.missing && (
-                            <div className="text-[12.5px] leading-[1.5]">
-                              {r.missing.thinChain && <p className="mb-1.5 text-[#92400E]">This chain is thin (fewer than 4 signals).</p>}
-                              {r.missing.gaps.length === 0 ? (
-                                <p className="m-0 text-muted-foreground">No gaps detected.</p>
-                              ) : (
-                                r.missing.gaps.map((g, j) => (
-                                  <div key={j} className="mb-2">
-                                    <div className="font-semibold">{g.phase.replace("_", "-")}</div>
-                                    {!g.sufficientEvidence || g.candidates.length === 0 ? (
-                                      <p className="m-0 text-muted-foreground">{g.gap || "No matching signals found."}</p>
-                                    ) : r.usedGapPhases?.has(g.phase) ? (
-                                      <div className="text-[#065F46]">✓ Added to chain.</div>
-                                    ) : (
-                                      <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
-                                        {g.candidates.map((c) => (
-                                          <li key={c.signalId} className="flex items-start justify-between gap-2">
-                                            <span>
-                                              — {c.title}: {c.rationale}
-                                            </span>
-                                            <button
-                                              onClick={() => onUseGapCandidate(i, g.phase, c.signalId)}
-                                              className="flex-shrink-0 whitespace-nowrap font-medium text-brand-orange hover:text-brand-orange700"
-                                            >
-                                              Use this
-                                            </button>
-                                          </li>
-                                        ))}
-                                      </ul>
-                                    )}
-                                  </div>
-                                ))
-                              )}
-                            </div>
-                          )}
-                          {r.ok && r.explanation !== undefined && (
-                            <p className="m-0 text-[12.5px] leading-[1.5] text-muted-foreground [text-wrap:pretty]">{r.explanation}</p>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                <ScenarioChatPanel
-                  messages={scenarioChatMessages}
-                  input={scenarioChatInput}
-                  setInput={setScenarioChatInput}
-                  thinking={scenarioChatThinking}
-                  onSend={sendScenarioChat}
-                />
-              </div>
-            ) : context === "narrative" ? (
-              // Fixed task menu, never freeform — same structure as the storyline branch above.
-              <div className="scroll-y flex flex-1 flex-col gap-2.5 p-4">
-                <div className="flex flex-col gap-1.5">
-                  <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">TASKS</div>
-                  {NARRATIVE_TASKS.map((t) => {
-                    const disabled =
-                      !!runningNarrativeTask || !store.narrativeAskAiContext || (t.needsImplications && !store.narrativeAskAiContext.hasImplications);
-                    return (
-                      <button
-                        key={t.id}
-                        onClick={() => runNarrativeTask(t.id)}
-                        disabled={disabled}
-                        className="rounded-[10px] border border-border bg-white px-3 py-2.5 text-left text-[12.5px] text-[#374151] transition-[border,background] duration-[120ms] hover:border-brand-orange100 hover:bg-brand-orangeLight disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        {runningNarrativeTask === t.id ? "Running…" : t.label}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {narrativeResults.length > 0 && (
-                  <div className="mt-1 flex flex-col gap-2.5">
-                    <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">RESULTS</div>
-                    {narrativeResults.map((r, i) => {
-                      const label = NARRATIVE_TASKS.find((t) => t.id === r.task)?.label ?? r.task;
-                      return (
-                        <div key={i} className="rounded-[10px] border border-border bg-bg p-3 text-brand-dark">
-                          <div className="mb-1.5 flex items-center justify-between gap-2">
-                            <span className="text-[12.5px] font-semibold">{label}</span>
-                            <span className="font-mono text-[10px] text-text-3">{new Date(r.ts).toLocaleTimeString()}</span>
-                          </div>
-                          {!r.ok && <div className="text-[12.5px] text-[#EF4444]">{r.error}</div>}
-
-                          {r.ok && r.fidelity && (
-                            <div className="text-[12.5px] leading-[1.5]">
-                              {!r.fidelity.hasNarrative || !r.fidelity.hasStoryline ? (
-                                <p className="m-0 text-muted-foreground">
-                                  {!r.fidelity.hasNarrative ? "This scenario has no narrative yet." : "This scenario has no storyline chain yet."}
-                                </p>
-                              ) : (
-                                <>
-                                  <div className="mb-1 font-mono text-xs font-semibold text-brand-orange">
-                                    {r.fidelity.nodesCovered.filter((n) => n.covered).length}/{r.fidelity.nodesCovered.length} nodes covered
-                                  </div>
-                                  {r.fidelity.nodesCovered.some((n) => !n.covered) && (
-                                    <ul className="m-0 mb-1.5 flex list-none flex-col gap-1 p-0">
-                                      {r.fidelity.nodesCovered
-                                        .filter((n) => !n.covered)
-                                        .map((n, j) => (
-                                          <li key={j} className="text-[11.5px] text-[#92400E]">
-                                            — Missing: {n.note || n.nodeId}
-                                          </li>
-                                        ))}
-                                    </ul>
-                                  )}
-                                  {!r.fidelity.causalOrderOk && (
-                                    <p className="m-0 mb-1.5 text-[11.5px] text-[#92400E]">Out of order: {r.fidelity.orderIssue}</p>
-                                  )}
-                                  {r.fidelity.inventedDetails.length > 0 ? (
-                                    <ul className="m-0 flex list-none flex-col gap-1 p-0">
-                                      {r.fidelity.inventedDetails.map((d, j) => (
-                                        <li key={j} className="text-[11.5px] text-[#EF4444]">
-                                          — Invented: &quot;{d.text}&quot; ({d.note})
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  ) : (
-                                    <p className="m-0 text-muted-foreground">No invented details found.</p>
-                                  )}
-                                </>
-                              )}
-                            </div>
-                          )}
-
-                          {r.ok && r.stressTest && (
-                            <div className="text-[12.5px] leading-[1.5]">
-                              {r.stressTest.results.length === 0 ? (
-                                <p className="m-0 text-muted-foreground">No implications yet to stress-test.</p>
-                              ) : (
-                                <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
-                                  {r.stressTest.results.map((res, j) => (
-                                    <li key={j} className={res.scenarioSpecific ? "text-[#065F46]" : "text-[#92400E]"}>
-                                      {res.scenarioSpecific ? "✓" : "⚠ generic —"} {res.text}
-                                      <div className="text-[11.5px] text-muted-foreground">{res.rationale}</div>
-                                    </li>
-                                  ))}
-                                </ul>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                <ScenarioChatPanel
-                  messages={scenarioChatMessages}
-                  input={scenarioChatInput}
-                  setInput={setScenarioChatInput}
-                  thinking={scenarioChatThinking}
-                  onSend={sendScenarioChat}
-                />
-              </div>
-            ) : context === "strategy" ? (
+            {context === "strategy" ? (
               // Fixed task menu, never freeform, PLUS the real "Ask anything…" freeform panel
-              // below it (per this mode's own spec) — same structure as storyline/narrative's
-              // menu-only branches above, extended with ScenarioChatPanel like both of those
-              // already use for their own freeform half.
+              // below it (per this mode's own spec).
               <div className="scroll-y flex flex-1 flex-col gap-2.5 p-4">
                 <div className="flex flex-col gap-1.5">
                   <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">TASKS</div>
@@ -2448,47 +1982,6 @@ export function AskAI({
                           {r.ok && r.bucketSummary && (
                             <p className="m-0 text-[12.5px] leading-[1.5] text-muted-foreground [text-wrap:pretty]">{r.bucketSummary.summary}</p>
                           )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            ) : context === "canvas" ? (
-              // Fixed task menu, never freeform — no input bar at all for this mode (all 3 tasks
-              // are project-wide, same shape as the Matrix branch above). Every task normalizes
-              // to a one-line summary, so results render uniformly.
-              <div className="scroll-y flex flex-1 flex-col gap-2.5 p-4">
-                <div className="flex flex-col gap-1.5">
-                  <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">TASKS</div>
-                  {CANVAS_TASKS.map((t) => {
-                    const disabled = !!runningCanvasTask || !store.activeProjectId;
-                    return (
-                      <button
-                        key={t.id}
-                        onClick={() => runCanvasTask(t.id)}
-                        disabled={disabled}
-                        className="rounded-[10px] border border-border bg-white px-3 py-2.5 text-left text-[12.5px] text-[#374151] transition-[border,background] duration-[120ms] hover:border-brand-orange100 hover:bg-brand-orangeLight disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        {runningCanvasTask === t.id ? "Running…" : t.label}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {canvasResults.length > 0 && (
-                  <div className="mt-1 flex flex-col gap-2.5">
-                    <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-text-3">RESULTS</div>
-                    {canvasResults.map((r, i) => {
-                      const label = CANVAS_TASKS.find((t) => t.id === r.task)?.label ?? r.task;
-                      return (
-                        <div key={i} className="rounded-[10px] border border-border bg-bg p-3 text-brand-dark">
-                          <div className="mb-1.5 flex items-center justify-between gap-2">
-                            <span className="text-[12.5px] font-semibold">{label}</span>
-                            <span className="font-mono text-[10px] text-text-3">{new Date(r.ts).toLocaleTimeString()}</span>
-                          </div>
-                          {!r.ok && <div className="text-[12.5px] text-[#EF4444]">{r.error}</div>}
-                          {r.ok && r.summary && <p className="m-0 text-[12.5px] leading-[1.5] text-muted-foreground [text-wrap:pretty]">{r.summary}</p>}
                         </div>
                       );
                     })}

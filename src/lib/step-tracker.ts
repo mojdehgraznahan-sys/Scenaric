@@ -13,7 +13,12 @@ export const STEP_LABELS = [
   "Monitoring",
   "Strategy",
 ];
-export const STEP_ROUTES = ["/settings", "/knowledge", "/signals", "/matrix", "/canvas", "/narrative", "/narrative", "/monitoring", "/strategy"];
+// "Narratives" and "Implications" both used to route to the old Narrative page; that page is
+// retired (design/storyline_handoff/) and Futures now owns narrative generation/reading.
+// "Implications" has no direct replacement page (Strategy still reads the implications table,
+// but nothing generates new rows since Narrative's "Generate implications" button is gone) —
+// routing it to Futures is the closest-available destination, not a perfect fit.
+export const STEP_ROUTES = ["/settings", "/knowledge", "/signals", "/matrix", "/futures", "/futures", "/futures", "/monitoring", "/strategy"];
 // Maps each of the 9 tracker tiles to the canonical 8-step count used by the Projects
 // dashboard (Key forces + Driving forces both complete once step 2 is reached).
 export const STEP_GATE = [1, 2, 2, 3, 4, 5, 6, 7, 8];

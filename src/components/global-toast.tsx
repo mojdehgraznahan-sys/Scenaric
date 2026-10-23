@@ -42,7 +42,7 @@ export function GlobalToast({ navigate }: { navigate: Navigate }) {
 
   const doAction = () => {
     const w = window as FmWindow;
-    if (toast.action === "open-canvas") navigate("/canvas");
+    if (toast.action === "open-canvas") navigate("/futures");
     else if (toast.action === "undo-reax" && w.__fmUndo) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       store.setScenarios(w.__fmUndo.scenarios as any);

@@ -17,7 +17,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // (app) route group is not in the URL, so the page id is the first path segment.
   const page = pathname.split("/").filter(Boolean)[0] || "projects";
 
-  // Cmd/Ctrl + 1/2/3 → jump between Matrix / Storyline / Narrative.
+  // Cmd/Ctrl + 1/2 → jump between Matrix / Storyline.
   useScenarioShortcuts(navigate);
 
   return (
@@ -32,27 +32,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </div>
       <AskAI
         context={
-          page === "canvas"
-            ? "canvas"
-            : page === "matrix"
+          page === "matrix"
             ? "matrix"
             : page === "knowledge"
               ? "knowledge"
               : page === "signals"
               ? "signals"
-              : page === "storyline"
-                ? "storyline"
-                : page === "narrative"
-                  ? "narrative"
-                  : page === "strategy"
-                    ? "strategy"
-                    : page === "monitoring"
-                      ? "monitoring"
-                      : page === "home"
-                        ? "home"
-                        : page === "settings"
-                          ? "settings"
-                          : undefined
+              : page === "strategy"
+                ? "strategy"
+                : page === "monitoring"
+                  ? "monitoring"
+                  : page === "home"
+                    ? "home"
+                    : page === "settings"
+                      ? "settings"
+                      : undefined
         }
       />
       <GlobalToast navigate={navigate} />

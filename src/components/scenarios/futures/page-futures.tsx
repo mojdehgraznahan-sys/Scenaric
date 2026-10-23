@@ -425,7 +425,7 @@ export function PageFutures() {
         back={null}
         next={
           allGenerated && firstScenario
-            ? { label: `Walk back from ${data.targetYear}`, onClick: () => navigate("/chains") }
+            ? { label: `Walk back from ${data.targetYear}`, onClick: () => navigate("/storyline") }
             : null
         }
       />
