@@ -73,7 +73,9 @@ export function PageHome() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex-shrink-0" style={{ padding: "16px 24px 12px" }}>
+      {/* Header strip, with its own border: both views scroll under it, and without an edge
+          here the first line of the scrolled content clips mid-sentence against nothing. */}
+      <div className="flex-shrink-0 border-b border-border" style={{ padding: "14px 24px 12px" }}>
         <div className="mx-auto flex flex-wrap items-center justify-between gap-2.5" style={{ maxWidth: 1180 }}>
           <HomeViewToggle view={view ?? "setup"} setView={setView} />
           <Button variant="ghost" size="sm" onClick={() => setBriefingOpen(true)}>

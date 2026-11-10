@@ -159,7 +159,7 @@ export function PageDashboard() {
           <div className="mb-4 h-1 overflow-hidden rounded-full bg-border">
             <div className="h-full rounded-full bg-brand-orange" style={{ width: pct + "%" }} />
           </div>
-          <div className="grid grid-cols-9 gap-1.5">
+          <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-5 lg:grid-cols-9">
             {tiles.map((step, i) => (
               <button
                 key={i}
@@ -191,7 +191,7 @@ export function PageDashboard() {
         </div>
 
         {/* Four KPI cards */}
-        <div className="mb-4 grid grid-cols-4 gap-3">
+        <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
           {kpis.map((k) => (
             <button
               key={k.label}
@@ -208,7 +208,7 @@ export function PageDashboard() {
         {/* AI Recommended Actions — real, grounded copy from POST /dashboard/recommendations
             when available; each card falls back to its own original static copy independently
             (never blank) if the fetch failed or the model judged that slot not worth surfacing. */}
-        <div className="mb-4 grid grid-cols-2 gap-3">
+        <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2">
           <div className="rounded-xl border border-border bg-card p-[18px] shadow-card">
             <div className="mb-2.5 flex items-center gap-2">
               <Icons.Sparkle size={14} stroke="#F97316" />
@@ -276,15 +276,15 @@ export function PageDashboard() {
                 key={n.id}
                 className={cn("flex items-center gap-3 px-[18px] py-3", i < news.length - 1 && "border-b border-[#F3F4F6]")}
               >
-                <div className="flex-1">
-                  <div className="mb-0.5 text-[13.5px] font-medium text-brand-dark">{n.title}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="mb-0.5 text-[13.5px] font-medium leading-[1.4] text-brand-dark">{n.title}</div>
                   <div className="font-mono text-[11px] text-text-3">
                     {n.source.toUpperCase()} · {timeAgoLabel(n.published_at)}
                   </div>
                 </div>
                 <span
                   className={cn(
-                    "inline-flex items-center rounded px-[7px] py-0.5 text-[10px] font-semibold uppercase tracking-[0.04em]",
+                    "inline-flex flex-shrink-0 items-center rounded px-[7px] py-0.5 text-[10px] font-semibold uppercase tracking-[0.04em]",
                     n.impact === "HIGH" ? "bg-brand-orangeLight text-brand-orange700" : "bg-[#FFFBEB] text-[#B45309]"
                   )}
                 >

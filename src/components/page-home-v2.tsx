@@ -92,101 +92,191 @@ function HomeCard({
   );
 }
 
+// Pole labels are free text from `signals` — anything from "Doesn't happen" to a full
+// sentence — and SVG text neither wraps nor clips on its own. Wrap the horizontal (top/bottom)
+// poles over at most two lines and hard-truncate the rest; the full text stays reachable
+// through each label's <title> tooltip.
+function truncateText(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max - 1).trimEnd() + "…" : s;
+}
+
+function wrapLabel(text: string, maxChars: number, maxLines: number): string[] {
+  const t = truncateText(text.trim(), maxChars * maxLines);
+  if (!t) return [];
+  const lines: string[] = [];
+  let line = "";
+  for (const w of t.split(/\s+/)) {
+    const next = line ? `${line} ${w}` : w;
+    if (!line || next.length <= maxChars) line = next;
+    else {
+      lines.push(line);
+      line = w;
+    }
+  }
+  if (line) lines.push(line);
+  return lines.slice(0, maxLines).map((l) => truncateText(l, maxChars));
+}
+
 function HomeCompass({
   scenarios,
   quadrantOf,
   targetId,
   axes,
   trail,
+  moved,
 }: {
   scenarios: ScenarioLite[];
   quadrantOf: (id: string) => Quadrant;
   targetId: string | null;
   axes: DecisionAxes;
   trail: { x: number; y: number }[];
+  moved: boolean;
 }) {
-  const S = 360;
-  const pad = 34;
-  const c = S / 2;
-  const r = c - pad;
-  const P = (p: { x: number; y: number }): [number, number] => [c + p.x * r, c - p.y * r];
+  const PLOT = 340;
+  const HALF = PLOT / 2;
+  const SIDE = 46; // margin reserved for the rotated x-pole labels
+  const LINE = 13;
+  const topLines = wrapLabel(axes.yPoleB || "Unnamed pole", 42, 2);
+  const bottomLines = wrapLabel(axes.yPoleA || "Unnamed pole", 42, 2);
+  const MT = 14 + topLines.length * LINE;
+  const MB = 20 + bottomLines.length * LINE;
+  const W = PLOT + SIDE * 2;
+  const H = PLOT + MT + MB;
+  const x0 = SIDE;
+  const y0 = MT;
+  const cx = x0 + HALF;
+  const cy = y0 + HALF;
+  const P = (p: { x: number; y: number }): [number, number] => [cx + p.x * HALF, cy - p.y * HALF];
+  const start = P(trail[0]);
   const now = P(trail[trail.length - 1]);
-  const qRect: Record<Quadrant, [number, number]> = { TL: [pad, pad], TR: [c, pad], BL: [pad, c], BR: [c, c] };
-  // Multiple scenarios land in the SAME quadrant whenever there's no tracked-event evidence
-  // yet to tell them apart (see this component's header comment on the (0,0) degeneracy) —
-  // without this, their labels all draw at the identical anchor point and render as illegible
-  // overlapping text. Stack same-quadrant labels instead, growing inward from the edge the
-  // single-label case already anchored to.
-  const byQuadrant = new Map<Quadrant, ScenarioLite[]>();
-  for (const s of scenarios) {
-    const q = quadrantOf(s.id);
-    const list = byQuadrant.get(q);
-    if (list) list.push(s);
-    else byQuadrant.set(q, [s]);
-  }
-  const LABEL_LINE_HEIGHT = 15;
-  // SVG text doesn't wrap or clip on its own — a long/unfixed pole (e.g. a full sentence
-  // instead of a short 2-5 word outcome) would otherwise sprawl across or past the chart.
-  const truncatePole = (s: string, max = 26) => (s.length > max ? s.slice(0, max - 1).trimEnd() + "…" : s);
+  const qXY: Record<Quadrant, [number, number]> = { TL: [x0, y0], TR: [cx, y0], BL: [x0, cy], BR: [cx, cy] };
+
+  // Scenarios routinely share a quadrant — with no tracked-event evidence yet they ALL do (see
+  // this component's header comment on the (0,0) degeneracy). Group first so each quadrant is
+  // tinted once instead of once per scenario (stacked fills read as a darker, arbitrary box),
+  // and so the labels stack on separate lines instead of drawing on top of each other.
+  const grouped = (["TL", "TR", "BL", "BR"] as Quadrant[])
+    .map((q) => ({ q, list: scenarios.filter((s) => quadrantOf(s.id) === q) }))
+    .filter((g) => g.list.length > 0);
+  const ROW = 17;
+  // Labels stack inward from the quadrant's OUTER edge, which keeps them clear of the axes and
+  // of the "Today" marker sitting at the centre.
+  const rowY = (q: Quadrant, i: number, n: number) =>
+    q[0] === "T" ? qXY[q][1] + 22 + i * ROW : qXY[q][1] + HALF - 14 - (n - 1 - i) * ROW;
+
+  const tick = (x: number, y: number, dx: number, dy: number) => (
+    <polyline points={`${x - dy * 4 - dx * 6},${y - dx * 4 - dy * 6} ${x},${y} ${x + dy * 4 - dx * 6},${y + dx * 4 - dy * 6}`} fill="none" stroke="#D1D5DB" strokeWidth={1.5} />
+  );
+
   return (
-    <svg viewBox={`0 0 ${S} ${S}`} className="block w-full" style={{ maxWidth: 440, margin: "0 auto" }}>
-      {scenarios.map((s) => {
-        const q = quadrantOf(s.id);
-        const [x, y] = qRect[q];
-        const isT = s.id === targetId;
-        const siblings = byQuadrant.get(q)!;
-        const idx = siblings.indexOf(s);
-        const lx = q[1] === "L" ? x + 10 : x + r - 10;
-        const ly = q[0] === "T" ? y + 20 + idx * LABEL_LINE_HEIGHT : y + r - 12 - idx * LABEL_LINE_HEIGHT;
-        const color = s.color ?? "#9CA3AF";
+    <svg viewBox={`0 0 ${W} ${H}`} className="block w-full" style={{ maxWidth: 480, margin: "0 auto" }} role="img">
+      {grouped.map(({ q, list }) => {
+        const [qx, qy] = qXY[q];
+        const targetHere = list.find((s) => s.id === targetId);
+        const color = targetHere?.color ?? "#9CA3AF";
         return (
-          <g key={s.id}>
-            <rect x={x} y={y} width={r} height={r} fill={color} fillOpacity={isT ? 0.14 : 0.06} />
-            {isT && <rect x={x + 1} y={y + 1} width={r - 2} height={r - 2} fill="none" stroke={color} strokeWidth={2} strokeDasharray="5 4" />}
-            <text x={lx} y={ly} textAnchor={q[1] === "L" ? "start" : "end"} fontSize={12} fontWeight={600} fill="#1E1B2E">
-              {s.name}
-            </text>
-            {isT && (
-              <text
-                x={lx}
-                y={ly + (q[0] === "T" ? 14 : -14)}
-                textAnchor={q[1] === "L" ? "start" : "end"}
-                fontSize={9.5}
-                fill={color}
-                fontWeight={600}
-                letterSpacing="0.08em"
-              >
-                TARGET
-              </text>
-            )}
+          <g key={q}>
+            <rect x={qx} y={qy} width={HALF} height={HALF} fill={color} fillOpacity={targetHere ? 0.1 : 0.045} />
+            {targetHere && <rect x={qx + 1} y={qy + 1} width={HALF - 2} height={HALF - 2} fill="none" stroke={color} strokeWidth={1.5} strokeDasharray="5 4" />}
           </g>
         );
       })}
-      <line x1={pad} x2={S - pad} y1={c} y2={c} stroke="#D1D5DB" />
-      <line y1={pad} y2={S - pad} x1={c} x2={c} stroke="#D1D5DB" />
-      <text x={c} y={pad - 10} textAnchor="middle" fontSize={10} fill="#6B7280">
-        {truncatePole(axes.yPoleB)} ↑
-      </text>
-      <text x={c} y={S - pad + 18} textAnchor="middle" fontSize={10} fill="#6B7280">
-        ↓ {truncatePole(axes.yPoleA)}
-      </text>
-      <text x={pad - 8} y={c} textAnchor="middle" fontSize={10} fill="#6B7280" transform={`rotate(-90 ${pad - 10} ${c})`}>
-        ← {truncatePole(axes.xPoleA)}
-      </text>
-      <text x={S - pad + 10} y={c} textAnchor="middle" fontSize={10} fill="#6B7280" transform={`rotate(90 ${S - pad + 12} ${c})`}>
-        {truncatePole(axes.xPoleB)} →
-      </text>
-      <polyline points={trail.map((p) => P(p).join(",")).join(" ")} fill="none" stroke="#1E1B2E" strokeOpacity={0.35} strokeWidth={1.5} strokeDasharray="3 3" />
-      {trail.slice(0, -1).map((p, i) => {
-        const [x, y] = P(p);
-        return <circle key={i} cx={x} cy={y} r={3} fill="#1E1B2E" fillOpacity={0.15 + i * 0.1} />;
-      })}
-      <text x={P(trail[0])[0]} y={P(trail[0])[1] - 9} textAnchor="middle" fontSize={9.5} fill="#6B7280">
-        12 wks ago
-      </text>
-      <circle cx={now[0]} cy={now[1]} r={13} fill="#1E1B2E" fillOpacity={0.1} />
-      <circle cx={now[0]} cy={now[1]} r={6.5} fill="#1E1B2E" stroke="#fff" strokeWidth={2} />
-      <text x={now[0]} y={now[1] + 25} textAnchor="middle" fontSize={10.5} fontWeight={600} fill="#1E1B2E">
+
+      <line x1={x0} x2={x0 + PLOT} y1={cy} y2={cy} stroke="#D1D5DB" />
+      <line y1={y0} y2={y0 + PLOT} x1={cx} x2={cx} stroke="#D1D5DB" />
+      {tick(cx, y0, 0, -1)}
+      {tick(cx, y0 + PLOT, 0, 1)}
+      {tick(x0, cy, -1, 0)}
+      {tick(x0 + PLOT, cy, 1, 0)}
+
+      {grouped.flatMap(({ q, list }) =>
+        list.map((s, i) => {
+          const [qx] = qXY[q];
+          const y = rowY(q, i, list.length);
+          const color = s.color ?? "#9CA3AF";
+          const isT = s.id === targetId;
+          return (
+            <g key={s.id}>
+              <title>{s.name}</title>
+              <circle cx={qx + 13} cy={y - 4} r={isT ? 4.5 : 3.5} fill={color} />
+              {isT && <circle cx={qx + 13} cy={y - 4} r={7} fill="none" stroke={color} strokeWidth={1.25} strokeOpacity={0.5} />}
+              <text x={qx + 24} y={y} fontSize={11.5} fill="#1E1B2E" fontWeight={isT ? 600 : 500}>
+                {truncateText(s.name, 16)}
+                {isT && (
+                  <tspan fontSize={8} fontWeight={700} fill={color} letterSpacing="0.07em">
+                    {"\u00A0\u00A0TARGET"}
+                  </tspan>
+                )}
+              </text>
+            </g>
+          );
+        })
+      )}
+
+      <g>
+        <title>{axes.yPoleB}</title>
+        {topLines.map((l, i) => (
+          <text key={i} x={cx} y={MT - 12 - (topLines.length - 1 - i) * LINE} textAnchor="middle" fontSize={10.5} fill="#6B7280">
+            {l}
+          </text>
+        ))}
+      </g>
+      <g>
+        <title>{axes.yPoleA}</title>
+        {bottomLines.map((l, i) => (
+          <text key={i} x={cx} y={y0 + PLOT + 18 + i * LINE} textAnchor="middle" fontSize={10.5} fill="#6B7280">
+            {l}
+          </text>
+        ))}
+      </g>
+      <g>
+        <title>{axes.xPoleA}</title>
+        <text x={x0 - 22} y={cy} textAnchor="middle" fontSize={10.5} fill="#6B7280" transform={`rotate(-90 ${x0 - 22} ${cy})`}>
+          {truncateText(axes.xPoleA || "Unnamed pole", 44)}
+        </text>
+      </g>
+      <g>
+        <title>{axes.xPoleB}</title>
+        <text x={x0 + PLOT + 22} y={cy} textAnchor="middle" fontSize={10.5} fill="#6B7280" transform={`rotate(90 ${x0 + PLOT + 22} ${cy})`}>
+          {truncateText(axes.xPoleB || "Unnamed pole", 44)}
+        </text>
+      </g>
+
+      {/* A flat trail collapses every point onto the "Today" marker — drawing it then just
+          stacks dots and a label on top of the marker, so it's left off entirely and the card
+          says so in words underneath. */}
+      {moved && (
+        <>
+          <polyline points={trail.map((p) => P(p).join(",")).join(" ")} fill="none" stroke="#1E1B2E" strokeOpacity={0.3} strokeWidth={1.5} strokeDasharray="3 3" />
+          {trail.slice(0, -1).map((p, i) => {
+            const [px, py] = P(p);
+            return <circle key={i} cx={px} cy={py} r={2.5} fill="#1E1B2E" fillOpacity={0.12 + i * 0.07} />;
+          })}
+          {/* Offset to the side the trail came FROM, so the label never lies across the
+              dashed line it belongs to. */}
+          {Math.hypot(now[0] - start[0], now[1] - start[1]) > 34 && (
+            <text
+              x={start[0] + (now[0] >= start[0] ? -9 : 9)}
+              y={start[1] + 4}
+              textAnchor={now[0] >= start[0] ? "end" : "start"}
+              fontSize={9.5}
+              fill="#9CA3AF"
+            >
+              12 wks ago
+            </text>
+          )}
+        </>
+      )}
+      <circle cx={now[0]} cy={now[1]} r={13} fill="#1E1B2E" fillOpacity={0.08} />
+      <circle cx={now[0]} cy={now[1]} r={6} fill="#1E1B2E" stroke="#fff" strokeWidth={2} />
+      <text
+        x={now[0]}
+        y={now[1] > y0 + PLOT - 34 ? now[1] - 16 : now[1] + 25}
+        textAnchor="middle"
+        fontSize={10.5}
+        fontWeight={600}
+        fill="#1E1B2E"
+      >
         Today
       </text>
     </svg>
@@ -265,8 +355,10 @@ function HomeMomentumCard({
     >
       <div className="flex items-center gap-1.5">
         <span className="h-2 w-2 rounded-full" style={{ background: color }} />
-        <span className="text-[13px] font-semibold">{scenario.name}</span>
-        <span className="ml-auto text-xs font-semibold" style={{ color: momentum.score > 0 ? "#1E1B2E" : "#6B7280" }}>
+        <span className="truncate text-[13px] font-semibold" title={scenario.name}>
+          {scenario.name}
+        </span>
+        <span className="ml-auto flex-shrink-0 text-xs font-semibold" style={{ color: momentum.score > 0 ? "#1E1B2E" : "#6B7280" }}>
           {momentum.label}
         </span>
       </div>
@@ -354,9 +446,9 @@ function HomeSignposts({ scenarios, data, target }: { scenarios: ScenarioLite[];
         const sps = data.signposts.filter((p) => p.scenario_id === s.id);
         return (
           <div key={s.id} className="grid items-center gap-3" style={{ gridTemplateColumns: "132px minmax(0,1fr) auto" }}>
-            <div className="flex items-center gap-1.5 text-[12.5px]" style={{ fontWeight: s.id === target ? 600 : 500 }}>
+            <div className="flex min-w-0 items-center gap-1.5 text-[12.5px]" style={{ fontWeight: s.id === target ? 600 : 500 }} title={s.name}>
               <span className="h-[7px] w-[7px] flex-shrink-0 rounded-full" style={{ background: s.color ?? "#9CA3AF" }} />
-              {s.name}
+              <span className="truncate">{s.name}</span>
             </div>
             <div className="grid gap-[3px]" style={{ gridTemplateColumns: "repeat(5,1fr)" }}>
               {STORYLINE_PHASES.map((phase, i) => (
@@ -450,7 +542,7 @@ export function PageHomeV2() {
 
   if (!data.targetScenarioId) {
     return (
-      <div className="scroll-y flex-1 overflow-y-auto" style={{ padding: "8px 24px 24px" }}>
+      <div className="scroll-y flex-1 overflow-y-auto" style={{ padding: "18px 24px 28px" }}>
         <div className="mx-auto flex flex-col gap-3.5" style={{ maxWidth: 1180 }}>
           <div className="rounded-[10px] border border-dashed border-border p-5 text-center text-sm text-muted-foreground">
             Choose a target future in{" "}
@@ -491,6 +583,14 @@ export function PageHomeV2() {
         return points.map((_, i) => ({ x: xSeries[i], y: ySeries[i] }));
       })()
     : points.map(() => ({ x: 0, y: 0 }));
+  // A trail that never moved is a flat stack of dots under the "Today" marker — say it in
+  // words under the chart instead of drawing it (see HomeCompass's `moved`).
+  const trailMoved = trail.some((p) => Math.abs(p.x - trail[0].x) > 1e-6 || Math.abs(p.y - trail[0].y) > 1e-6);
+  const compassNote = !data.tracked.length
+    ? "No tracked events yet, so every future still sits at the centre. Monitoring fills this in."
+    : !trailMoved
+      ? "Evidence hasn't moved on either axis in the last 12 weeks."
+      : null;
 
   const quadrantOf = (scenarioId: string): Quadrant => {
     if (!data.axes) return "TL";
@@ -542,7 +642,7 @@ export function PageHomeV2() {
   const offCourse = [...health.weakening, ...health.blockersRising][0];
 
   return (
-    <div className="scroll-y flex-1 overflow-y-auto" style={{ padding: "8px 24px 24px" }}>
+    <div className="scroll-y flex-1 overflow-y-auto" style={{ padding: "18px 24px 28px" }}>
       <div className="mx-auto flex flex-col gap-3.5" style={{ maxWidth: 1180 }}>
         {/* Headline */}
         <div className="flex flex-wrap items-end justify-between gap-3.5">
@@ -567,10 +667,13 @@ export function PageHomeV2() {
           <div className="hv-top">
             <HomeCard
               title="Futures compass"
-              sub="Where the balance of event likelihoods on your two axes sits now, and where it sat over the last 12 weeks. This shows the direction of the evidence, not a forecast."
+              sub="Where the balance of evidence on your two axes sits today, and the path it took over 12 weeks — direction, not forecast."
             >
               {data.axes ? (
-                <HomeCompass scenarios={scenariosLite} quadrantOf={quadrantOf} targetId={target.id} axes={data.axes} trail={trail} />
+                <>
+                  <HomeCompass scenarios={scenariosLite} quadrantOf={quadrantOf} targetId={target.id} axes={data.axes} trail={trail} moved={trailMoved} />
+                  {compassNote && <div className="mt-1 text-center text-[11.5px] text-muted-foreground">{compassNote}</div>}
+                </>
               ) : (
                 <div className="py-8 text-center text-[13px] text-muted-foreground">Build your Matrix axes to see the compass.</div>
               )}
@@ -630,7 +733,7 @@ export function PageHomeV2() {
         {/* Scenario momentum */}
         <HomeCard
           title="Scenario momentum"
-          sub="Change in supporting evidence over the last 12 weeks. ◆ marks a signpost that fired. Momentum is relative and never a probability — all four futures stay plausible."
+          sub="Change in supporting evidence over 12 weeks. ◆ marks a signpost that fired. Momentum is relative — never a probability."
           right={
             <button onClick={() => navigate("/monitoring")} className="text-[12.5px] font-medium text-muted-foreground hover:text-brand-dark">
               Monitoring
@@ -662,7 +765,7 @@ export function PageHomeV2() {
           <HomeCard title="What moved" sub={`Event likelihood changes, weighted by impact, relative to ${target.name}.`}>
             <HomeDiverging rows={divergingRows} navigate={navigate} />
           </HomeCard>
-          <HomeCard title="Signpost progress" sub="How far each future's storyline has advanced, and which of its signposts have fired.">
+          <HomeCard title="Signpost progress" sub="How far each storyline has advanced, and which signposts have fired.">
             <HomeSignposts scenarios={scenariosLite} data={data} target={target.id} />
           </HomeCard>
         </div>
